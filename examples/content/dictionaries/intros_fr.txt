@@ -1,0 +1,2 @@
+Informations générales sur {{product.name}}.
+Présentation informative de {{product.name}}.

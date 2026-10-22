@@ -1,0 +1,12 @@
+id: italian_info
+locale: it
+products_file: dictionaries/products.csv
+descriptions_file: dictionaries/descriptions.csv
+keywords_file: dictionaries/keywords_it.txt
+cities_file: dictionaries/cities_it.txt
+intros_file: dictionaries/intros_it.txt
+templates:
+  - templates/italian_info.txt
+output:
+  title: "{{product.name}}: informazioni"
+  body: template_rendered

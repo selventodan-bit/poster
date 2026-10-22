@@ -1,0 +1,12 @@
+id: french_info
+locale: fr
+products_file: dictionaries/products.csv
+descriptions_file: dictionaries/descriptions.csv
+keywords_file: dictionaries/keywords_fr.txt
+cities_file: dictionaries/cities_fr.txt
+intros_file: dictionaries/intros_fr.txt
+templates:
+  - templates/french_info.txt
+output:
+  title: "{{product.name}} : informations"
+  body: template_rendered

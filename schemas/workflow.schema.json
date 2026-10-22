@@ -1,0 +1,248 @@
+{
+  "$defs": {
+    "Step": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "op": {
+          "enum": [
+            "request",
+            "extract",
+            "set",
+            "assert",
+            "verify",
+            "wait"
+          ],
+          "title": "Op",
+          "type": "string"
+        },
+        "method": {
+          "default": "GET",
+          "enum": [
+            "GET",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE",
+            "HEAD",
+            "OPTIONS"
+          ],
+          "title": "Method",
+          "type": "string"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Url"
+        },
+        "form": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Form"
+        },
+        "json": {
+          "default": null,
+          "title": "Json"
+        },
+        "multipart": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Multipart"
+        },
+        "headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Headers",
+          "type": "object"
+        },
+        "save_as": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Save As"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source"
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "enum": [
+                "css_text",
+                "css_attribute",
+                "json_path",
+                "regex",
+                "contains",
+                "status"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Kind"
+        },
+        "selector": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Selector"
+        },
+        "attribute": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Attribute"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
+        "pattern": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pattern"
+        },
+        "expected": {
+          "default": null,
+          "title": "Expected"
+        },
+        "values": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Values"
+        },
+        "seconds": {
+          "default": 0,
+          "maximum": 60,
+          "minimum": 0,
+          "title": "Seconds",
+          "type": "number"
+        },
+        "result_url": {
+          "default": false,
+          "title": "Result Url",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "op"
+      ],
+      "title": "Step",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "steps": {
+      "items": {
+        "$ref": "#/$defs/Step"
+      },
+      "maxItems": 100,
+      "minItems": 1,
+      "title": "Steps",
+      "type": "array"
+    },
+    "recovery": {
+      "items": {
+        "$ref": "#/$defs/Step"
+      },
+      "maxItems": 30,
+      "title": "Recovery",
+      "type": "array"
+    }
+  },
+  "required": [
+    "steps"
+  ],
+  "title": "Workflow",
+  "type": "object"
+}

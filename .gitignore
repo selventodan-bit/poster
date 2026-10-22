@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.poster/
+demo-output/
+*.sqlite*
+session.enc
+*.key
+.env
+credentials*.json
+token*.json

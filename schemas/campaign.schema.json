@@ -1,0 +1,90 @@
+{
+  "$defs": {
+    "ContentOutput": {
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "default": "{{product.name}}",
+          "title": "Title",
+          "type": "string"
+        },
+        "body": {
+          "const": "template_rendered",
+          "default": "template_rendered",
+          "title": "Body",
+          "type": "string"
+        }
+      },
+      "title": "ContentOutput",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "pattern": "^[a-zA-Z0-9_-]{1,80}$",
+      "title": "Id",
+      "type": "string"
+    },
+    "locale": {
+      "pattern": "^[a-z]{2,3}(?:-[A-Za-z0-9]+)*$",
+      "title": "Locale",
+      "type": "string"
+    },
+    "products_file": {
+      "title": "Products File",
+      "type": "string"
+    },
+    "descriptions_file": {
+      "title": "Descriptions File",
+      "type": "string"
+    },
+    "keywords_file": {
+      "title": "Keywords File",
+      "type": "string"
+    },
+    "cities_file": {
+      "title": "Cities File",
+      "type": "string"
+    },
+    "intros_file": {
+      "title": "Intros File",
+      "type": "string"
+    },
+    "templates": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 100,
+      "minItems": 1,
+      "title": "Templates",
+      "type": "array"
+    },
+    "output": {
+      "$ref": "#/$defs/ContentOutput",
+      "default": {
+        "title": "{{product.name}}",
+        "body": "template_rendered"
+      }
+    },
+    "variables": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Variables",
+      "type": "object"
+    }
+  },
+  "required": [
+    "id",
+    "locale",
+    "products_file",
+    "descriptions_file",
+    "keywords_file",
+    "cities_file",
+    "intros_file",
+    "templates"
+  ],
+  "title": "Campaign",
+  "type": "object"
+}

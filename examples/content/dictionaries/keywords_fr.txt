@@ -1,0 +1,4 @@
+{{product.name}} informations
+{{product.name}} notice
+{{product.name}} précautions
+{{product.name}} principe actif
