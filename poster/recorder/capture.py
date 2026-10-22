@@ -1,6 +1,7 @@
 """Playwright is intentionally imported only by the Recorder, never by the Engine."""
 
 import asyncio
+import json
 import os
 import shutil
 import uuid
@@ -31,6 +32,33 @@ INIT_JS = """document.addEventListener('submit', e => {
 document.addEventListener('change', e => {
  const t=e.target; if(t.name) window.__poster_action({event:'change', name:t.name, type:t.type});
 }, true);""".replace("FORM_JS", FORM_JS)
+
+
+def marker_shortcut_script(capture):
+    """Browser-side typing of capture markers without the OS clipboard."""
+    markers = json.dumps({"Digit1": capture.title_marker, "Digit2": capture.body_marker})
+    script = """
+    (() => {
+      const markers = __POSTER_MARKERS__;
+      document.addEventListener('keydown', (event) => {
+        if (!event.ctrlKey || !event.altKey || event.repeat) return;
+        const marker = markers[event.code];
+        if (!marker) return;
+        const field = document.activeElement;
+        if (!field) return;
+        const writable = field.isContentEditable ||
+          field.matches('textarea, input:not([type="hidden"]):not([type="password"])');
+        if (!writable || field.disabled || field.readOnly) return;
+        event.preventDefault();
+        const inserted = document.execCommand('insertText', false, marker);
+        if (!inserted && typeof field.setRangeText === 'function') {
+          field.setRangeText(marker, field.selectionStart, field.selectionEnd, 'end');
+          field.dispatchEvent(new Event('input', {bubbles: true}));
+        }
+      }, true);
+    })();
+    """
+    return script.replace("__POSTER_MARKERS__", markers)
 
 
 def chromium_options(headless=False, managed_executable=None):
@@ -95,6 +123,7 @@ class Recorder:
         await context.expose_binding("__poster_form", lambda _, data: self.capture.forms.append(data))
         await context.expose_binding("__poster_action", lambda _, data: self.capture.actions.append(data))
         await context.add_init_script(INIT_JS)
+        await context.add_init_script(marker_shortcut_script(self.capture))
         context.on("request", request)
         context.on("response", lambda res: self.task(response(res)))
 
