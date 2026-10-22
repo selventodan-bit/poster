@@ -1,12 +1,13 @@
 """The executor imports no browser modules. All redirects pass through the host gate."""
 
 import asyncio
+import html
 import json
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from http.cookiejar import Cookie
-from urllib.parse import urljoin, urlsplit, urlunsplit
+from urllib.parse import quote, urljoin, urlsplit, urlunsplit
 
 import httpx
 from bs4 import BeautifulSoup
@@ -16,7 +17,7 @@ from .auth import session_key
 from .models import Step
 from .project import Project
 
-TOKEN = re.compile(r"{{\s*([a-zA-Z_][\w.]*)\s*}}")
+TOKEN = re.compile(r"{{\s*([a-zA-Z_][\w.]*)(?:\|(html|url))?\s*}}")
 
 
 class WorkflowError(Exception):
@@ -34,7 +35,7 @@ class AmbiguousWrite(WorkflowError):
 def render(value, context):
     if isinstance(value, str):
 
-        def substitute(m):
+        def resolve(m):
             data = context
             for key in m[1].split("."):
                 if not isinstance(data, dict) or key not in data:
@@ -42,12 +43,19 @@ def render(value, context):
                 data = data[key]
             if isinstance(data, (httpx.Response, dict, list)):
                 raise WorkflowError("Variable must be a scalar")
-            return str(data)
+            if m[2] == "html":
+                return html.escape(str(data), quote=False)
+            if m[2] == "url":
+                return quote(str(data), safe="")
+            return data
 
-        result = TOKEN.sub(substitute, value)
-        if "{{" in result or "}}" in result:
+        remainder = TOKEN.sub("", value)
+        if "{{" in remainder or "}}" in remainder:
             raise WorkflowError("Unsupported template expression")
-        return result
+        exact = TOKEN.fullmatch(value)
+        if exact:
+            return resolve(exact)
+        return TOKEN.sub(lambda m: str(resolve(m)), value)
     if isinstance(value, dict):
         return {k: render(v, context) for k, v in value.items()}
     if isinstance(value, list):
@@ -249,6 +257,9 @@ class Runtime:
                     context[step.save_as] = actual
                 else:
                     expected = render(step.expected, context)
+                    if step.normalize == "whitespace":
+                        actual = " ".join(str(actual).split())
+                        expected = " ".join(str(expected).split()) if expected is not None else None
                     passed = (
                         bool(actual)
                         if expected is None or step.kind == "contains"
@@ -265,6 +276,12 @@ class Runtime:
         site = self.project.site
         if site.status != "HTTP_READY" or not site.enabled or site.mode != "http":
             return Result("REVIEW_REQUIRED", reason="Project is not enabled HTTP_READY")
+        if site.recognition and (
+            site.recognition.state != "HTTP_VERIFIED" or not site.recognition.http_verified
+        ):
+            return Result(
+                "REVIEW_REQUIRED", reason="Recognized HTTP candidate has not been independently verified"
+            )
         context = dict(variables)
         steps = self.project.workflow.recovery if recovery else self.project.workflow.steps
         if recovery and not steps:

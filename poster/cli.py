@@ -22,6 +22,14 @@ def parser():
     sub.add_parser("recorder", help="Open the local Tk Recorder UI")
     f = sub.add_parser("fixtures", help="Run the two local test sites")
     f.add_argument("--port", type=int, default=8765)
+    f2 = sub.add_parser("fixtures-v2", help="Run realistic JS/AJAX and rich-editor fixture sites")
+    f2.add_argument("--port", type=int, default=8765)
+    recognize = sub.add_parser("recognize", help="Read-only browser survey; never submits a publication")
+    recognize.add_argument("url")
+    recognize.add_argument("--profile", type=Path, default=Path(".poster/recognition-profile"))
+    recognize.add_argument("--headed", action="store_true")
+    v2 = sub.add_parser("demo-recognition", help="Real automatic recognition → browser → learned HTTP replay")
+    v2.add_argument("--output", type=Path, default=Path(".poster/recognition-demo"))
     v = sub.add_parser("validate")
     v.add_argument("project", type=Path)
     m = sub.add_parser("ready", help="Write hashes after intentionally editing a complete local tree")
@@ -125,6 +133,26 @@ def main(argv=None):
             from .recorder.app import launch
 
             launch()
+        elif a.command == "fixtures-v2":
+            from .fixtures_recognition import serve_forever
+
+            serve_forever(a.port)
+        elif a.command == "recognize":
+            from .recognition.service import RecognitionSession
+
+            async def survey():
+                session = RecognitionSession(a.url, a.profile, headless=not a.headed)
+                try:
+                    await session.start()
+                    return (await session.recognize()).summary()
+                finally:
+                    await session.close()
+
+            print(json.dumps(asyncio.run(survey()), ensure_ascii=False, indent=2))
+        elif a.command == "demo-recognition":
+            from .demo_recognition import demo
+
+            print(json.dumps(asyncio.run(demo(a.output)), ensure_ascii=False, indent=2))
         elif a.command == "validate":
             project = load_project(a.project)
             print(

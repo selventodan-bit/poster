@@ -13,8 +13,8 @@ from urllib.parse import parse_qs, urlsplit
 class FixtureServer(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, address):
-        super().__init__(address, Handler)
+    def __init__(self, address, handler=None):
+        super().__init__(address, handler or Handler)
         self.posts = {}
         self.tokens = {}
         self.lock = threading.Lock()

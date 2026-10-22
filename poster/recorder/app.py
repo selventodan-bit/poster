@@ -1,189 +1,124 @@
-"""Small cross-platform Tk UI; each browser capture owns a dedicated Chromium profile."""
+"""Recorder 2.0: recognize first, explicitly authorize each real publication."""
 
 import asyncio
+import json
 import queue
-import sys
+import re
 import threading
 import tkinter as tk
 from pathlib import Path
-from urllib.parse import urljoin
-from tkinter import filedialog, messagebox, simpledialog, ttk
+from tkinter import filedialog, messagebox, ttk
+from urllib.parse import urljoin, urlsplit
 
+from ..auth import ensure_local_key
 from ..project import load_project
-from ..runtime import Runtime
-from .builder import analyze, export
-from .capture import Recorder
+from ..recognition.knowledge import KnowledgeBase
+from ..recognition.service import RecognitionSession
+from ..recognition.types import MESSAGES
+from .clipboard import ClipboardMixin
+from .preferences import Preferences
+
+STATE_TEXT = {
+    "DETECTED": "Форма найдена. Проверьте предпросмотр и разрешите одну тестовую публикацию.",
+    "BROWSER_VERIFIED": "Браузерная публикация подтверждена.",
+    "HTTP_CANDIDATE": "Публикация подтверждена. HTTP-проект подготовлен, но ещё не проверен.",
+    "HTTP_VERIFIED": "HTTP-публикация подтверждена. Проект готов к сохранению.",
+    "LEARNING_REQUIRED": "Нужно выбрать форму или показать действие вручную.",
+    "UNKNOWN": "Результат отправки неизвестен. Повтор запрещён; проверьте сайт вручную.",
+    "FAILED": "Тест не подтверждён. Новая отправка автоматически не выполняется.",
+}
 
 
-class App:
+class App(ClipboardMixin):
     def __init__(self, root):
         self.root = root
-        root.title("Poster Recorder — HTML forms MVP")
-        self.messages = queue.Queue()
+        root.title("Poster 2.0 — распознавание и обучение")
+        self.preferences = Preferences(Path(".poster/recorder-settings.json"))
+        saved = self.preferences.load()
+        ensure_local_key(Path(".poster/private"))
         self.loop = asyncio.new_event_loop()
-        threading.Thread(target=self.loop.run_forever, daemon=True).start()
-        self.url = tk.StringVar(value="http://127.0.0.1:8765/classic/new")
-        self.project_id = tk.StringVar(value="my-project")
-        self.selector = tk.StringVar(value="[data-result-id]")
-        for label, var in (
-            ("URL формы", self.url),
-            ("ID проекта", self.project_id),
-            ("CSS подтверждения", self.selector),
-        ):
+        self.thread = threading.Thread(target=self.loop.run_forever, daemon=True)
+        self.thread.start()
+        self.messages = queue.Queue()
+        self.generation = 0
+        self.future = self.session = self.knowledge = self.existing_site = None
+        self.busy = False
+        self.snapshot = {}
+        self.url = tk.StringVar(value=saved.get("url", "http://127.0.0.1:8765/recognize/ajax"))
+        self.project_id = tk.StringVar(value=saved.get("project_id", ""))
+        self.title = tk.StringVar(value="Проверка Poster")
+        self.status = tk.StringVar(value="Введите адрес, заголовок и текст, затем нажмите «Распознать сайт».")
+        self.advanced = tk.BooleanVar(value=False)
+        for label, variable in (("Адрес сайта или формы", self.url), ("Заголовок", self.title)):
             ttk.Label(root, text=label).pack(anchor="w", padx=12)
-            entry = ttk.Entry(root, textvariable=var, width=85)
-            entry.pack(fill="x", padx=12, pady=4)
-            self._enable_clipboard(entry)
-        self.log = tk.Text(root, width=90, height=13, state="disabled")
-        self.log.pack(padx=12, pady=8)
-        self._enable_clipboard(self.log)
-        self.markers = {}
-        marker_buttons = ttk.Frame(root)
-        marker_buttons.pack(padx=12, pady=4)
-        self.marker_buttons = {}
-        for key, label in (
-            ("title", "Копировать заголовок"),
-            ("body", "Копировать текст"),
-        ):
-            button = ttk.Button(
-                marker_buttons,
-                text=label,
-                state="disabled",
-                command=lambda name=key: self.copy_marker(name),
+            widget = ttk.Entry(root, textvariable=variable, width=95)
+            widget.pack(fill="x", padx=12, pady=4)
+            self._enable_clipboard(widget)
+        ttk.Label(root, text="Текст публикации").pack(anchor="w", padx=12)
+        self.body = tk.Text(root, width=90, height=6, wrap="word", undo=True)
+        self.body.insert("1.0", "Тестовая публикация для проверки формы.")
+        self.body.pack(fill="both", expand=True, padx=12, pady=4)
+        self._enable_clipboard(self.body)
+        actions = ttk.Frame(root)
+        actions.pack(fill="x", padx=12, pady=8)
+        self.buttons = {}
+        for index, (key, label, callback) in enumerate(
+            (
+                ("recognize", "Распознать сайт", self.recognize),
+                ("publish", "Тестовая публикация", self.publish),
+                ("http", "Проверить HTTP", self.http_verify),
+                ("manual", "Обучить вручную", self.manual),
+                ("finish", "Завершить обучение", self.finish_manual),
+                ("save", "Сохранить проект", self.save),
+                ("stop", "Стоп / закрыть браузер", self.stop),
             )
-            button.pack(side="left", padx=3)
-            self.marker_buttons[key] = button
-        buttons = ttk.Frame(root)
-        buttons.pack(padx=12, pady=8)
-        for text, command in (
-            ("Новый проект", self.new),
-            ("Открыть", self.open),
-            ("Запись", self.record),
-            ("Стоп", self.stop),
-            ("Анализ", self.analyze),
-            ("Проверить HTTP", self.verify),
-            ("Экспорт", self.export),
         ):
-            ttk.Button(buttons, text=text, command=command).pack(side="left", padx=3)
-        self.capture = self.previous = self.build = self.stop_event = None
-        self.recording = False
-        self.existing_site = None
-        self.root.after(100, self.pump)
+            button = ttk.Button(actions, text=label, command=callback)
+            button.grid(row=index // 4, column=index % 4, padx=2, pady=3, sticky="ew")
+            actions.columnconfigure(index % 4, weight=1)
+            self.buttons[key] = button
+        ttk.Label(root, textvariable=self.status, wraplength=950).pack(anchor="w", padx=12, pady=4)
+        self.preview = tk.StringVar(value="Предпросмотр формы появится после распознавания.")
+        ttk.Label(root, textvariable=self.preview, wraplength=950).pack(anchor="w", padx=12, pady=4)
+        ttk.Checkbutton(
+            root,
+            text="Расширенные настройки и диагностика",
+            variable=self.advanced,
+            command=self.toggle_advanced,
+        ).pack(anchor="w", padx=12)
+        self.details = ttk.Frame(root)
+        ttk.Label(self.details, text="ID проекта (пустое поле = автоматически)").pack(anchor="w")
+        entry = ttk.Entry(self.details, textvariable=self.project_id)
+        entry.pack(fill="x")
+        self._enable_clipboard(entry)
+        self.form_choice = ttk.Combobox(self.details, state="readonly")
+        self.form_choice.pack(fill="x", pady=4)
+        ttk.Button(self.details, text="Выбрать эту форму", command=self.select_form).pack(side="left")
+        ttk.Button(self.details, text="Открыть проект для переобучения", command=self.open).pack(side="left")
+        self.log = tk.Text(root, height=7, state="disabled", wrap="word")
+        self.log.pack(fill="both", padx=12, pady=8)
+        self._enable_clipboard(self.log)
+        self.update_buttons()
+        root.after(100, self.pump)
         root.protocol("WM_DELETE_WINDOW", self.close)
 
-    def _enable_clipboard(self, widget):
-        """Keyboard and right-click editing, including with a Russian keyboard layout."""
-        widget.bind("<Control-KeyPress>", self._shortcut, add="+")
-        menu = tk.Menu(widget, tearoff=0)
-        for caption, action in (
-            ("Вырезать", "cut"),
-            ("Копировать", "copy"),
-            ("Вставить", "paste"),
-            ("Выделить всё", "all"),
-        ):
-            menu.add_command(
-                label=caption,
-                command=lambda a=action, w=widget: self._edit(w, a),
-            )
-        widget.bind("<Button-3>", lambda event, m=menu: self._popup(event, m), add="+")
+    def toggle_advanced(self):
+        if self.advanced.get():
+            self.details.pack(fill="x", padx=12, pady=4, before=self.log)
+        else:
+            self.details.pack_forget()
 
-    @staticmethod
-    def _popup(event, menu):
-        try:
-            menu.tk_popup(event.x_root, event.y_root)
-        finally:
-            menu.grab_release()
-        return "break"
+    def text(self):
+        return self.title.get(), self.body.get("1.0", "end-1c")
 
-    def _shortcut(self, event):
-        key = event.keysym.lower()
-        actions = {
-            "c": "copy",
-            "v": "paste",
-            "x": "cut",
-            "a": "all",
-            "cyrillic_es": "copy",
-            "cyrillic_em": "paste",
-            "cyrillic_che": "cut",
-            "cyrillic_ef": "all",
-        }
-        action = actions.get(key)
-        if sys.platform == "win32":
-            # Windows virtual-key codes identify the physical C/V/X/A keys.
-            action = {67: "copy", 86: "paste", 88: "cut", 65: "all"}.get(event.keycode, action)
-        if action:
-            return self._edit(event.widget, action)
-        return None
-
-    @staticmethod
-    def _selection(widget):
-        if isinstance(widget, (ttk.Entry, tk.Entry)):
-            if widget.selection_present():
-                return widget.get()[widget.index("sel.first") : widget.index("sel.last")]
-        elif isinstance(widget, tk.Text) and widget.tag_ranges("sel"):
-            return widget.get("sel.first", "sel.last")
-        return None
-
-    @staticmethod
-    def _editable(widget):
-        return str(widget.cget("state")) == "normal"
-
-    def _edit(self, widget, action):
-        entry = isinstance(widget, (ttk.Entry, tk.Entry))
-        text_widget = isinstance(widget, tk.Text)
-        if action == "all":
-            if entry:
-                widget.selection_range(0, "end")
-                widget.icursor("end")
-            elif text_widget:
-                widget.tag_add("sel", "1.0", "end-1c")
-            return "break"
-        if action in {"copy", "cut"}:
-            selected = self._selection(widget)
-            if selected is None:
-                return "break"
-            self.root.clipboard_clear()
-            self.root.clipboard_append(selected)
-            self.root.update_idletasks()
-            if action == "copy" or not self._editable(widget):
-                return "break"
-            if entry or text_widget:
-                widget.delete("sel.first", "sel.last")
-            return "break"
-        if action == "paste":
-            if not self._editable(widget):
-                return "break"
-            try:
-                value = self.root.clipboard_get()
-            except tk.TclError:
-                return "break"
-            if entry:
-                selected = widget.selection_present()
-                index = widget.index("sel.first") if selected else widget.index("insert")
-                if selected:
-                    widget.delete("sel.first", "sel.last")
-                widget.insert(index, value)
-            elif text_widget:
-                selected = bool(widget.tag_ranges("sel"))
-                index = widget.index("sel.first" if selected else "insert")
-                if selected:
-                    widget.delete("sel.first", "sel.last")
-                widget.insert(index, value)
-            return "break"
-        return None
-
-    def copy_marker(self, name):
-        marker = self.markers.get(name)
-        if marker:
-            self.root.clipboard_clear()
-            self.root.clipboard_append(marker)
-            self.root.update_idletasks()
-            self.write("Маркер скопирован: " + name)
-
-    def _set_markers(self, title=None, body=None):
-        self.markers = {"title": title, "body": body} if title and body else {}
-        for name, button in self.marker_buttons.items():
-            button.configure(state="normal" if name in self.markers else "disabled")
+    def identity(self):
+        value = self.project_id.get().strip()
+        if not value:
+            value = re.sub(r"[^A-Za-z0-9_-]", "-", urlsplit(self.url.get()).hostname or "project")[:70]
+            self.project_id.set(value)
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", value):
+            raise ValueError("Invalid project id")
+        return value
 
     def write(self, text):
         self.log.configure(state="normal")
@@ -191,143 +126,254 @@ class App:
         self.log.see("end")
         self.log.configure(state="disabled")
 
+    def run(self, operation):
+        if self.busy:
+            return
+        self.busy = True
+        generation = self.generation
+        self.update_buttons()
+
+        async def work():
+            try:
+                await operation()
+                summary = self.session.result.summary() if self.session else {}
+                self.messages.put((generation, "result", summary))
+            except asyncio.CancelledError:
+                self.messages.put((generation, "error", "Операция остановлена."))
+            except Exception as exc:
+                code = str(exc) if isinstance(exc, (PermissionError, ValueError)) else ""
+                if code not in MESSAGES:
+                    if self.session:
+                        await self.session.close()
+                        self.session = None
+                    self.messages.put((generation, "reset", None))
+                self.messages.put((generation, "error", MESSAGES.get(code, MESSAGES["BROWSER_ERROR"])))
+            finally:
+                self.messages.put((generation, "done", None))
+
+        self.future = asyncio.run_coroutine_threadsafe(work(), self.loop)
+
     def pump(self):
         while not self.messages.empty():
-            kind, value = self.messages.get_nowait()
-            if kind == "markers":
-                self._set_markers(*value)
-            elif kind == "capture":
-                self.capture, self.recording = value, False
-                self.write("Запись остановлена. Нажмите «Анализ».")
+            generation, kind, value = self.messages.get_nowait()
+            if generation != self.generation:
+                continue  # A stopped/previous run cannot update this run's UI.
+            if kind == "result":
+                self.snapshot = value
+                self.status.set(
+                    STATE_TEXT.get(value.get("state"), "Браузер закрыт. Можно начать распознавание.")
+                )
+                self.form_choice.configure(values=[f["id"] for f in value.get("forms", [])])
+                if value.get("selected"):
+                    self.form_choice.set(value["selected"])
+                forms = value.get("forms", [])
+                self.preview.set(
+                    "Движок: "
+                    + value.get("engine", "unknown")
+                    + "; форм: "
+                    + str(len(forms))
+                    + "; роли: "
+                    + ", ".join(forms[0]["roles"] if forms else [])
+                    + "; уверенность формы: "
+                    + str(round(100 * value.get("confidence", {}).get("form", 0)))
+                    + "%"
+                    + "; сопоставление полей: "
+                    + str(round(100 * value.get("confidence", {}).get("fields", 0)))
+                    + "%"
+                )
+                for item in value.get("diagnostics", []):
+                    if item["code"] != "READ_ONLY" or value.get("state") == "DETECTED":
+                        self.write(item["message"])
+                if self.advanced.get():
+                    self.write(json.dumps(value, ensure_ascii=False))
             elif kind == "error":
-                self.recording = False
+                self.status.set(value)
                 self.write(value)
-            else:
-                self.write(value)
+            elif kind == "reset":
+                self.snapshot = {}
+            elif kind == "done":
+                self.busy = False
+                self.future = None
+            self.update_buttons()
         self.root.after(100, self.pump)
 
-    def new(self):
-        if self.recording:
+    def update_buttons(self):
+        state = self.snapshot.get("state")
+        attempted = bool(self.session and self.session.browser_attempted)
+        enabled = {
+            "recognize": not self.busy,
+            "publish": state == "DETECTED" and not attempted,
+            "http": state == "HTTP_CANDIDATE" and not (self.session and self.session.http_attempted),
+            "manual": bool(self.session) and not attempted,
+            "finish": bool(self.session and self.session.manual)
+            and state in {"DETECTED", "LEARNING_REQUIRED"},
+            "save": state in {"HTTP_CANDIDATE", "HTTP_VERIFIED"},
+            "stop": bool(self.session) or self.busy,
+        }
+        for key, button in self.buttons.items():
+            button.configure(
+                state="normal" if enabled[key] and (not self.busy or key == "stop") else "disabled"
+            )
+
+    def recognize(self):
+        if self.busy:
             return
-        self.capture = self.previous = self.build = None
-        self._set_markers()
-        self.existing_site = None
-        name = simpledialog.askstring("Новый проект", "ID (буквы, цифры, дефис):")
-        if name:
-            self.project_id.set(name)
-        self.write("Новый проект. Укажите URL и начните запись.")
+        try:
+            project_id, url = self.identity(), self.url.get().strip()
+            self.preferences.save(url, project_id)
+        except ValueError:
+            self.status.set("Проверьте URL и ID проекта в расширенных настройках.")
+            return
+        self.generation += 1
+        self.snapshot = {}
+        self.status.set("Исследую страницу без отправки публикаций…")
+
+        async def work():
+            if self.session:
+                await self.session.close()
+            if not self.knowledge:
+                self.knowledge = KnowledgeBase(Path(".poster/knowledge.sqlite"))
+            self.session = RecognitionSession(
+                url, Path(".poster/profiles") / project_id, knowledge=self.knowledge
+            )
+            await self.session.start()
+            await self.session.recognize()
+
+        self.run(work)
+
+    def publish(self):
+        if not messagebox.askyesno(
+            "Одна тестовая публикация",
+            "Отправить одну настоящую публикацию с указанными заголовком и текстом?",
+        ):
+            return
+        title, body = self.text()
+        project_id = self.identity()
+
+        async def work():
+            await self.session.test_publish(
+                title, body, project_id, confirmed=True, existing_site=self.existing_site
+            )
+
+        self.run(work)
+
+    def http_verify(self):
+        if not messagebox.askyesno(
+            "Отдельная HTTP-проверка",
+            "Создать вторую настоящую публикацию через HTTP? Это отдельная отправка. После неизвестного исхода повтора не будет.",
+        ):
+            return
+        title, body = self.text()
+
+        async def work():
+            await self.session.verify_http(title, body, confirmed=True)
+
+        self.run(work)
+
+    def manual(self):
+        if not messagebox.askyesno(
+            "Ручное обучение",
+            "Разрешить ручной вход и одну публикацию в открытом браузере? Найденные поля будут заполнены вашим текстом. После отправки нажмите «Завершить обучение».",
+        ):
+            return
+        title, body = self.text()
+
+        async def work():
+            await self.session.begin_manual(title, body, confirmed=True)
+
+        self.run(work)
+
+    def finish_manual(self):
+        project_id = self.identity()
+
+        async def work():
+            await self.session.finish_manual(project_id, existing_site=self.existing_site)
+
+        self.run(work)
+
+    def select_form(self):
+        key = self.form_choice.get()
+        if not key:
+            return
+
+        async def work():
+            self.session.select(key)
+            await self.session.highlight()
+
+        self.run(work)
+
+    def save(self):
+        if self.snapshot.get("state") == "HTTP_CANDIDATE" and not messagebox.askyesno(
+            "Непроверенный кандидат",
+            "HTTP ещё не проверен. Сохранить только REVIEW-кандидат? Очередь Engine не будет его выполнять.",
+        ):
+            return
+        parent = filedialog.askdirectory(title="Каталог проектов — внутри будет создана папка с ID")
+        if parent:
+            output = Path(parent) / self.identity()
+            if output.exists() and any(output.iterdir()):
+                self.status.set("Папка проекта уже заполнена. Выберите новый каталог для новой версии.")
+                return
+
+            async def work():
+                self.session.save(output)
+
+            self.run(work)
 
     def open(self):
-        if self.recording:
+        if self.busy:
             return
-        folder = filedialog.askdirectory(title="Проект для повторного обучения")
-        if not folder:
-            return
-        try:
-            project = load_project(Path(folder))
-            self.existing_site = project.site
-            self.project_id.set(project.site.id)
-            first = next(s for s in project.workflow.steps if s.op == "request")
-            self.url.set(
-                urljoin(project.site.base_url, first.url) if "{{" not in first.url else project.site.base_url
-            )
-            self.capture = self.previous = self.build = None
-            self.write("Проект открыт. Новая запись сохранит настройки; экспортируйте в новую пустую папку.")
-        except Exception:
-            self.write("Не удалось открыть проект: проверьте YAML и READY.")
-
-    def record(self):
-        if self.recording:
-            return
-        self.previous = self.capture
-        self.build = None
-        self._set_markers()
-        self.recording = True
-        url = self.url.get()
-        profile = Path(".poster/profiles") / self.project_id.get()
-
-        async def work():
-            self.stop_event = asyncio.Event()
-            recorder = Recorder(url, profile)
-
-            def ready(cap):
-                self.messages.put(("markers", (cap.title_marker, cap.body_marker)))
-                self.messages.put(
-                    (
-                        "text",
-                        f"Маркеры: {cap.title_marker} / {cap.body_marker}\n"
-                        "Кнопки копирования находятся под журналом Recorder. "
-                        "Вставляйте маркеры в форму через Ctrl+V. "
-                        "Проверьте оба поля, затем отправьте форму и нажмите Стоп.",
-                    )
-                )
-
-            try:
-                cap = await recorder.record(self.stop_event, ready)
-                self.messages.put(("capture", cap))
-            except Exception:
-                self.messages.put(("error", "Не удалось записать. Проверьте URL и установку Chromium."))
-
-        asyncio.run_coroutine_threadsafe(work(), self.loop)
-
-    def stop(self):
-        if self.stop_event:
-            self.loop.call_soon_threadsafe(self.stop_event.set)
-
-    def analyze(self):
-        if not self.capture or self.recording:
-            return
-        try:
-            self.build = analyze(
-                self.capture,
-                self.project_id.get(),
-                self.selector.get() or None,
-                self.previous,
-                self.existing_site,
-            )
-            self.write(self.build.site["status"] + ": " + "; ".join(self.build.diagnostics))
-        except Exception:
-            self.write("Анализ не выполнен: проверьте ID и CSS-селектор.")
-
-    def export(self):
-        if not self.build:
-            self.analyze()
-        if not self.build:
-            return
-        folder = filedialog.askdirectory(title="Выберите ПУСТУЮ папку с именем ID проекта")
+        folder = filedialog.askdirectory(title="Проект для переобучения")
         if folder:
             try:
-                export(self.build, Path(folder))
-                self.write("Экспорт завершён. READY записан последним.")
+                project = load_project(Path(folder))
+                self.existing_site = project.site
+                self.project_id.set(project.site.id)
+                first = next(s for s in project.workflow.steps if s.op == "request")
+                self.url.set(
+                    urljoin(project.site.base_url, first.url)
+                    if "{{" not in first.url
+                    else project.site.base_url
+                )
+                self.status.set("Настройки проекта загружены. Откройте нужную форму и распознайте её заново.")
             except Exception:
-                self.write("Экспорт не выполнен: нужна пустая папка и POSTER_SESSION_KEY для сессии.")
+                self.status.set("Не удалось прочитать проект. Проверьте READY и YAML.")
 
-    def verify(self):
-        if not self.build or self.build.site["status"] != "HTTP_READY":
-            self.write("Сначала нужен результат анализа HTTP_READY.")
-            return
-        if not messagebox.askyesno("HTTP replay", "Будет отправлена ЕЩЁ ОДНА настоящая форма. Продолжить?"):
-            return
-        build = self.build
+    def stop(self):
+        self.generation += 1
+        if self.future:
+            self.future.cancel()
+        self.busy = False
+        self.snapshot = {}
 
         async def work():
-            import tempfile
+            if self.session:
+                await self.session.close()
+                self.session = None
 
-            try:
-                with tempfile.TemporaryDirectory() as temp:
-                    export(build, Path(temp))
-                    result = await Runtime(load_project(Path(temp))).run(
-                        {"title": "Recorder HTTP check", "body": "Explicitly requested HTTP replay"}
-                    )
-                self.messages.put(("text", f"HTTP: {result.status} {result.reason}"))
-            except Exception:
-                self.messages.put(("error", "HTTP проверка не выполнена; проверьте ключ сессии и проект."))
-
-        asyncio.run_coroutine_threadsafe(work(), self.loop)
+        self.run(work)
 
     def close(self):
-        self.stop()
-        self.root.destroy()
+        self.generation += 1
+        if self.future:
+            self.future.cancel()
+
+        async def cleanup():
+            if self.session:
+                await self.session.close()
+            if self.knowledge:
+                self.knowledge.close()
+
+        future = asyncio.run_coroutine_threadsafe(cleanup(), self.loop)
+
+        def finish():
+            if not future.done():
+                self.root.after(50, finish)
+                return
+            self.loop.call_soon_threadsafe(self.loop.stop)
+            self.root.destroy()
+
+        finish()
 
 
 def launch():

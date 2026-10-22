@@ -3,6 +3,7 @@
 import asyncio
 import os
 import shutil
+import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -19,6 +20,11 @@ class Capture:
     forms: list[dict] = field(default_factory=list)
     actions: list[dict] = field(default_factory=list)
     session: dict = field(default_factory=dict)
+    action_id: str | None = None
+    result_url: str | None = None
+    confirmation: dict = field(default_factory=dict)
+    browser_verified: bool = False
+    body_format: str = "text"
 
 
 FORM_JS = """form => ({url: location.href, action: form.action, method: form.method,
@@ -30,6 +36,18 @@ INIT_JS = """document.addEventListener('submit', e => {
 }, true);
 document.addEventListener('change', e => {
  const t=e.target; if(t.name) window.__poster_action({event:'change', name:t.name, type:t.type});
+}, true);
+document.addEventListener('input', e => {
+ const t=e.target;
+ if(!t.matches('input,textarea,[contenteditable="true"]') || ['password','hidden'].includes(t.type)) return;
+ if(!t.hasAttribute('data-poster-observed')) t.setAttribute('data-poster-observed','field-'+(window.__posterFieldNo=(window.__posterFieldNo||0)+1));
+ const scope=t.closest('form,[role="form"],section,article') || document;
+ const inputs=[...scope.querySelectorAll('input')].filter(x=>['text',''].includes(x.type)&&x.getClientRects().length);
+ window.__poster_action({event:'field-input',name:t.name||'',type:t.type||'',
+   kind:t.isContentEditable?'contenteditable':t.tagName.toLowerCase(),
+   value:t.isContentEditable?t.textContent:t.value,
+   selector:'[data-poster-observed="'+t.getAttribute('data-poster-observed')+'"]',
+   position:Math.max(0,inputs.indexOf(t))});
 }, true);""".replace("FORM_JS", FORM_JS)
 
 
@@ -56,23 +74,42 @@ class Recorder:
         task.add_done_callback(self.pending.discard)
 
     async def attach(self, context):
+        request_ids = {}
+
         def request(req):
             if req.resource_type in {"document", "xhr", "fetch"}:
+                request_id = f"r{len(self.capture.requests)}"
+                request_ids[req] = request_id
+                raw = req.post_data_buffer or b""
+                content_type = req.headers.get("content-type", "")
+                try:
+                    if len(raw) > 2_000_000:
+                        raise ValueError("Oversized capture")
+                    body = raw.decode("utf-8")
+                except (UnicodeError, ValueError):
+                    body, content_type = "", "application/octet-stream"
                 self.capture.requests.append(
                     {
+                        "id": request_id,
+                        "action_id": self.capture.action_id,
+                        "time": time.monotonic(),
+                        "resource_type": req.resource_type,
+                        "redirected_from": request_ids.get(req.redirected_from),
                         "method": req.method,
                         "url": req.url,
-                        "body": req.post_data or "",
-                        "content_type": req.headers.get("content-type", ""),
+                        "body": body,
+                        "content_type": content_type,
                         "headers": {
                             k: v
                             for k, v in req.headers.items()
-                            if k.lower() in {"authorization", "x-api-key"}
+                            if k.lower()
+                            in {"authorization", "x-api-key", "x-auth-token", "x-csrf-token", "x-xsrf-token"}
                         },
                     }
                 )
 
         async def response(res):
+            received_at = time.monotonic()
             if res.request.resource_type not in {"document", "xhr", "fetch"}:
                 return
             try:
@@ -81,11 +118,15 @@ class Recorder:
                     return
                 self.capture.responses.append(
                     {
+                        "request_id": request_ids.get(res.request),
+                        "action_id": self.capture.action_id,
+                        "time": received_at,
                         "url": res.url,
                         "method": res.request.method,
                         "status": res.status,
                         "body": body,
                         "content_type": res.headers.get("content-type", ""),
+                        "location": res.headers.get("location"),
                     }
                 )
             except Exception:
@@ -93,7 +134,15 @@ class Recorder:
                 pass
 
         await context.expose_binding("__poster_form", lambda _, data: self.capture.forms.append(data))
-        await context.expose_binding("__poster_action", lambda _, data: self.capture.actions.append(data))
+
+        def action(source, data):
+            if len(self.capture.actions) >= 2000:
+                self.capture.actions.pop(0)
+            data["frame_url"] = source["frame"].url
+            data["iframe"] = source["frame"] != source["page"].main_frame
+            self.capture.actions.append(data)
+
+        await context.expose_binding("__poster_action", action)
         await context.add_init_script(INIT_JS)
         context.on("request", request)
         context.on("response", lambda res: self.task(response(res)))
@@ -105,7 +154,13 @@ class Recorder:
         # Tokens never appear in exported YAML or logs.
         for req in self.capture.requests:
             if req.get("headers") and urlsplit(req["url"]).netloc == urlsplit(self.capture.start_url).netloc:
-                self.capture.session.setdefault("headers", {}).update(req["headers"])
+                self.capture.session.setdefault("headers", {}).update(
+                    {
+                        k: v
+                        for k, v in req["headers"].items()
+                        if k in {"authorization", "x-api-key", "x-auth-token"}
+                    }
+                )
         await context.close()
         return self.capture
 

@@ -1,0 +1,114 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "pattern": "^form-[a-f0-9]{16}$",
+      "title": "Id",
+      "type": "string"
+    },
+    "version": {
+      "default": 1,
+      "minimum": 1,
+      "title": "Version",
+      "type": "integer"
+    },
+    "scope": {
+      "const": "form-structure",
+      "default": "form-structure",
+      "title": "Scope",
+      "type": "string"
+    },
+    "algorithm": {
+      "const": "semantic-editor-pair-v1",
+      "default": "semantic-editor-pair-v1",
+      "title": "Algorithm",
+      "type": "string"
+    },
+    "editor": {
+      "enum": [
+        "input",
+        "textarea",
+        "contenteditable",
+        "iframe:contenteditable",
+        "iframe:textarea"
+      ],
+      "title": "Editor",
+      "type": "string"
+    },
+    "roles": {
+      "items": {
+        "enum": [
+          "title",
+          "body",
+          "submit",
+          "category",
+          "tags",
+          "csrf"
+        ],
+        "type": "string"
+      },
+      "title": "Roles",
+      "type": "array"
+    },
+    "source": {
+      "enum": [
+        "browser-observation",
+        "manual-observation"
+      ],
+      "title": "Source",
+      "type": "string"
+    },
+    "tests": {
+      "default": [],
+      "items": {
+        "enum": [
+          "browser-permalink",
+          "http-permalink"
+        ],
+        "type": "string"
+      },
+      "title": "Tests",
+      "type": "array"
+    },
+    "confidence": {
+      "default": 0.5,
+      "maximum": 1,
+      "minimum": 0,
+      "title": "Confidence",
+      "type": "number"
+    },
+    "browser_successes": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Browser Successes",
+      "type": "integer"
+    },
+    "http_successes": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Http Successes",
+      "type": "integer"
+    },
+    "failures": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Failures",
+      "type": "integer"
+    },
+    "title_text_index": {
+      "default": 0,
+      "maximum": 30,
+      "minimum": 0,
+      "title": "Title Text Index",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "id",
+    "editor",
+    "roles",
+    "source"
+  ],
+  "title": "Rule",
+  "type": "object"
+}

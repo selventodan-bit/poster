@@ -204,6 +204,15 @@
           "default": false,
           "title": "Result Url",
           "type": "boolean"
+        },
+        "normalize": {
+          "default": "none",
+          "enum": [
+            "none",
+            "whitespace"
+          ],
+          "title": "Normalize",
+          "type": "string"
         }
       },
       "required": [

@@ -1,5 +1,7 @@
 # Диагностика
 
+Recorder 2.0: начните с «Распознать сайт». NO_WRITE — запрос не наблюдался; CONTENT_NOT_MAPPED — преобразованный контент не сопоставлен; UNLINKED_REQUESTS — несколько запросов не связаны доказательством; UNKNOWN_DYNAMIC — не найден источник параметра; NO_PERMALINK — нет независимого подтверждения; PUBLICATION_REJECTED — явный отказ даже при HTTP 200. Это не доказательства невозможности HTTP. Для неизвестной формы есть ручное обучение; HTTP-кандидат остаётся REVIEW до отдельного разрешённого теста. Старая диагностика маркеров ниже относится к legacy API/старому demo.
+
 - `HTTP_READY` отсутствует: откройте analysis.json. Проверьте оба маркера, URL-encoded submit, совпадение формы и запроса, GET-источник hidden-полей и CSS успеха. Для сложного сайта ручной YAML допустим; автоматический builder не обещает универсальность.
 - «Operation failed (ValidationError)»: проверьте schema_version, unknown fields, id и опечатки по schemas/ и docs/project_format.md. Неверный workflow не исполняется.
 - `READY checksum mismatch`: файл изменён после публикации. Завершите изменение и выполните `poster ready <folder>` последним. При выгрузке в Drive старый READY обновляйте после файлов.

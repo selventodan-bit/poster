@@ -17,6 +17,31 @@ class Schedule(StrictModel):
     min_interval_seconds: float = Field(default=0, ge=0, le=86400)
 
 
+class RecognitionInfo(StrictModel):
+    state: Literal[
+        "DETECTED",
+        "BROWSER_VERIFIED",
+        "HTTP_CANDIDATE",
+        "HTTP_VERIFIED",
+        "LEARNING_REQUIRED",
+        "UNKNOWN",
+        "FAILED",
+    ]
+    recognizer: str = "semantic-2.0"
+    rule_id: str | None = None
+    browser_verified: bool = False
+    http_verified: bool = False
+    diagnostics: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def verified_flags(self):
+        if self.state == "HTTP_VERIFIED" and not (self.browser_verified and self.http_verified):
+            raise ValueError("HTTP_VERIFIED requires both browser and HTTP evidence")
+        if self.http_verified and self.state != "HTTP_VERIFIED":
+            raise ValueError("HTTP evidence flag and state disagree")
+        return self
+
+
 class Site(StrictModel):
     schema_version: Literal[1] = 1
     id: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,80}$")
@@ -33,6 +58,7 @@ class Site(StrictModel):
     get_retries: int = Field(default=2, ge=0, le=5)
     retry_delay: float = Field(default=0.25, ge=0, le=60)
     headers: dict[str, str] = Field(default_factory=dict)
+    recognition: RecognitionInfo | None = None
 
     @model_validator(mode="after")
     def urls(self):
@@ -69,6 +95,7 @@ class Step(StrictModel):
     values: dict[str, Any] | None = None
     seconds: float = Field(default=0, ge=0, le=60)
     result_url: bool = False
+    normalize: Literal["none", "whitespace"] = "none"
 
     @model_validator(mode="after")
     def shape(self):
