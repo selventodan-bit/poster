@@ -12,7 +12,8 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: uv sync --frozen --extra dev --extra recorder
-      - run: uv run --no-sync python -m playwright install --with-deps chromium
       - run: uv run --no-sync ruff check .
+      - run: uv run --no-sync ruff format --diff .
       - run: uv run --no-sync ruff format --check .
+      - run: uv run --no-sync python -m playwright install --with-deps chromium
       - run: uv run --no-sync python -m pytest -q
