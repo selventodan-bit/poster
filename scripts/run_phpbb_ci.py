@@ -23,10 +23,13 @@ def main():
                 try:
                     with httpx.Client(trust_env=False, timeout=1) as client:
                         response = client.get("http://127.0.0.1:8879/index.php")
-                        if response.status_code == 200:
+                        # phpBB can start a guest session with a normal 302 before
+                        # serving the page. Readiness is distinct from publication proof.
+                        if response.status_code in {200, 301, 302, 303, 307, 308}:
                             break
                 except httpx.HTTPError:
-                    time.sleep(0.2)
+                    pass
+                time.sleep(0.2)
             else:
                 raise RuntimeError("phpBB did not start: " + (directory / "server.log").read_text()[-4000:])
             report = asyncio.run(
