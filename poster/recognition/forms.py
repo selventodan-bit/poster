@@ -1,73 +1,74 @@
-"""Semantic field analysis across ordinary, JS and same-origin iframe editors."""
+"""Relational field analysis across light DOM, open shadow DOM and allowed iframe editors."""
 
 import re
+from urllib.parse import urlsplit
 
+from .localization import Localizations
 from .types import FieldRef, FormCandidate
 
 SNAPSHOT_JS = r"""() => {
- const visible = e => !!(e.getClientRects().length) && getComputedStyle(e).visibility !== 'hidden';
- const roots = [...document.querySelectorAll('form,[role="form"]')];
- for (const editor of document.querySelectorAll('textarea,[contenteditable="true"],[role="textbox"]')) {
-   if (!roots.some(r => r.contains(editor))) {
-     const root=editor.closest('section,article,dialog') || editor.parentElement;
-     if(root && !roots.includes(root)) roots.push(root);
+ const all=root=>[...root.querySelectorAll('*')].flatMap(e=>[e,...(e.shadowRoot?all(e.shadowRoot):[])]);
+ const elements=all(document);
+ for(const e of elements) for(const attr of ['data-poster-field','data-poster-submit','data-poster-form']) e.removeAttribute(attr);
+ const visible=e=>!!e.getClientRects().length && getComputedStyle(e).visibility!=='hidden';
+ const roots=elements.filter(e=>e.matches('form,[role="form"]'));
+ for(const e of elements.filter(e=>e.matches('textarea,[contenteditable="true"],[role="textbox"]'))) {
+   if(!roots.some(r=>r.contains(e))) {
+     const root=e.closest('section,article,dialog,[role="dialog"],fieldset')||e.parentElement;
+     if(root&&!roots.includes(root)) roots.push(root);
    }
  }
- return roots.map((root,i) => {
-   const key='form-'+i; root.setAttribute('data-poster-form',key);
-   const fields=[...root.querySelectorAll('input,textarea,select,[contenteditable="true"],[role="textbox"]')]
-    .map((e,j) => {
-     const id=key+'-field-'+j; e.setAttribute('data-poster-field',id);
-     const label=[e.name,e.id,e.getAttribute('aria-label'),e.getAttribute('placeholder'),
-       ...[...(e.labels || [])].map(l=>l.innerText)].filter(Boolean).join(' ').slice(0,500);
-     return {selector:'[data-poster-field="'+id+'"]', label, name:e.name||'', tag:e.tagName.toLowerCase(),
-       type:e.type||'', editable:e.isContentEditable, visible:visible(e),
-       options:e.tagName==='SELECT'?[...e.options].map(o=>({value:o.value,disabled:o.disabled})):[]};
-    });
-   const buttons=[...root.querySelectorAll('button,input[type="submit"],[role="button"]')]
-    .filter(visible).map((e,j)=>{
-     const id=key+'-submit-'+j; e.setAttribute('data-poster-submit',id);
-     return {selector:'[data-poster-submit="'+id+'"]',text:(e.innerText||e.value||e.getAttribute('aria-label')||'').slice(0,300),
-       type:e.type||'',tag:e.tagName.toLowerCase()};
-    });
-   return {key,tag:root.tagName.toLowerCase(),action:root.action||location.href,method:root.method||'',fields,buttons};
+ return roots.map((root,i)=>{
+  const key='form-'+i;root.setAttribute('data-poster-form',key);
+  const descendants=[root,...all(root)];
+  const controls=descendants.filter(e=>e.matches('input,textarea,select,[contenteditable="true"],[role="textbox"]'));
+  const editor=controls.find(e=>e.matches('textarea,[contenteditable="true"],[role="textbox"]'));
+  const fields=controls.map((e,j)=>{
+   const id=key+'-field-'+j;e.setAttribute('data-poster-field',id);
+   const accessibility=[e.getAttribute('aria-label'),e.getAttribute('placeholder'),...[...(e.labels||[])].map(n=>n.innerText),
+    ...(e.getAttribute('aria-labelledby')||'').split(' ').map(id=>e.getRootNode().getElementById?.(id)?.textContent)].filter(Boolean).join(' ');
+   const classes=e.className||'';
+   let adapter=/mce-content-body/.test(classes)?'tinymce':/ck-editor|cke_editable/.test(classes)?'ckeditor':
+    /ql-editor/.test(classes)?'quill':/ProseMirror|tiptap/.test(classes)?'prosemirror':
+    /note-editable/.test(classes)?'summernote':/fr-element/.test(classes)?'froala':'native';
+   return {selector:'[data-poster-field="'+id+'"]',label:[e.name,e.id,accessibility].filter(Boolean).join(' ').slice(0,500),
+    accessibility:accessibility.slice(0,400),name:e.name||'',tag:e.tagName.toLowerCase(),type:e.type||'',
+    editable:e.isContentEditable,visible:visible(e),adapter,
+    before_editor:!!editor && e!==editor && !!(e.compareDocumentPosition(editor)&Node.DOCUMENT_POSITION_FOLLOWING),
+    required:e.required||e.getAttribute('aria-required')==='true',maxlength:e.maxLength||0};
+  });
+  const buttons=descendants.filter(e=>e.matches('button,input[type="submit"],[role="button"]')).filter(visible).map((e,j)=>{
+   const id=key+'-submit-'+j;e.setAttribute('data-poster-submit',id);
+   return {selector:'[data-poster-submit="'+id+'"]',text:[e.innerText,e.value,e.getAttribute('aria-label'),e.title].filter(Boolean).join(' ').slice(0,300),
+    type:e.type||'',tag:e.tagName.toLowerCase(),form_owned:e.form===root};
+  });
+  return {key,tag:root.tagName.toLowerCase(),action:root.action||location.href,method:root.method||'',fields,buttons,
+   purpose:[root.getAttribute('aria-label'),root.querySelector('legend,h1,h2,h3')?.textContent].filter(Boolean).join(' ').slice(0,500),
+   structure:[root.getRootNode() instanceof ShadowRoot?'shadow':'light',root.matches('dialog,[role="dialog"]')?'dialog':'inline']};
  });
 }"""
 
-ROLE_WORDS = {
-    "title": r"\b(title|subject|asunto|sujet|titre|titolo|t[ií]tulo|betreff|заголовок|тема)\b",
-    "body": r"\b(body|message|content|texto|mensaje|mensagem|texte|messaggio|сообщение|текст|editor)\b",
-    "category": r"\b(category|forum|categor[ií]a|раздел|категория)\b",
-    "tags": r"\b(tags|etiquetas|теги)\b",
-    "csrf": r"csrf|nonce|token",
-}
-SUBMIT = re.compile(r"publish|post|submit|enviar|publicar|envoyer|invia|отправить|опубликовать", re.I)
-SEARCH = re.compile(r"search|buscar|recherche|поиск", re.I)
-
 
 class UniversalFormDetector:
-    version = "semantic-2.0"
+    version = "relational-2.1"
+
+    def __init__(self, locales=None):
+        self.locales = locales or Localizations()
 
     async def inspect(self, page, allowed_hosts) -> list[FormCandidate]:
-        from urllib.parse import urlsplit
-
         candidates, iframe_parents = [], {}
         for index, frame in enumerate(page.frames):
             if index:
                 try:
                     await frame.wait_for_load_state("domcontentloaded", timeout=3000)
+                    owner = await frame.frame_element()
+                    iframe_parents[index] = await owner.evaluate(
+                        "e=>e.closest('[data-poster-form]')?.getAttribute('data-poster-form')"
+                    )
                 except Exception:
                     continue
             if urlsplit(frame.url).hostname not in allowed_hosts and frame.url != "about:blank":
                 continue
-            if index:
-                try:
-                    owner = await frame.frame_element()
-                    iframe_parents[index] = await owner.evaluate(
-                        "e => e.closest('[data-poster-form]')?.getAttribute('data-poster-form')"
-                    )
-                except Exception:
-                    continue
             try:
                 snapshots = await frame.evaluate(SNAPSHOT_JS)
             except Exception:
@@ -77,11 +78,11 @@ class UniversalFormDetector:
                 if candidate:
                     candidates.append(candidate)
         for child in list(candidates):
-            parent_key = iframe_parents.get(child.frame)
-            if not parent_key or "body" not in child.fields:
-                continue
-            parent = next((c for c in candidates if c.frame == 0 and c.key == f"0:{parent_key}"), None)
-            if parent and "title" in parent.fields:
+            parent = next(
+                (c for c in candidates if c.frame == 0 and c.key == f"0:{iframe_parents.get(child.frame)}"),
+                None,
+            )
+            if parent and "body" in child.fields:
                 parent.fields["body"] = child.fields["body"]
                 parent.fields["body"].kind = "iframe:" + child.fields["body"].kind
                 parent.evidence.append("same-origin-iframe-editor")
@@ -94,53 +95,108 @@ class UniversalFormDetector:
         return round(sum({"title": 0.3, "body": 0.4, "submit": 0.25}.get(r, 0) for r in fields), 2)
 
     def analyze(self, snapshot, frame=0):
-        fields, evidence = {}, []
-        visible = [f for f in snapshot["fields"] if f["visible"] and f["type"] not in {"hidden", "submit"}]
+        fields, evidence, alternatives = {}, [], {}
+        if re.search(
+            r"\b(profile|settings|contact|newsletter|subscribe|login|register|search)\b",
+            snapshot.get("purpose", ""),
+            re.I,
+        ):
+            return None
+        if re.search(
+            r"/(profile|settings|contact|newsletter|subscribe|login|register|search)(?:[./?]|$)",
+            urlsplit(snapshot.get("action", "")).path,
+            re.I,
+        ):
+            return None
+        visible = [
+            f
+            for f in snapshot["fields"]
+            if f["visible"] and f["type"] not in {"hidden", "submit", "password"}
+        ]
+        if any(f["visible"] and f["type"] == "password" for f in snapshot["fields"]):
+            return None
         text_fields = [
             f
             for f in visible
-            if f["tag"] == "input" and f["type"] in {"text", ""} and not SEARCH.search(f["label"])
+            if f["tag"] == "input"
+            and f["type"] in {"text", ""}
+            and not self.locales.has("search", f["label"])
         ]
-        if any(f["type"] == "password" for f in visible):
-            return None
-        for role, pattern in ROLE_WORDS.items():
+        for role in ("title", "body", "category", "tags"):
             choices = []
             for f in visible:
-                score = 0.85 if re.search(pattern, f["label"], re.I) else 0
-                if role == "body" and (f["editable"] or f["tag"] == "textarea"):
-                    score = max(score, 0.8)
-                if role == "title" and f["tag"] == "input" and f["type"] in {"text", ""}:
-                    score = max(score, 0.3)
-                if f["type"] == "search" or SEARCH.search(f["label"]):
-                    score = 0
+                features = []
+                score = 0
+                single = f["tag"] == "input" and f["type"] in {"text", ""}
+                multi = f["editable"] or f["tag"] == "textarea" or f.get("adapter", "native") != "native"
+                if role == "title" and not single or role == "body" and not multi:
+                    continue
+                if f["type"] == "search" or self.locales.has("search", f["label"]):
+                    continue
+                if role in {"title", "body"}:
+                    score = 0.25 if single else 0.65
+                    features.append("single-line" if single else "multiline-editor")
+                    if self.locales.has(role, f["label"]):
+                        score += 0.45
+                        features.append("semantic-attributes")
+                    if self.locales.has(role, f.get("accessibility", "")):
+                        score += 0.15
+                        features.append("accessible-label")
+                    if role == "title" and f.get("before_editor"):
+                        features.append("before-editor")
+                    elif role == "title":
+                        features.append("after-editor")
+                    if role == "title" and len(text_fields) == 1:
+                        score += 0.3
+                        features.append("unique-title-near-editor")
+                else:
+                    if re.search(
+                        {"category": r"category|forum|categor[ií]a|раздел", "tags": r"tags|etiquetas|теги"}[
+                            role
+                        ],
+                        f["label"],
+                        re.I,
+                    ):
+                        score = 0.8
+                        features.append("semantic-attributes")
                 if score:
-                    choices.append((score, f))
-            choices.sort(key=lambda c: c[0], reverse=True)
-            if choices and (len(choices) == 1 or choices[0][0] > choices[1][0]):
-                score, f = choices[0]
-                kind = "contenteditable" if f["editable"] else f["tag"]
-                fields[role] = FieldRef(
-                    role, f["selector"], frame, kind, score, text_fields.index(f) if f in text_fields else 0
+                    choices.append(
+                        FieldRef(
+                            role,
+                            f["selector"],
+                            frame,
+                            "contenteditable" if f["editable"] else f["tag"],
+                            min(0.98, score),
+                            text_fields.index(f) if f in text_fields else 0,
+                            f.get("adapter", "native"),
+                            features,
+                        )
+                    )
+            choices.sort(key=lambda f: f.confidence, reverse=True)
+            alternatives[role] = choices
+            threshold = 0.5 if role == "title" else 0.6
+            if (
+                choices
+                and choices[0].confidence >= threshold
+                and (len(choices) == 1 or choices[0].confidence - choices[1].confidence >= 0.15)
+            ):
+                fields[role] = choices[0]
+                evidence.append("relational-" + role)
+        buttons = []
+        for b in snapshot["buttons"]:
+            score = 0.65 if b["type"] == "submit" else 0
+            features = ["form-submit-control"] if score else []
+            if self.locales.has("publish", b["text"]):
+                score += 0.3
+                features.append("accessible-publication-intent")
+            if score:
+                buttons.append(
+                    FieldRef("submit", b["selector"], frame, "button", min(0.98, score), features=features)
                 )
-                evidence.append("semantic-" + role)
-        # A single visible text input next to an editor is useful evidence, not a CSS-name assumption.
-        if "title" not in fields:
-            titles = [
-                f
-                for f in visible
-                if f["tag"] == "input" and f["type"] in {"text", ""} and not SEARCH.search(f["label"])
-            ]
-            if len(titles) == 1:
-                fields["title"] = FieldRef("title", titles[0]["selector"], frame, "input", 0.6)
-                evidence.append("single-text-input-next-to-editor")
-        buttons = [
-            (0.9 if SUBMIT.search(b["text"]) else 0.5 if b["type"] == "submit" else 0, b)
-            for b in snapshot["buttons"]
-        ]
-        buttons.sort(key=lambda b: b[0], reverse=True)
-        if buttons and buttons[0][0] and (len(buttons) == 1 or buttons[0][0] > buttons[1][0]):
-            score, b = buttons[0]
-            fields["submit"] = FieldRef("submit", b["selector"], frame, "button", score)
+        buttons.sort(key=lambda b: b.confidence, reverse=True)
+        alternatives["submit"] = buttons
+        if buttons and (len(buttons) == 1 or buttons[0].confidence - buttons[1].confidence >= 0.15):
+            fields["submit"] = buttons[0]
         if not ("body" in fields or "title" in fields):
             return None
         candidate = FormCandidate(
@@ -151,8 +207,14 @@ class UniversalFormDetector:
             snapshot["method"],
             snapshot["action"],
             evidence,
+            alternatives=alternatives,
+            structure=snapshot.get("structure", []),
         )
         candidate.text_inputs = [
-            FieldRef("title", f["selector"], frame, "input", 0.55, i) for i, f in enumerate(text_fields)
+            next(
+                (r for r in alternatives.get("title", []) if r.selector == f["selector"]),
+                FieldRef("title", f["selector"], frame, "input", 0.3, i),
+            )
+            for i, f in enumerate(text_fields)
         ]
         return candidate

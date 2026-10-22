@@ -33,6 +33,11 @@ MESSAGES = {
     "BROWSER_ERROR": "Браузерная операция не завершена. Сессия закрыта; можно начать новое распознавание.",
     "PUBLICATION_REJECTED": "Сайт явно отклонил отправку. HTTP 200 не считается подтверждением.",
     "MANUAL_READY": "Заполнены найденные поля. Покажите правильную форму и отправьте один раз вручную.",
+    "AUTH_EXPIRED": "Сессия истекла или доступ запрещён. Войдите в браузере и начните новое распознавание.",
+    "WRITE_SCOPE": "Заблокирована отправка, не связанная с разрешённой публикацией.",
+    "KNOWLEDGE_CONFLICT": "Найденные правила противоречат друг другу. Требуется выбор или ручное обучение.",
+    "DISTINCT_CONTENT": "HTTP-проверка требует нового заголовка и нового текста, отличающихся от браузерного теста.",
+    "EDITOR_SYNC": "Редактор не принял введённый текст. Отправка не выполнялась.",
 }
 
 
@@ -54,6 +59,8 @@ class FieldRef:
     kind: str = "input"
     confidence: float = 0
     position: int = 0
+    editor: str = "native"
+    features: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -66,6 +73,8 @@ class FormCandidate:
     action: str = ""
     evidence: list[str] = field(default_factory=list)
     text_inputs: list[FieldRef] = field(default_factory=list)
+    alternatives: dict[str, list[FieldRef]] = field(default_factory=dict)
+    structure: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -78,6 +87,9 @@ class Recognition:
     auth_required: bool = False
     diagnostics: list[str] = field(default_factory=list)
     rule_id: str | None = None
+    technologies: list[dict] = field(default_factory=list)
+    navigation: list[dict] = field(default_factory=list)
+    outcome: str = "not_attempted"
 
     def summary(self):
         """User-facing diagnostics contain semantic roles/codes, never page values or raw requests."""
@@ -88,6 +100,9 @@ class Recognition:
             "auth_required": self.auth_required,
             "selected": self.selected,
             "rule_id": self.rule_id,
+            "technologies": self.technologies,
+            "navigation": self.navigation,
+            "outcome": self.outcome,
             "forms": [
                 {
                     "id": f.key,
@@ -95,6 +110,13 @@ class Recognition:
                     "confidence": f.confidence,
                     "editors": sorted({v.kind for v in f.fields.values() if v.role == "body"}),
                     "evidence": f.evidence,
+                    "alternatives": {
+                        role: [
+                            {"position": r.position, "score": r.confidence, "evidence": r.features}
+                            for r in refs
+                        ]
+                        for role, refs in f.alternatives.items()
+                    },
                 }
                 for f in self.forms
             ],

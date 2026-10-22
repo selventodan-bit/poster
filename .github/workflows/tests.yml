@@ -16,4 +16,31 @@ jobs:
       - run: uv run --no-sync ruff format --diff .
       - run: uv run --no-sync ruff format --check .
       - run: uv run --no-sync python -m playwright install --with-deps chromium
-      - run: uv run --no-sync python -m pytest -q
+      - run: sudo apt-get install -y xvfb libtk8.6
+      - run: xvfb-run -a uv run --no-sync python -m pytest -q
+  phpbb:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.13'
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: sqlite3, mbstring, xml
+          tools: composer:v2
+      - run: uv sync --frozen --extra dev --extra recorder
+      - run: uv run --no-sync python -m playwright install --with-deps chromium
+      - run: uv run --no-sync python scripts/run_phpbb_ci.py
+        env:
+          COMPOSER_AUTH: '{"github-oauth":{"github.com":"${{ github.token }}"}}'
+  windows-recorder:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m pip install -e ".[dev,recorder]"
+      - run: python -m pytest -q tests/test_recorder_ui.py tests/test_recognition_protocol.py

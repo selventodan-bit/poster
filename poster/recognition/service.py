@@ -2,9 +2,8 @@
 
 import asyncio
 import json
-import hashlib
-import re
 import uuid
+import time
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
 
@@ -16,19 +15,16 @@ from ..models import Site, Step, Workflow
 from ..project import Project
 from ..recorder.builder import export
 from ..recorder.capture import Recorder, chromium_options
-from ..runtime import Runtime, WorkflowError
+from ..runtime import AuthenticationExpired, Runtime, WorkflowError
 from .detector import EngineDetector
 from .forms import UniversalFormDetector
+from .editors import adapter_for
+from .navigation import NavigationDiscovery
+from .policy import ResourcePolicy, SubmissionScope, dangerous_url, origin
 from .learner import HTTPWorkflowLearner
 from .network import NetworkAnalyzer
 from .network import leaves
 from .types import FieldRef, FormCandidate, LearningState, Recognition
-
-OPEN_FORM = re.compile(
-    r"new topic|create topic|new thread|new discussion|nuevo tema|crear tema|nova mensagem|"
-    r"новая тема|создать тему",
-    re.I,
-)
 
 
 def css_path(node):
@@ -41,7 +37,17 @@ def css_path(node):
 
 
 class RecognitionSession:
-    def __init__(self, url: str, profile: Path, *, knowledge=None, headless=False, confirmation_timeout=4):
+    def __init__(
+        self,
+        url: str,
+        profile: Path,
+        *,
+        knowledge=None,
+        headless=False,
+        confirmation_timeout=4,
+        static_origins=None,
+        locales=None,
+    ):
         parsed = urlsplit(url)
         if (
             parsed.scheme not in {"http", "https"}
@@ -65,6 +71,11 @@ class RecognitionSession:
         self.manual = False
         self.manual_finished = False
         self.sent_writes = set()
+        self.scope = None
+        self.resources = ResourcePolicy(static_origins)
+        self.navigation = NavigationDiscovery(locales=locales, knowledge=knowledge)
+        self.locales = locales
+        self.login_scope = None
 
     def state(self, value):
         self.result.state = value
@@ -94,60 +105,109 @@ class RecognitionSession:
     async def gate(self, route):
         request = route.request
         parsed = urlsplit(request.url)
-        allowed = parsed.hostname in self.hosts and parsed.scheme in {"http", "https"}
+        allowed = origin(request.url) == origin(self.url)
         if urlsplit(self.url).scheme == "https" and parsed.scheme != "https":
             allowed = False
         if not allowed:
+            if await self.resources.fulfill_static(route):
+                return
             if "BLOCKED_HOST" not in self.result.diagnostics:
                 self.result.diagnostics.append("BLOCKED_HOST")
             await route.abort()
+        elif dangerous_url(request.url):
+            await route.abort()
+        elif (
+            self.login_scope
+            and request.method == "POST"
+            and time.monotonic() < self.login_scope["deadline"]
+            and request.url == self.login_scope["url"]
+            and not self.login_scope["used"]
+        ):
+            self.login_scope["used"] = True
+            await route.continue_()
         elif self.read_only and request.method not in {"GET", "HEAD", "OPTIONS"}:
             await route.abort()
         else:
             if request.method not in {"GET", "HEAD", "OPTIONS"}:
-                identity = hashlib.sha256(
-                    (request.method + request.url).encode() + b"\0" + (request.post_data_buffer or b"")
-                ).hexdigest()
-                if identity in self.sent_writes:
+                if self.recorder.pending:
+                    await asyncio.wait(list(self.recorder.pending), timeout=0.25)
+                if not self.scope or not self.scope.allows(request):
+                    recorded = next(
+                        (
+                            r
+                            for r in reversed(self.recorder.capture.requests)
+                            if r["url"] == request.url and r["method"] == request.method
+                        ),
+                        None,
+                    )
+                    if recorded:
+                        recorded["blocked"] = True
                     await route.abort()
-                    self.result.diagnostics.append("ALREADY_ATTEMPTED")
+                    self.result.diagnostics.append("WRITE_SCOPE")
                     return
-                self.sent_writes.add(identity)
+                # Recorder's request event precedes routing; bind only the admitted request.
+                recorded = next(
+                    (
+                        r
+                        for r in reversed(self.recorder.capture.requests)
+                        if r["url"] == request.url
+                        and r["method"] == request.method
+                        and r.get("action_id") == self.recorder.capture.action_id
+                    ),
+                    None,
+                )
+                if recorded:
+                    self.scope.allowed_ids.add(recorded["id"])
             await route.continue_()
+
+    async def authorize_login(self, *, confirmed=False):
+        if not confirmed:
+            raise PermissionError("CONSENT_REQUIRED")
+        if self.browser_attempted:
+            raise ValueError("ALREADY_ATTEMPTED")
+        passwords = self.page.locator('input[type="password"]:visible')
+        if await passwords.count() != 1:
+            raise ValueError("AUTH_REQUIRED")
+        action = await passwords.evaluate("e=>e.form?.action")
+        if not action or origin(action) != origin(self.url):
+            raise ValueError("BLOCKED_HOST")
+        self.login_scope = {"url": action, "deadline": time.monotonic() + 120, "used": False}
 
     async def recognize(self):
         if self.closed:
             raise ValueError("Session closed")
         self.read_only = True
         self.result = Recognition(diagnostics=["READ_ONLY"])
-        detector = UniversalFormDetector()
-        forms = await detector.inspect(self.page, self.hosts)
-        if not any(all(r in f.fields for r in ("title", "body", "submit")) for f in forms):
-            for locator in (
-                self.page.get_by_role("button", name=OPEN_FORM),
-                self.page.get_by_role("link", name=OPEN_FORM),
-            ):
-                if await locator.count() == 1:
-                    if await locator.get_attribute("type") == "submit":
-                        continue
-                    await locator.click()
-                    try:
-                        await self.page.wait_for_selector(
-                            'textarea,[contenteditable="true"],iframe', timeout=2000
-                        )
-                    except Exception:
-                        pass
-                    forms = await detector.inspect(self.page, self.hosts)
-                    break
+        detector = UniversalFormDetector(self.locales)
+        forms = await self.navigation.discover(self.page, lambda: detector.inspect(self.page, self.hosts))
+        self.result.navigation = self.navigation.trace
         html = await self.page.content()
-        engine, confidence, _ = EngineDetector().detect(html)
+        technologies = EngineDetector().report(
+            html,
+            url=self.page.url,
+            requests=self.recorder.capture.requests,
+            responses=self.recorder.capture.responses,
+        )
+        self.result.technologies = technologies
+        engine, confidence = (
+            (technologies[0]["family"], technologies[0]["confidence"]) if technologies else ("unknown", 0)
+        )
         self.result.engine, self.result.confidence.engine = engine, confidence
         self.result.forms = forms
         if self.knowledge:
             for form in forms:
                 if self.knowledge.suggest(form):
                     form.confidence = detector.confidence(form.fields)
-        self.result.auth_required = await self.page.locator('input[type="password"]').count() > 0
+                if "knowledge-conflict" in form.evidence:
+                    self.result.diagnostics.append("KNOWLEDGE_CONFLICT")
+        self.result.auth_required = (
+            await self.page.locator('input[type="password"]:visible').count() > 0
+            or any(
+                r["status"] in {401, 403} and origin(r["url"]) == origin(self.url)
+                for r in self.recorder.capture.responses
+            )
+            or any(part in urlsplit(self.page.url).path.lower() for part in ("/login", "/sign-in", "/signin"))
+        )
         if self.result.auth_required:
             self.result.diagnostics.append("AUTH_REQUIRED")
         complete = [f for f in forms if all(k in f.fields for k in ("title", "body", "submit"))]
@@ -200,11 +260,17 @@ class RecognitionSession:
             raise ValueError("CONTENT_REQUIRED")
         for role, value in (("title", title), ("body", body)):
             ref = form.fields[role]
-            await self.page.frames[ref.frame].locator(ref.selector).fill(value)
+            await adapter_for(ref).fill(
+                self.page.frames[ref.frame].locator(ref.selector),
+                value,
+                staged="previous-stage" in ref.features,
+            )
         self.recorder.capture.title_marker = title
         self.recorder.capture.body_marker = body
         self.recorder.capture.body_format = (
-            "html" if "contenteditable" in form.fields["body"].kind else "text"
+            "html"
+            if "contenteditable" in form.fields["body"].kind or form.fields["body"].editor != "native"
+            else "text"
         )
         self.recorder.capture.start_url = self.page.url
         return form
@@ -220,6 +286,7 @@ class RecognitionSession:
         form = await self.fill(title, body)
         self.browser_attempted = True
         self.recorder.capture.action_id = uuid.uuid4().hex
+        self.scope = SubmissionScope(self.url, self.recorder.capture)
         self.read_only = False
         try:
             ref = form.fields["submit"]
@@ -254,7 +321,7 @@ class RecognitionSession:
                     {
                         k: v
                         for k, v in request.get("headers", {}).items()
-                        if k in {"authorization", "x-api-key", "x-auth-token"}
+                        if k in {"authorization", "x-api-key", "x-auth-token", "user-agent"}
                     }
                 )
         self.recorder.capture.session = state
@@ -265,7 +332,13 @@ class RecognitionSession:
         capture = self.recorder.capture
         while asyncio.get_running_loop().time() < deadline:
             await self.session_state()
-            candidate = await self.find_confirmation()
+            rejected = any(
+                r.get("action_id") == capture.action_id
+                and r["method"] in {"POST", "PUT", "PATCH"}
+                and (r["status"] >= 400 or '"success":false' in r["body"].replace(" ", "").lower())
+                for r in capture.responses
+            )
+            candidate = None if rejected else await self.find_confirmation()
             if candidate:
                 capture.result_url, capture.confirmation = candidate
                 capture.browser_verified = True
@@ -276,20 +349,42 @@ class RecognitionSession:
                 if form is None and self.manual:
                     form = self.learn_manual_fields()
                 if self.knowledge and form:
-                    self.result.rule_id = self.knowledge.propose(form, manual=self.manual)
+                    self.result.rule_id = self.knowledge.propose(
+                        form,
+                        manual=self.manual,
+                        origin=str(origin(self.url)),
+                        engine=self.result.engine,
+                        navigation=self.result.navigation,
+                        capture=capture,
+                    )
                 try:
                     self.build = HTTPWorkflowLearner().learn(
-                        capture, project_id, rule_id=self.result.rule_id, existing_site=existing_site
+                        capture,
+                        project_id,
+                        rule_id=self.result.rule_id,
+                        existing_site=existing_site,
+                        knowledge_rule=next(
+                            (r for r in self.knowledge.rules() if r.id == self.result.rule_id), None
+                        )
+                        if self.knowledge
+                        else None,
                     )
                 except (ValueError, TypeError, KeyError):
                     self.result.diagnostics.append("UNKNOWN_DYNAMIC")
                     self.state(LearningState.LEARNING_REQUIRED)
                     return
                 self.result.diagnostics.extend(self.build.diagnostics)
+                if self.knowledge and self.result.rule_id:
+                    self.knowledge.observe_workflow(self.result.rule_id, self.build.workflow)
+                    if self.result.technologies:
+                        self.knowledge.observe_engine(self.result.rule_id, self.result.technologies[0])
+                self.result.outcome = "publication_confirmed"
                 state = self.build.site["recognition"]["state"]
                 self.state(LearningState(state))
                 if state == "HTTP_CANDIDATE":
                     self.result.diagnostics.append("HTTP_UNVERIFIED")
+                else:
+                    self.result.outcome = "workflow_not_built"
                 return
             failed = any(
                 r["status"] >= 400 or '"success":false' in r["body"].replace(" ", "").lower()
@@ -299,11 +394,23 @@ class RecognitionSession:
             if failed:
                 self.state(LearningState.FAILED)
                 self.result.diagnostics.append("PUBLICATION_REJECTED")
+                self.result.outcome = "publication_rejected"
+                if any(
+                    r["status"] in {401, 403} and r.get("action_id") == capture.action_id
+                    for r in capture.responses
+                ):
+                    self.result.diagnostics.append("AUTH_EXPIRED")
+                    self.result.outcome = "auth_expired"
+                if self.knowledge and self.result.rule_id:
+                    self.knowledge.result(self.result.rule_id, False)
                 return
             await asyncio.sleep(0.1)
         self.result.diagnostics.append("NO_PERMALINK")
         self.result.diagnostics.extend(NetworkAnalyzer().analyze(capture).diagnostics)
         self.state(LearningState.UNKNOWN)
+        self.result.outcome = (
+            "auth_expired" if "AUTH_EXPIRED" in self.result.diagnostics else "permalink_missing"
+        )
 
     def learn_manual_fields(self):
         """Observe ordinary operator input on an unknown form; values never enter the rule database."""
@@ -351,11 +458,15 @@ class RecognitionSession:
                 confirmation = await self.read_confirmation(url)
                 if confirmation:
                     return url, {**extra, **confirmation}
+            except AuthenticationExpired:
+                self.result.diagnostics.append("AUTH_EXPIRED")
             except (ValueError, httpx.HTTPError, KeyError, WorkflowError):
                 continue
         return None
 
     async def read_confirmation(self, url):
+        if origin(url) != origin(self.url):
+            return None
         site = Site(id="verification", base_url=self.url, allowed_hosts=self.hosts, status="HTTP_READY")
         placeholder = Workflow(
             steps=[
@@ -370,6 +481,16 @@ class RecognitionSession:
         async with httpx.AsyncClient(timeout=10, follow_redirects=False, trust_env=False) as client:
             response = await runtime.request(client, placeholder.steps[0], {}, runtime.load_auth(client))
         soup = BeautifulSoup(response.text, "html.parser")
+        if (
+            response.status_code != 200
+            or soup.select_one('input[type="password"]')
+            or any(p in urlsplit(str(response.url)).path.lower() for p in ("/login", "/signin", "/sign-in"))
+        ):
+            if soup.select_one('input[type="password"]') or any(
+                p in urlsplit(str(response.url)).path.lower() for p in ("/login", "/signin", "/sign-in")
+            ):
+                self.result.diagnostics.append("AUTH_EXPIRED")
+            return None
         selectors = {}
         for role, expected in (
             ("title", self.recorder.capture.title_marker),
@@ -380,9 +501,22 @@ class RecognitionSession:
                 n
                 for n in soup.find_all(True)
                 if n.name not in {"script", "style", "input", "textarea"}
-                and not n.find_parent("form")
+                and not any(
+                    p.name == "form"
+                    and p.select_one('textarea,[contenteditable="true"],input[type="text"],input:not([type])')
+                    for p in n.parents
+                )
                 and not n.has_attr("contenteditable")
                 and not n.has_attr("hidden")
+                and not n.find_parent(["script", "style", "textarea", "template", "dialog"])
+                and not any(
+                    p.has_attr("hidden")
+                    or p.get("aria-hidden") == "true"
+                    or p.has_attr("contenteditable")
+                    or "display:none" in p.get("style", "").replace(" ", "")
+                    for p in [n, *n.parents]
+                    if getattr(p, "attrs", None)
+                )
                 and " ".join(n.get_text(strip=True).split()) == norm
             ]
             if not nodes:
@@ -399,12 +533,22 @@ class RecognitionSession:
             raise ValueError("ALREADY_ATTEMPTED")
         if self.result.state != LearningState.HTTP_CANDIDATE or not self.build:
             raise ValueError("HTTP_UNVERIFIED")
+        if (
+            not title.strip()
+            or not body.strip()
+            or title == self.recorder.capture.title_marker
+            or body == self.recorder.capture.body_marker
+        ):
+            raise ValueError("DISTINCT_CONTENT")
+        self.check_key()
         self.http_attempted = True
         self.read_only = True
         site = Site.model_validate({**self.build.site, "status": "HTTP_READY", "recognition": None})
         session = encrypt_session(self.build.session) if self.build.session else None
         trial = Project(site, Workflow.model_validate(self.build.workflow), "verification-trial", session)
-        result = await Runtime(trial).run({"title": title, "body": body, "target_url": self.url})
+        result = await Runtime(trial, strict_origin=True).run(
+            {"title": title, "body": body, "target_url": self.url}
+        )
         if result.status == "SUCCEEDED":
             self.state(LearningState.HTTP_VERIFIED)
             self.result.confidence.http_verified = True
@@ -414,9 +558,20 @@ class RecognitionSession:
         else:
             self.state(LearningState.UNKNOWN if result.status == "UNKNOWN" else LearningState.FAILED)
             self.result.diagnostics.append("HTTP_FAILED")
+            self.result.outcome = (
+                "auth_expired"
+                if result.status == "AUTH_EXPIRED"
+                else "http_unknown"
+                if result.status == "UNKNOWN"
+                else "http_failed"
+            )
+            if result.status == "AUTH_EXPIRED":
+                self.result.diagnostics.append("AUTH_EXPIRED")
             self.build.site["recognition"]["state"] = str(self.result.state)
         if self.knowledge and self.result.rule_id:
-            self.knowledge.result(self.result.rule_id, result.status == "SUCCEEDED")
+            self.knowledge.result(
+                self.result.rule_id, result.status == "SUCCEEDED", origin=str(origin(self.url))
+            )
         return result
 
     async def begin_manual(self, title, body, *, confirmed=False):
@@ -433,6 +588,7 @@ class RecognitionSession:
             self.recorder.capture.title_marker, self.recorder.capture.body_marker = title, body
         self.manual, self.browser_attempted = True, True
         self.recorder.capture.action_id = uuid.uuid4().hex
+        self.scope = SubmissionScope(self.url, self.recorder.capture)
         self.read_only = False
         self.result.diagnostics.append("MANUAL_READY")
 

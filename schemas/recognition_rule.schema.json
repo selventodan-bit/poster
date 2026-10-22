@@ -1,4 +1,463 @@
 {
+  "$defs": {
+    "EngineKnowledge": {
+      "additionalProperties": false,
+      "properties": {
+        "family": {
+          "default": "unknown",
+          "enum": [
+            "unknown",
+            "xenforo",
+            "phpbb",
+            "vbulletin",
+            "mybb",
+            "discourse",
+            "smf",
+            "invision",
+            "flarum",
+            "wordpress",
+            "wpforo"
+          ],
+          "title": "Family",
+          "type": "string"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "pattern": "^\\d{1,3}(?:\\.\\d{1,3}){0,3}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        },
+        "adapter_revision": {
+          "default": 2,
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Adapter Revision",
+          "type": "integer"
+        },
+        "channels": {
+          "items": {
+            "enum": [
+              "generator",
+              "assets",
+              "routes",
+              "api",
+              "dom",
+              "behavior",
+              "headers"
+            ],
+            "type": "string"
+          },
+          "maxItems": 7,
+          "title": "Channels",
+          "type": "array"
+        }
+      },
+      "title": "EngineKnowledge",
+      "type": "object"
+    },
+    "FormKnowledge": {
+      "additionalProperties": false,
+      "properties": {
+        "editor_adapter": {
+          "default": "native",
+          "enum": [
+            "native",
+            "tinymce",
+            "ckeditor",
+            "quill",
+            "prosemirror",
+            "summernote",
+            "froala"
+          ],
+          "title": "Editor Adapter",
+          "type": "string"
+        },
+        "title_features": {
+          "items": {
+            "enum": [
+              "previous-stage",
+              "single-line",
+              "multiline-editor",
+              "semantic-attributes",
+              "accessible-label",
+              "before-editor",
+              "after-editor",
+              "unique-title-near-editor",
+              "form-submit-control",
+              "accessible-publication-intent"
+            ],
+            "type": "string"
+          },
+          "maxItems": 10,
+          "title": "Title Features",
+          "type": "array"
+        },
+        "layout": {
+          "items": {
+            "enum": [
+              "light",
+              "shadow",
+              "dialog",
+              "inline"
+            ],
+            "type": "string"
+          },
+          "maxItems": 4,
+          "title": "Layout",
+          "type": "array"
+        },
+        "input_count": {
+          "default": 0,
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Input Count",
+          "type": "integer"
+        }
+      },
+      "title": "FormKnowledge",
+      "type": "object"
+    },
+    "NavigationKnowledge": {
+      "additionalProperties": false,
+      "properties": {
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/NavigationStep"
+          },
+          "maxItems": 5,
+          "title": "Steps",
+          "type": "array"
+        }
+      },
+      "title": "NavigationKnowledge",
+      "type": "object"
+    },
+    "NavigationStep": {
+      "additionalProperties": false,
+      "properties": {
+        "purpose": {
+          "enum": [
+            "menu",
+            "compose"
+          ],
+          "title": "Purpose",
+          "type": "string"
+        },
+        "evidence": {
+          "items": {
+            "enum": [
+              "accessible-compose-intent",
+              "compose-route",
+              "compose-affordance",
+              "controlled-editor",
+              "controlled-menu",
+              "navigation-link",
+              "non-submit-control",
+              "navigation-context"
+            ],
+            "type": "string"
+          },
+          "maxItems": 8,
+          "title": "Evidence",
+          "type": "array"
+        },
+        "score": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Score",
+          "type": "number"
+        }
+      },
+      "required": [
+        "purpose",
+        "evidence",
+        "score"
+      ],
+      "title": "NavigationStep",
+      "type": "object"
+    },
+    "SubmissionDependency": {
+      "additionalProperties": false,
+      "properties": {
+        "parent": {
+          "maximum": 20,
+          "minimum": 0,
+          "title": "Parent",
+          "type": "integer"
+        },
+        "child": {
+          "maximum": 20,
+          "minimum": 0,
+          "title": "Child",
+          "type": "integer"
+        },
+        "source": {
+          "enum": [
+            "json_path",
+            "header"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "target": {
+          "enum": [
+            "payload",
+            "path",
+            "query",
+            "header"
+          ],
+          "title": "Target",
+          "type": "string"
+        }
+      },
+      "required": [
+        "parent",
+        "child",
+        "source",
+        "target"
+      ],
+      "title": "SubmissionDependency",
+      "type": "object"
+    },
+    "SubmissionKnowledge": {
+      "additionalProperties": false,
+      "properties": {
+        "operations": {
+          "items": {
+            "$ref": "#/$defs/SubmissionOperation"
+          },
+          "maxItems": 20,
+          "title": "Operations",
+          "type": "array"
+        },
+        "dependencies": {
+          "items": {
+            "$ref": "#/$defs/SubmissionDependency"
+          },
+          "maxItems": 100,
+          "title": "Dependencies",
+          "type": "array"
+        }
+      },
+      "title": "SubmissionKnowledge",
+      "type": "object"
+    },
+    "SubmissionOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "enum": [
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE"
+          ],
+          "title": "Method",
+          "type": "string"
+        },
+        "encoding": {
+          "enum": [
+            "json",
+            "form",
+            "multipart"
+          ],
+          "title": "Encoding",
+          "type": "string"
+        },
+        "roles": {
+          "items": {
+            "enum": [
+              "title",
+              "body"
+            ],
+            "type": "string"
+          },
+          "maxItems": 2,
+          "title": "Roles",
+          "type": "array"
+        },
+        "body_shape": {
+          "items": {
+            "enum": [
+              "object",
+              "array",
+              "scalar",
+              "dynamic",
+              "title",
+              "body"
+            ],
+            "type": "string"
+          },
+          "maxItems": 100,
+          "title": "Body Shape",
+          "type": "array"
+        },
+        "route": {
+          "default": "other",
+          "enum": [
+            "draft",
+            "publish",
+            "other"
+          ],
+          "title": "Route",
+          "type": "string"
+        },
+        "route_shape": {
+          "items": {
+            "enum": [
+              "api",
+              "draft",
+              "drafts",
+              "publish",
+              "threads",
+              "topics",
+              "posts",
+              "identity",
+              "other"
+            ],
+            "type": "string"
+          },
+          "maxItems": 30,
+          "title": "Route Shape",
+          "type": "array"
+        }
+      },
+      "required": [
+        "method",
+        "encoding",
+        "roles"
+      ],
+      "title": "SubmissionOperation",
+      "type": "object"
+    },
+    "TokenKnowledge": {
+      "additionalProperties": false,
+      "properties": {
+        "patterns": {
+          "items": {
+            "$ref": "#/$defs/TokenPattern"
+          },
+          "maxItems": 100,
+          "title": "Patterns",
+          "type": "array"
+        }
+      },
+      "title": "TokenKnowledge",
+      "type": "object"
+    },
+    "TokenPattern": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "enum": [
+            "csrf_token",
+            "csrf",
+            "nonce",
+            "token",
+            "x-csrf-token",
+            "x-xsrf-token",
+            "id",
+            "draft_id",
+            "topic_id",
+            "uuid",
+            "other"
+          ],
+          "title": "Name",
+          "type": "string"
+        },
+        "role": {
+          "enum": [
+            "csrf",
+            "identity",
+            "nonce"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "source": {
+          "enum": [
+            "html-hidden",
+            "html-meta",
+            "json",
+            "header",
+            "cookie",
+            "unknown"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "fresh": {
+          "default": true,
+          "title": "Fresh",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "role",
+        "source"
+      ],
+      "title": "TokenPattern",
+      "type": "object"
+    },
+    "VerificationKnowledge": {
+      "additionalProperties": false,
+      "properties": {
+        "permalink": {
+          "default": "unknown",
+          "enum": [
+            "json",
+            "bookmark",
+            "redirect",
+            "unknown"
+          ],
+          "title": "Permalink",
+          "type": "string"
+        },
+        "content": {
+          "items": {
+            "enum": [
+              "title",
+              "body"
+            ],
+            "type": "string"
+          },
+          "maxItems": 2,
+          "title": "Content",
+          "type": "array"
+        },
+        "independent_get": {
+          "default": true,
+          "title": "Independent Get",
+          "type": "boolean"
+        },
+        "rejected": {
+          "items": {
+            "enum": [
+              "http-error",
+              "login",
+              "explicit-error",
+              "missing-content",
+              "missing-permalink"
+            ],
+            "type": "string"
+          },
+          "maxItems": 5,
+          "title": "Rejected",
+          "type": "array"
+        }
+      },
+      "title": "VerificationKnowledge",
+      "type": "object"
+    }
+  },
   "additionalProperties": false,
   "properties": {
     "id": {
@@ -7,7 +466,8 @@
       "type": "string"
     },
     "version": {
-      "default": 1,
+      "default": 2,
+      "maximum": 2,
       "minimum": 1,
       "title": "Version",
       "type": "integer"
@@ -19,8 +479,11 @@
       "type": "string"
     },
     "algorithm": {
-      "const": "semantic-editor-pair-v1",
-      "default": "semantic-editor-pair-v1",
+      "default": "relational-workflow-v2",
+      "enum": [
+        "semantic-editor-pair-v1",
+        "relational-workflow-v2"
+      ],
       "title": "Algorithm",
       "type": "string"
     },
@@ -47,6 +510,7 @@
         ],
         "type": "string"
       },
+      "maxItems": 6,
       "title": "Roles",
       "type": "array"
     },
@@ -59,7 +523,6 @@
       "type": "string"
     },
     "tests": {
-      "default": [],
       "items": {
         "enum": [
           "browser-permalink",
@@ -67,6 +530,7 @@
         ],
         "type": "string"
       },
+      "maxItems": 2,
       "title": "Tests",
       "type": "array"
     },
@@ -101,6 +565,75 @@
       "minimum": 0,
       "title": "Title Text Index",
       "type": "integer"
+    },
+    "enabled": {
+      "default": true,
+      "title": "Enabled",
+      "type": "boolean"
+    },
+    "priority": {
+      "default": 0,
+      "maximum": 100,
+      "minimum": -100,
+      "title": "Priority",
+      "type": "integer"
+    },
+    "revision": {
+      "default": 1,
+      "minimum": 1,
+      "title": "Revision",
+      "type": "integer"
+    },
+    "regressions": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Regressions",
+      "type": "integer"
+    },
+    "installations": {
+      "items": {
+        "pattern": "^[a-f0-9]{16}$",
+        "type": "string"
+      },
+      "maxItems": 100,
+      "title": "Installations",
+      "type": "array"
+    },
+    "http_installations": {
+      "items": {
+        "pattern": "^[a-f0-9]{16}$",
+        "type": "string"
+      },
+      "maxItems": 100,
+      "title": "Http Installations",
+      "type": "array"
+    },
+    "variants": {
+      "items": {
+        "pattern": "^[a-f0-9]{16}$",
+        "type": "string"
+      },
+      "maxItems": 100,
+      "title": "Variants",
+      "type": "array"
+    },
+    "engine": {
+      "$ref": "#/$defs/EngineKnowledge"
+    },
+    "navigation": {
+      "$ref": "#/$defs/NavigationKnowledge"
+    },
+    "form": {
+      "$ref": "#/$defs/FormKnowledge"
+    },
+    "submission": {
+      "$ref": "#/$defs/SubmissionKnowledge"
+    },
+    "tokens": {
+      "$ref": "#/$defs/TokenKnowledge"
+    },
+    "verification": {
+      "$ref": "#/$defs/VerificationKnowledge"
     }
   },
   "required": [

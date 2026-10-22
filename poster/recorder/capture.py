@@ -5,6 +5,7 @@ import os
 import shutil
 import time
 import uuid
+from email.message import Message
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -75,23 +76,28 @@ class Recorder:
 
     async def attach(self, context):
         request_ids = {}
+        request_actions = {}
 
         def request(req):
             if req.resource_type in {"document", "xhr", "fetch"}:
                 request_id = f"r{len(self.capture.requests)}"
                 request_ids[req] = request_id
+                request_actions[req] = request_actions.get(req.redirected_from, self.capture.action_id)
                 raw = req.post_data_buffer or b""
                 content_type = req.headers.get("content-type", "")
                 try:
                     if len(raw) > 2_000_000:
                         raise ValueError("Oversized capture")
-                    body = raw.decode("utf-8")
+                    mime = Message()
+                    mime["content-type"] = content_type
+                    body = raw.decode(mime.get_content_charset() or "utf-8")
                 except (UnicodeError, ValueError):
                     body, content_type = "", "application/octet-stream"
                 self.capture.requests.append(
                     {
                         "id": request_id,
-                        "action_id": self.capture.action_id,
+                        "action_id": request_actions[req],
+                        "initiator": req.frame.url if req.frame else "",
                         "time": time.monotonic(),
                         "resource_type": req.resource_type,
                         "redirected_from": request_ids.get(req.redirected_from),
@@ -103,23 +109,35 @@ class Recorder:
                             k: v
                             for k, v in req.headers.items()
                             if k.lower()
-                            in {"authorization", "x-api-key", "x-auth-token", "x-csrf-token", "x-xsrf-token"}
+                            in {
+                                "authorization",
+                                "x-api-key",
+                                "x-auth-token",
+                                "x-csrf-token",
+                                "x-xsrf-token",
+                                "user-agent",
+                            }
                         },
                     }
                 )
 
         async def response(res):
             received_at = time.monotonic()
+            action_id = request_actions.get(res.request)
+            response_headers = dict(res.headers)
             if res.request.resource_type not in {"document", "xhr", "fetch"}:
                 return
             try:
-                body = await res.text()
+                try:
+                    body = await res.text()
+                except Exception:
+                    body = ""
                 if len(body) > 2_000_000:
                     return
                 self.capture.responses.append(
                     {
                         "request_id": request_ids.get(res.request),
-                        "action_id": self.capture.action_id,
+                        "action_id": action_id,
                         "time": received_at,
                         "url": res.url,
                         "method": res.request.method,
@@ -127,6 +145,7 @@ class Recorder:
                         "body": body,
                         "content_type": res.headers.get("content-type", ""),
                         "location": res.headers.get("location"),
+                        "headers": response_headers,
                     }
                 )
             except Exception:
@@ -158,7 +177,7 @@ class Recorder:
                     {
                         k: v
                         for k, v in req["headers"].items()
-                        if k in {"authorization", "x-api-key", "x-auth-token"}
+                        if k in {"authorization", "x-api-key", "x-auth-token", "user-agent"}
                     }
                 )
         await context.close()

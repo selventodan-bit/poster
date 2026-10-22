@@ -5,6 +5,7 @@ import json
 import queue
 import re
 import threading
+import uuid
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
@@ -49,6 +50,7 @@ class App(ClipboardMixin):
         self.title = tk.StringVar(value="Проверка Poster")
         self.status = tk.StringVar(value="Введите адрес, заголовок и текст, затем нажмите «Распознать сайт».")
         self.advanced = tk.BooleanVar(value=False)
+        self.output_parent = tk.StringVar(value="")
         for label, variable in (("Адрес сайта или формы", self.url), ("Заголовок", self.title)):
             ttk.Label(root, text=label).pack(anchor="w", padx=12)
             widget = ttk.Entry(root, textvariable=variable, width=95)
@@ -59,6 +61,13 @@ class App(ClipboardMixin):
         self.body.insert("1.0", "Тестовая публикация для проверки формы.")
         self.body.pack(fill="both", expand=True, padx=12, pady=4)
         self._enable_clipboard(self.body)
+        destination = ttk.Frame(root)
+        destination.pack(fill="x", padx=12, pady=4)
+        ttk.Label(destination, text="Папка для готового проекта:").pack(side="left")
+        output_entry = ttk.Entry(destination, textvariable=self.output_parent)
+        output_entry.pack(side="left", fill="x", expand=True)
+        self._enable_clipboard(output_entry)
+        ttk.Button(destination, text="Выбрать…", command=self.choose_output).pack(side="left")
         actions = ttk.Frame(root)
         actions.pack(fill="x", padx=12, pady=8)
         self.buttons = {}
@@ -71,6 +80,7 @@ class App(ClipboardMixin):
                 ("finish", "Завершить обучение", self.finish_manual),
                 ("save", "Сохранить проект", self.save),
                 ("stop", "Стоп / закрыть браузер", self.stop),
+                ("login", "Разрешить один вход", self.login),
             )
         ):
             button = ttk.Button(actions, text=label, command=callback)
@@ -191,6 +201,8 @@ class App(ClipboardMixin):
                 self.write(value)
             elif kind == "reset":
                 self.snapshot = {}
+            elif kind == "saved":
+                self.write("Сохранение: " + value)
             elif kind == "done":
                 self.busy = False
                 self.future = None
@@ -209,6 +221,7 @@ class App(ClipboardMixin):
             and state in {"DETECTED", "LEARNING_REQUIRED"},
             "save": state in {"HTTP_CANDIDATE", "HTTP_VERIFIED"},
             "stop": bool(self.session) or self.busy,
+            "login": bool(self.session) and bool(self.snapshot.get("auth_required")) and not attempted,
         }
         for key, button in self.buttons.items():
             button.configure(
@@ -257,18 +270,60 @@ class App(ClipboardMixin):
 
         self.run(work)
 
-    def http_verify(self):
+    def login(self):
         if not messagebox.askyesno(
-            "Отдельная HTTP-проверка",
-            "Создать вторую настоящую публикацию через HTTP? Это отдельная отправка. После неизвестного исхода повтора не будет.",
+            "Один вход на сайт",
+            "Разрешить одну отправку показанной формы входа в течение двух минут? Введите данные в браузере, затем снова нажмите «Распознать сайт».",
         ):
             return
+
+        async def work():
+            await self.session.authorize_login(confirmed=True)
+
+        self.run(work)
+
+    def http_verify(self):
         title, body = self.text()
+        suffix = uuid.uuid4().hex[:6]
+        title = title + " [HTTP " + suffix + "]"
+        body = body + "\nHTTP-проверка " + suffix
+        output = Path(self.output_parent.get()) / self.identity() if self.output_parent.get() else None
+        if output and output.exists() and any(output.iterdir()):
+            self.status.set("Выберите пустую папку проекта перед автоматическим сохранением.")
+            return
+        if not messagebox.askyesno(
+            "Отдельная HTTP-проверка",
+            "Создать вторую настоящую публикацию через HTTP с новым заголовком «"
+            + title
+            + "» и отдельной пометкой в тексте? После подтверждения проект будет сохранён в выбранную папку."
+            if output
+            else "Создать вторую настоящую публикацию через HTTP с новым заголовком «"
+            + title
+            + "» и отдельной пометкой в тексте?",
+        ):
+            return
 
         async def work():
             await self.session.verify_http(title, body, confirmed=True)
+            if output and self.session.result.state == "HTTP_VERIFIED":
+                try:
+                    self.session.save(output)
+                    self.messages.put((self.generation, "saved", str(output)))
+                except (ValueError, OSError):
+                    self.messages.put(
+                        (
+                            self.generation,
+                            "saved",
+                            "Автосохранение не выполнено. Выберите другую папку и нажмите «Сохранить проект».",
+                        )
+                    )
 
         self.run(work)
+
+    def choose_output(self):
+        selected = filedialog.askdirectory(title="Каталог проектов для автоматического сохранения")
+        if selected:
+            self.output_parent.set(selected)
 
     def manual(self):
         if not messagebox.askyesno(

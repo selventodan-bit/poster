@@ -91,3 +91,7 @@ recognition:
 Дополнительное поле шага `normalize: whitespace` сравнивает текст без различий в пробелах. Строгие подстановки дополнены ограниченными фильтрами `{{body|html}}` и `{{title|url}}`: только escaping, без функций или произвольного кода. Простой JSON-path по-прежнему поддерживает словари/индексы, не полный JSONPath-язык.
 
 `recognition.json` — диагностические оценки и история состояний без сырых сетевых тел. Индивидуальные cookies остаются в session.enc; глобальные правила knowledge.sqlite в папку проекта не копируются.
+
+### Дополнения recognition 2.1
+
+Schema v1 сохранена. Extraction `header` разрешает только X-CSRF-Token/X-XSRF-Token/X-Draft-ID/ETag/Location через `attribute`; extraction `cookie` читает указанное имя из текущего cookie jar, ограниченного доменом ответа. Значения не сохраняются в YAML. Для новых распознанных проектов Runtime проверяет точный origin, включая порт. Legacy проекты без recognition сохраняют прежнюю семантику `allowed_hosts`.

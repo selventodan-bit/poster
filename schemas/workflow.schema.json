@@ -115,6 +115,8 @@
                 "css_text",
                 "css_attribute",
                 "json_path",
+                "header",
+                "cookie",
                 "regex",
                 "contains",
                 "status"

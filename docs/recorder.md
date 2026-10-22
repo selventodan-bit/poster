@@ -37,3 +37,7 @@ python -m poster demo-recognition --output .poster/check-v2
 ```
 
 Legacy `Recorder`, `builder.analyze` и прежний `poster demo` сохранены для совместимости и регрессии. Новый UI использует NetworkAnalyzer/HTTPWorkflowLearner поверх общего Capture и Build/export. Детали и ограничения — [recognition_architecture.md](recognition_architecture.md).
+
+## Глубокая доработка
+
+Актуальные ограничения навигации, редакторные адаптеры, шесть категорий знаний, точная изоляция origin, отдельный login и безопасное использование прежних ключей описаны в [архитектуре](recognition_architecture.md). Перед HTTP-тестом GUI создаёт другой контент. При заранее выбранной папке подтверждённый проект сохраняется автоматически. Полный автоматический набор и реальная установка phpBB: [отчёт](VALIDATION_V2_DEEP.md). Порядок действий Windows: [краткая инструкция](windows_quickstart.md).

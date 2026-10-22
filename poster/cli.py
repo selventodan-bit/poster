@@ -30,6 +30,15 @@ def parser():
     recognize.add_argument("--headed", action="store_true")
     v2 = sub.add_parser("demo-recognition", help="Real automatic recognition → browser → learned HTTP replay")
     v2.add_argument("--output", type=Path, default=Path(".poster/recognition-demo"))
+    knowledge = sub.add_parser("knowledge", help="Manage safe recognition knowledge without a browser")
+    knowledge.add_argument("operation", choices=["list", "export", "import", "backup", "disable", "enable"])
+    knowledge.add_argument("--db", type=Path, default=Path(".poster/knowledge.sqlite"))
+    knowledge.add_argument("--file", type=Path)
+    knowledge.add_argument("--rule")
+    benchmark = sub.add_parser(
+        "benchmark-recognition", help="Controlled held-out browser/HTTP recognition benchmark"
+    )
+    benchmark.add_argument("--output", type=Path, default=Path(".poster/benchmark"))
     v = sub.add_parser("validate")
     v.add_argument("project", type=Path)
     m = sub.add_parser("ready", help="Write hashes after intentionally editing a complete local tree")
@@ -153,6 +162,43 @@ def main(argv=None):
             from .demo_recognition import demo
 
             print(json.dumps(asyncio.run(demo(a.output)), ensure_ascii=False, indent=2))
+        elif a.command == "knowledge":
+            from .recognition.knowledge import KnowledgeBase
+
+            kb = KnowledgeBase(a.db)
+            try:
+                if a.operation == "list":
+                    print(
+                        json.dumps(
+                            [
+                                {
+                                    "id": r.id,
+                                    "maturity": r.maturity,
+                                    "enabled": r.enabled,
+                                    "successes": r.http_successes,
+                                    "failures": r.failures,
+                                }
+                                for r in kb.rules()
+                            ],
+                            indent=2,
+                        )
+                    )
+                elif a.operation in {"disable", "enable"}:
+                    if not a.rule:
+                        raise ValueError("--rule is required")
+                    kb.disable(a.rule, a.operation == "disable")
+                else:
+                    if not a.file:
+                        raise ValueError("--file is required")
+                    {"export": kb.export_rules, "import": kb.import_rules, "backup": kb.backup}[a.operation](
+                        a.file
+                    )
+            finally:
+                kb.close()
+        elif a.command == "benchmark-recognition":
+            from .benchmark import benchmark
+
+            print(json.dumps(asyncio.run(benchmark(a.output)), ensure_ascii=False, indent=2))
         elif a.command == "validate":
             project = load_project(a.project)
             print(

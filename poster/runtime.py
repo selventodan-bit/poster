@@ -2,7 +2,6 @@
 
 import asyncio
 import html
-import json
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -11,9 +10,9 @@ from urllib.parse import quote, urljoin, urlsplit, urlunsplit
 
 import httpx
 from bs4 import BeautifulSoup
-from cryptography.fernet import Fernet, InvalidToken
+from cryptography.fernet import InvalidToken
 
-from .auth import session_key
+from .auth import decrypt_bytes
 from .models import Step
 from .project import Project
 
@@ -73,7 +72,13 @@ def extract(step: Step, response: httpx.Response):
         node = BeautifulSoup(response.text, "html.parser").select_one(step.selector)
         if node is None:
             raise WorkflowError("Expected confirmation/extraction element is absent")
-        value = node.get_text(strip=True) if step.kind == "css_text" else node.get(step.attribute)
+        value = (
+            node.get_text(" ", strip=True)
+            if step.kind == "css_text" and step.normalize == "whitespace"
+            else node.get_text(strip=True)
+            if step.kind == "css_text"
+            else node.get(step.attribute)
+        )
         if value is None or value == "":
             raise WorkflowError("Expected element value is absent")
         return value
@@ -81,6 +86,11 @@ def extract(step: Step, response: httpx.Response):
         value = response.json()
         for key in step.path.removeprefix("$.").split("."):
             value = value[int(key)] if isinstance(value, list) else value[key]
+        return value
+    if step.kind == "header":
+        value = response.headers.get(step.attribute)
+        if not value:
+            raise WorkflowError("Expected response header is absent")
         return value
     if step.kind == "regex":
         match = re.search(step.pattern, response.text[:1_000_000])
@@ -103,13 +113,14 @@ class Result:
 
 
 class Runtime:
-    def __init__(self, project: Project, transport=None, host_limits=None):
+    def __init__(self, project: Project, transport=None, host_limits=None, *, strict_origin=False):
         self.project = project
         self.transport = transport
         self.operations = []
         self.wrote = False
         self.verified = False
         self.result_url = None
+        self.strict_origin = strict_origin or bool(project.site.recognition)
         self.host_limits = (
             host_limits if host_limits is not None else defaultdict(lambda: asyncio.Semaphore(1))
         )
@@ -126,11 +137,19 @@ class Runtime:
             raise WorkflowError("Request/redirect host is outside allowed_hosts")
         if urlsplit(self.project.site.base_url).scheme == "https" and parsed.scheme != "https":
             raise WorkflowError("HTTPS downgrade is forbidden")
+        if self.strict_origin:
+            base = urlsplit(self.project.site.base_url)
+
+            def address(p):
+                return p.scheme, p.hostname, p.port or (443 if p.scheme == "https" else 80)
+
+            if address(parsed) != address(base):
+                raise WorkflowError("Recognized workflow origin is outside the verified origin")
 
     def load_auth(self, client):
         if not self.project.session:
             return {}
-        state = json.loads(Fernet(session_key()).decrypt(self.project.session))
+        state = decrypt_bytes(self.project.session)
         for c in state.get("cookies", []):
             domain = c["domain"]
             if not any(
@@ -162,7 +181,7 @@ class Runtime:
         return {
             k: v
             for k, v in state.get("headers", {}).items()
-            if k.lower() in {"authorization", "x-api-key", "x-auth-token"}
+            if k.lower() in {"authorization", "x-api-key", "x-auth-token", "user-agent"}
         }
 
     async def request(self, client, step, context, auth_headers):
@@ -250,9 +269,21 @@ class Runtime:
                 response = context.get(step.source)
                 if not isinstance(response, httpx.Response):
                     raise WorkflowError("Extraction source is not an HTTP response")
-                actual = extract(
-                    step.model_copy(update={"expected": render(step.expected, context)}), response
-                )
+                if step.kind == "cookie":
+                    host = response.url.host
+                    values = {
+                        c.value
+                        for c in client.cookies.jar
+                        if c.name == step.attribute
+                        and (host == c.domain.lstrip(".") or host.endswith("." + c.domain.lstrip(".")))
+                    }
+                    if len(values) != 1:
+                        raise WorkflowError("Session cookie is absent or ambiguous")
+                    actual = values.pop()
+                else:
+                    actual = extract(
+                        step.model_copy(update={"expected": render(step.expected, context)}), response
+                    )
                 if step.op == "extract":
                     context[step.save_as] = actual
                 else:

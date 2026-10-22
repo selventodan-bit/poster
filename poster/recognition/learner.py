@@ -10,10 +10,11 @@ from bs4 import BeautifulSoup
 from ..models import Site, Workflow
 from ..recorder.builder import Build, SENSITIVE
 from .network import NetworkAnalyzer, leaves, text
+from .policy import origin as url_origin
 
 
 class HTTPWorkflowLearner:
-    def learn(self, capture, project_id, *, rule_id=None, existing_site=None):
+    def learn(self, capture, project_id, *, rule_id=None, existing_site=None, knowledge_rule=None):
         analysis = NetworkAnalyzer().analyze(capture)
         diagnostics = list(analysis.diagnostics)
         if not capture.browser_verified or not capture.confirmation:
@@ -43,21 +44,73 @@ class HTTPWorkflowLearner:
                 )
             )
         steps, sources, bindings = [], {}, {}
+        preferred_sources = set(p.source for p in knowledge_rule.tokens.patterns) if knowledge_rule else set()
 
-        def endpoint(raw):
+        def source_rank(response):
+            kind = "json"
+            if "<meta" in response.get("body", ""):
+                kind = "html-meta"
+            elif "<input" in response.get("body", ""):
+                kind = "html-hidden"
+            if response.get("headers", {}).get("x-csrf-token"):
+                kind = "header"
+            return kind not in preferred_sources
+
+        evidence_responses = sorted(capture.responses, key=source_rank)
+
+        def cookie_name(value):
+            return next(
+                (
+                    c["name"]
+                    for c in capture.session.get("cookies", [])
+                    if c["value"] == value and re.fullmatch(r"[A-Za-z0-9_\-]{1,100}", c["name"])
+                ),
+                None,
+            )
+
+        def endpoint(raw, request=None):
             parsed = urlsplit(raw)
-            if parsed.hostname != origin.hostname or parsed.username or parsed.password:
+            if url_origin(raw) != url_origin(capture.start_url) or parsed.username or parsed.password:
                 diagnostics.append("BLOCKED_HOST")
                 return "{{operator_review_required}}"
             query = []
             for k, v in parse_qsl(parsed.query, keep_blank_values=True):
-                if SENSITIVE.search(k):
+                edge = next(
+                    (
+                        e
+                        for e in analysis.dependencies
+                        if request
+                        and e.child == request.get("id")
+                        and e.target_kind == "query"
+                        and e.target_path == k
+                    ),
+                    None,
+                )
+                if edge:
+                    v = dependency_binding(edge).replace("}}", "|url}}")
+                elif SENSITIVE.search(k) and cookie_name(v):
+                    # Authentication is supplied by the encrypted cookie jar. Never
+                    # duplicate the captured session value in a persistent URL.
+                    if request is None:
+                        continue
+                    v = extraction("page", "cookie", attribute=cookie_name(v)).replace("}}", "|url}}")
+                elif SENSITIVE.search(k):
                     diagnostics.append("UNKNOWN_DYNAMIC")
                     v = "{{operator_review_required}}"
                 else:
                     v = quote(v, safe="")
                 query.append(quote(k, safe="") + "=" + v)
-            return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "&".join(query), ""))
+            segments = parsed.path.split("/")
+            for edge in analysis.dependencies:
+                if request and edge.child == request.get("id") and edge.target_kind == "path":
+                    segments[int(edge.target_path)] = dependency_binding(edge).replace("}}", "|url}}")
+            if any(re.fullmatch(r"[a-f0-9-]{24,}", part, re.I) for part in segments):
+                diagnostics.append("UNKNOWN_DYNAMIC")
+                segments = [
+                    "{{operator_review_required}}" if re.fullmatch(r"[a-f0-9-]{24,}", part, re.I) else part
+                    for part in segments
+                ]
+            return urlunsplit((parsed.scheme, parsed.netloc, "/".join(segments), "&".join(query), ""))
 
         initial = next(
             (r for r in capture.responses if r["method"] == "GET" and r["url"] == capture.start_url), None
@@ -69,6 +122,18 @@ class HTTPWorkflowLearner:
             sources[initial.get("request_id")] = "page"
 
         def bind(value, key, request):
+            edge = next(
+                (
+                    e
+                    for e in analysis.dependencies
+                    if e.child == request.get("id")
+                    and e.target_path.rsplit(".", 1)[-1] == key
+                    and e.target_kind in {"payload", "header"}
+                ),
+                None,
+            )
+            if edge:
+                return dependency_binding(edge)
             if not isinstance(value, str):
                 if (
                     isinstance(value, (int, float))
@@ -90,9 +155,15 @@ class HTTPWorkflowLearner:
                                 "topic_id",
                             }:
                                 return extraction(source, "json_path", path=path)
+                if re.search(r"(^id$|_id$)", key) and key not in {"forum_id", "category_id"}:
+                    diagnostics.append("UNKNOWN_DYNAMIC")
+                    return "{{operator_review_required}}"
                 return value
             # Rich text is templated without losing escaping of the next task's body.
             body = capture.body_marker
+            escaped_title = html.escape(capture.title_marker, quote=False)
+            if escaped_title != capture.title_marker and escaped_title in value:
+                return value.replace(escaped_title, "{{title|html}}")
             escaped_body = html.escape(body, quote=False)
             if (
                 escaped_body
@@ -112,10 +183,22 @@ class HTTPWorkflowLearner:
                 diagnostics.append("CONTENT_NOT_MAPPED")
                 return "{{operator_review_required}}"
             sensitive = bool(SENSITIVE.search(key))
+            cookie = cookie_name(value)
+            if cookie and sensitive and value:
+                return extraction("page", "cookie", attribute=cookie)
             # Sources must precede the consuming write, including both GET and earlier JSON responses.
-            for response in capture.responses:
+            for response in evidence_responses:
                 if response.get("time", 0) > request.get("time", float("inf")):
                     continue
+                for header, previous in response.get("headers", {}).items():
+                    if (
+                        header.lower() in {"x-csrf-token", "x-xsrf-token", "x-draft-id", "etag"}
+                        and str(previous) == value
+                        and sensitive
+                    ):
+                        source = ensure_source(response)
+                        if source:
+                            return extraction(source, "header", attribute=header.lower())
                 if response["method"] == "GET":
                     soup = BeautifulSoup(response["body"], "html.parser")
                     node = next(
@@ -173,8 +256,11 @@ class HTTPWorkflowLearner:
                     return extraction(sources[response_id], "json_path", path=path)
             if sensitive or (
                 re.search(r"(^id$|_id$|nonce|hash|checksum)", key, re.I)
-                and re.fullmatch(r"[a-fA-F0-9-]{16,}", value)
+                and key not in {"forum_id", "category_id"}
             ):
+                diagnostics.append("UNKNOWN_DYNAMIC")
+                return "{{operator_review_required}}"
+            if re.fullmatch(r"[A-Za-z0-9_+/=-]{24,}", value):
                 diagnostics.append("UNKNOWN_DYNAMIC")
                 return "{{operator_review_required}}"
             return value
@@ -196,6 +282,28 @@ class HTTPWorkflowLearner:
                 bindings[identity] = var
             return "{{" + bindings[identity] + "}}"
 
+        def ensure_source(response):
+            response_id = response.get("request_id")
+            if response_id not in sources:
+                if response["method"] != "GET":
+                    return None
+                name = f"source_{len(sources)}"
+                steps.append({"id": name, "op": "request", "url": endpoint(response["url"]), "save_as": name})
+                sources[response_id] = name
+            return sources[response_id]
+
+        def dependency_binding(edge):
+            source = sources.get(edge.parent)
+            if not source:
+                diagnostics.append("UNKNOWN_DYNAMIC")
+                return "{{operator_review_required}}"
+            kwargs = (
+                {"path": edge.source_path}
+                if edge.source_kind == "json_path"
+                else {"attribute": edge.source_path}
+            )
+            return extraction(source, edge.source_kind, **kwargs)
+
         def mapping(payload, request, key=""):
             if isinstance(payload, dict):
                 return {k: mapping(v, request, k) for k, v in payload.items()}
@@ -204,6 +312,10 @@ class HTTPWorkflowLearner:
             return bind(payload, key, request)
 
         if analysis.linked:
+            if initial and BeautifulSoup(initial["body"], "html.parser").select_one(
+                'input[name="creation_time"]'
+            ):
+                steps.append({"id": "respect_form_time", "op": "wait", "seconds": 1.1})
             for i, request in enumerate(analysis.writes):
                 payload = mapping(request["payload"], request)
                 headers = {
@@ -216,7 +328,7 @@ class HTTPWorkflowLearner:
                     {
                         "id": name,
                         "op": "request",
-                        "url": endpoint(request["url"]),
+                        "url": endpoint(request["url"], request),
                         "method": request["method"],
                         request["encoding"]: payload,
                         "headers": headers,
@@ -284,7 +396,7 @@ class HTTPWorkflowLearner:
         state = "HTTP_CANDIDATE" if not diagnostics and analysis.linked else "LEARNING_REQUIRED"
         site["recognition"] = {
             "state": state,
-            "recognizer": "semantic-2.0",
+            "recognizer": "relational-2.1",
             "rule_id": rule_id,
             "browser_verified": capture.browser_verified,
             "http_verified": False,

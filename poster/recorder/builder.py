@@ -15,7 +15,8 @@ from ..project import mark_ready
 from .capture import Capture
 
 SENSITIVE = re.compile(
-    r"csrf|token|nonce|password|passwd|pwd|secret|auth|api[_-]?key|credential", re.IGNORECASE
+    r"csrf|token|nonce|password|passwd|pwd|secret|auth|api[_-]?key|credential|^sid$|^session_?id$",
+    re.IGNORECASE,
 )
 
 
