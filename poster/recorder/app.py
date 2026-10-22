@@ -2,6 +2,7 @@
 
 import asyncio
 import queue
+import sys
 import threading
 import tkinter as tk
 from pathlib import Path
@@ -30,9 +31,28 @@ class App:
             ("CSS подтверждения", self.selector),
         ):
             ttk.Label(root, text=label).pack(anchor="w", padx=12)
-            ttk.Entry(root, textvariable=var, width=85).pack(fill="x", padx=12, pady=4)
+            entry = ttk.Entry(root, textvariable=var, width=85)
+            entry.pack(fill="x", padx=12, pady=4)
+            self._enable_clipboard(entry)
         self.log = tk.Text(root, width=90, height=13, state="disabled")
         self.log.pack(padx=12, pady=8)
+        self._enable_clipboard(self.log)
+        self.markers = {}
+        marker_buttons = ttk.Frame(root)
+        marker_buttons.pack(padx=12, pady=4)
+        self.marker_buttons = {}
+        for key, label in (
+            ("title", "Копировать заголовок"),
+            ("body", "Копировать текст"),
+        ):
+            button = ttk.Button(
+                marker_buttons,
+                text=label,
+                state="disabled",
+                command=lambda name=key: self.copy_marker(name),
+            )
+            button.pack(side="left", padx=3)
+            self.marker_buttons[key] = button
         buttons = ttk.Frame(root)
         buttons.pack(padx=12, pady=8)
         for text, command in (
@@ -51,6 +71,121 @@ class App:
         self.root.after(100, self.pump)
         root.protocol("WM_DELETE_WINDOW", self.close)
 
+    def _enable_clipboard(self, widget):
+        """Keyboard and right-click editing, including with a Russian keyboard layout."""
+        widget.bind("<Control-KeyPress>", self._shortcut, add="+")
+        menu = tk.Menu(widget, tearoff=0)
+        for caption, action in (
+            ("Вырезать", "cut"),
+            ("Копировать", "copy"),
+            ("Вставить", "paste"),
+            ("Выделить всё", "all"),
+        ):
+            menu.add_command(
+                label=caption,
+                command=lambda a=action, w=widget: self._edit(w, a),
+            )
+        widget.bind(
+            "<Button-3>",
+            lambda event, m=menu: self._popup(event, m),
+            add="+",
+        )
+
+    @staticmethod
+    def _popup(event, menu):
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+        return "break"
+
+    def _shortcut(self, event):
+        key = event.keysym.lower()
+        actions = {
+            "c": "copy", "v": "paste", "x": "cut", "a": "all",
+            "cyrillic_es": "copy", "cyrillic_em": "paste",
+            "cyrillic_che": "cut", "cyrillic_ef": "all",
+        }
+        action = actions.get(key)
+        if sys.platform == "win32":
+            # Windows virtual-key codes identify the physical C/V/X/A keys.
+            action = {67: "copy", 86: "paste", 88: "cut", 65: "all"}.get(
+                event.keycode, action
+            )
+        if action:
+            return self._edit(event.widget, action)
+        return None
+
+    @staticmethod
+    def _selection(widget):
+        if isinstance(widget, (ttk.Entry, tk.Entry)):
+            if widget.selection_present():
+                return widget.get()[widget.index("sel.first"):widget.index("sel.last")]
+        elif isinstance(widget, tk.Text) and widget.tag_ranges("sel"):
+            return widget.get("sel.first", "sel.last")
+        return None
+
+    @staticmethod
+    def _editable(widget):
+        return str(widget.cget("state")) == "normal"
+
+    def _edit(self, widget, action):
+        entry = isinstance(widget, (ttk.Entry, tk.Entry))
+        text_widget = isinstance(widget, tk.Text)
+        if action == "all":
+            if entry:
+                widget.selection_range(0, "end")
+                widget.icursor("end")
+            elif text_widget:
+                widget.tag_add("sel", "1.0", "end-1c")
+            return "break"
+        if action in {"copy", "cut"}:
+            selected = self._selection(widget)
+            if selected is None:
+                return "break"
+            self.root.clipboard_clear()
+            self.root.clipboard_append(selected)
+            self.root.update_idletasks()
+            if action == "copy" or not self._editable(widget):
+                return "break"
+            if entry or text_widget:
+                widget.delete("sel.first", "sel.last")
+            return "break"
+        if action == "paste":
+            if not self._editable(widget):
+                return "break"
+            try:
+                value = self.root.clipboard_get()
+            except tk.TclError:
+                return "break"
+            if entry:
+                selected = widget.selection_present()
+                index = widget.index("sel.first") if selected else widget.index("insert")
+                if selected:
+                    widget.delete("sel.first", "sel.last")
+                widget.insert(index, value)
+            elif text_widget:
+                selected = bool(widget.tag_ranges("sel"))
+                index = widget.index("sel.first" if selected else "insert")
+                if selected:
+                    widget.delete("sel.first", "sel.last")
+                widget.insert(index, value)
+            return "break"
+        return None
+
+    def copy_marker(self, name):
+        marker = self.markers.get(name)
+        if marker:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(marker)
+            self.root.update_idletasks()
+            self.write("Маркер скопирован: " + name)
+
+    def _set_markers(self, title=None, body=None):
+        self.markers = {"title": title, "body": body} if title and body else {}
+        for name, button in self.marker_buttons.items():
+            button.configure(state="normal" if name in self.markers else "disabled")
+
     def write(self, text):
         self.log.configure(state="normal")
         self.log.insert("end", text + "\n")
@@ -60,7 +195,9 @@ class App:
     def pump(self):
         while not self.messages.empty():
             kind, value = self.messages.get_nowait()
-            if kind == "capture":
+            if kind == "markers":
+                self._set_markers(*value)
+            elif kind == "capture":
                 self.capture, self.recording = value, False
                 self.write("Запись остановлена. Нажмите «Анализ».")
             elif kind == "error":
@@ -74,6 +211,7 @@ class App:
         if self.recording:
             return
         self.capture = self.previous = self.build = None
+        self._set_markers()
         self.existing_site = None
         name = simpledialog.askstring("Новый проект", "ID (буквы, цифры, дефис):")
         if name:
@@ -104,6 +242,7 @@ class App:
             return
         self.previous = self.capture
         self.build = None
+        self._set_markers()
         self.recording = True
         url = self.url.get()
         profile = Path(".poster/profiles") / self.project_id.get()
@@ -113,13 +252,14 @@ class App:
             recorder = Recorder(url, profile)
 
             def ready(cap):
+                self.messages.put(("markers", (cap.title_marker, cap.body_marker)))
                 self.messages.put(
                     (
                         "text",
                         f"Маркеры: {cap.title_marker} / {cap.body_marker}\n"
-                        "Без буфера обмена: в браузере выберите поле заголовка и нажмите Ctrl+Alt+1; "
-                        "выберите поле сообщения и нажмите Ctrl+Alt+2.\n"
-                        "Проверьте оба поля перед отправкой. Затем нажмите Стоп.",
+                        "Кнопки копирования находятся под журналом Recorder. "
+                        "Вставляйте маркеры в форму через Ctrl+V. "
+                        "Проверьте оба поля, затем отправьте форму и нажмите Стоп.",
                     )
                 )
 
