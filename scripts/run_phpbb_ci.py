@@ -40,4 +40,13 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exc:
+        # This harness uses controlled loopback data and fixed public download URLs.
+        # Surface bootstrap failures as a check annotation even when job logs are unavailable.
+        print(
+            "::error::phpBB integration: " + type(exc).__name__ + ": " + str(exc).replace("\n", "%0A"),
+            flush=True,
+        )
+        raise
