@@ -1,0 +1,16 @@
+# Диагностика
+
+- `HTTP_READY` отсутствует: откройте analysis.json. Проверьте оба маркера, URL-encoded submit, совпадение формы и запроса, GET-источник hidden-полей и CSS успеха. Для сложного сайта ручной YAML допустим; автоматический builder не обещает универсальность.
+- «Operation failed (ValidationError)»: проверьте schema_version, unknown fields, id и опечатки по schemas/ и docs/project_format.md. Неверный workflow не исполняется.
+- `READY checksum mismatch`: файл изменён после публикации. Завершите изменение и выполните `poster ready <folder>` последним. При выгрузке в Drive старый READY обновляйте после файлов.
+- `AUTH_EXPIRED`: сервер вернул 401/403 (это также может означать CSRF/права). Запишите новую сессию/проверьте извлечение CSRF. Нельзя считать cookies вечными.
+- `REVIEW_REQUIRED` с ошибкой ключа: текущий POSTER_SESSION_KEY должен соответствовать session.enc. Не передавайте ключ в чат/репозиторий. Нет ключа — новая запись.
+- `UNKNOWN`: отправка могла произойти, подтверждение не получено. Сначала проверьте целевой сайт либо задайте read-only recovery. Смена dedup key ради автоматического повторения создаёт риск дубля.
+- HTTP 200, но нет `[data-result-id]`/другого подтверждения: это не успешный результат. Проверьте страницу, признаки успеха и поля, не заменяйте verify проверкой кода ответа.
+- Chromium не установлен: `python -m playwright install chromium`; в Linux для библиотек `python -m playwright install --with-deps chromium`. Можно задать POSTER_CHROMIUM. Tk UI нужен desktop/display; в cloud пользуйтесь demo.
+- Export не выполнен: папка должна быть пустой; сессия требует POSTER_SESSION_KEY. Экспорт не перезаписывает имеющиеся файлы.
+- Drive sync failed: проверьте существование папки/её ID, Google Drive API, scope, локальный файл Google credentials, права на папку и разрешённые HTTPS-домены. Наличие cache не доказывает доступ к облаку. RAW authentication exceptions не печатаются во избежание утечки.
+- Второй Engine получает Timeout: уже работает экземпляр с той же локальной БД. Не удаляйте lock для обхода активного процесса; остановите первый.
+- После demo URL недоступны: серверы конечные и останавливаются. Повторите demo в новую папку или держите `poster fixtures` запущенным и запишите новый проект под его адрес.
+
+`poster report --db ...` показывает состояния/попытки/результаты. Детали HTTP хранятся в replay_artifacts без тел, cookies и auth-заголовков. Публичные логи не содержат секретов; база, browser profiles и encrypted sessions всё равно требуют аккуратного хранения. Не включайте debug-логирование сторонних HTTP-библиотек с credential URL.

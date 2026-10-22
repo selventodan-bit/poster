@@ -1,0 +1,32 @@
+schema_version: 1
+steps:
+  - {id: open_form, op: request, url: /csrf/new, save_as: page}
+  - id: csrf
+    op: extract
+    source: page
+    kind: css_attribute
+    selector: 'input[name="csrf_token"]'
+    attribute: value
+    save_as: csrf
+  - id: submit
+    op: request
+    method: POST
+    url: /csrf/posts
+    form:
+      subject: '{{title}}'
+      message: '{{body}}'
+      csrf_token: '{{csrf}}'
+    save_as: result
+  - id: title_check
+    op: verify
+    source: result
+    kind: css_text
+    selector: '[data-result-id] h1'
+    expected: '{{title}}'
+    result_url: true
+  - id: body_check
+    op: verify
+    source: result
+    kind: css_text
+    selector: '[data-result-id] .body'
+    expected: '{{body}}'

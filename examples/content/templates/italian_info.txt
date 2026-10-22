@@ -1,0 +1,12 @@
+{{intro}}
+
+{{description}}
+
+Informazioni correlate:
+{{keywords:3}}
+
+Località:
+{{cities:5}}
+[[optional:0.5]]
+Testo dimostrativo, non una consulenza medica.
+[[/optional]]

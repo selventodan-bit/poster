@@ -1,0 +1,9 @@
+{{intro}}
+
+{{description}}
+
+Informations associées :
+{{keywords:3}}
+
+Villes :
+{{cities:5}}

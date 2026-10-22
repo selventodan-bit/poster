@@ -1,0 +1,4 @@
+{{product.name}} informazioni
+{{product.name}} foglio illustrativo
+{{product.name}} precauzioni
+{{product.name}} principio attivo

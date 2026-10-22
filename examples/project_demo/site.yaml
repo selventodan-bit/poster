@@ -1,0 +1,8 @@
+schema_version: 1
+id: project_demo
+base_url: http://127.0.0.1:8765
+allowed_hosts: [127.0.0.1]
+mode: http
+status: HTTP_READY
+enabled: true
+workflow: workflow.yaml
