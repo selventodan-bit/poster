@@ -40,7 +40,9 @@ def setup(directory: Path):
     config = yaml.safe_load((root / "docs/install-config.sample.yml").read_text())
     config["installer"]["admin"].update(
         # phpBB 3.3 accepts at most 30 characters (20 random bytes produce 27).
-        name="admin", password=secrets.token_urlsafe(20), email="local-test@example.invalid"
+        name="admin",
+        password=secrets.token_urlsafe(20),
+        email="local-test@example.invalid",
     )
     config["installer"]["database"]["dbhost"] = str(directory / "phpbb.sqlite3")
     config["installer"]["server"].update(server_name="127.0.0.1", server_port=8879)
