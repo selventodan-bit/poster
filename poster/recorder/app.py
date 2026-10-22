@@ -119,7 +119,7 @@ class App:
     def _selection(widget):
         if isinstance(widget, (ttk.Entry, tk.Entry)):
             if widget.selection_present():
-                return widget.get()[widget.index("sel.first"):widget.index("sel.last")]
+                return widget.get()[widget.index("sel.first") : widget.index("sel.last")]
         elif isinstance(widget, tk.Text) and widget.tag_ranges("sel"):
             return widget.get("sel.first", "sel.last")
         return None
