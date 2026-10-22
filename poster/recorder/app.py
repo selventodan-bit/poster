@@ -85,11 +85,7 @@ class App:
                 label=caption,
                 command=lambda a=action, w=widget: self._edit(w, a),
             )
-        widget.bind(
-            "<Button-3>",
-            lambda event, m=menu: self._popup(event, m),
-            add="+",
-        )
+        widget.bind("<Button-3>", lambda event, m=menu: self._popup(event, m), add="+")
 
     @staticmethod
     def _popup(event, menu):
@@ -102,16 +98,19 @@ class App:
     def _shortcut(self, event):
         key = event.keysym.lower()
         actions = {
-            "c": "copy", "v": "paste", "x": "cut", "a": "all",
-            "cyrillic_es": "copy", "cyrillic_em": "paste",
-            "cyrillic_che": "cut", "cyrillic_ef": "all",
+            "c": "copy",
+            "v": "paste",
+            "x": "cut",
+            "a": "all",
+            "cyrillic_es": "copy",
+            "cyrillic_em": "paste",
+            "cyrillic_che": "cut",
+            "cyrillic_ef": "all",
         }
         action = actions.get(key)
         if sys.platform == "win32":
             # Windows virtual-key codes identify the physical C/V/X/A keys.
-            action = {67: "copy", 86: "paste", 88: "cut", 65: "all"}.get(
-                event.keycode, action
-            )
+            action = {67: "copy", 86: "paste", 88: "cut", 65: "all"}.get(event.keycode, action)
         if action:
             return self._edit(event.widget, action)
         return None
