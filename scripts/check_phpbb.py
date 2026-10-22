@@ -30,7 +30,13 @@ async def check(base, install_config, output):
     try:
         await session.start()
         await session.recognize()
-        assert session.result.auth_required
+        if not session.result.auth_required:
+            raise AssertionError(
+                "Controlled phpBB login form missing. Title: "
+                + await session.page.title()
+                + "; page: "
+                + (await session.page.locator("body").inner_text())[:2000]
+            )
         await session.authorize_login(confirmed=True)
         await asyncio.sleep(1.1)
         await session.page.locator("#username").fill(admin["name"])
