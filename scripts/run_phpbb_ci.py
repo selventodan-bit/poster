@@ -5,8 +5,7 @@ import json
 import subprocess
 import time
 from pathlib import Path
-from urllib.error import URLError
-from urllib.request import urlopen
+import httpx
 
 from check_phpbb import check
 from setup_phpbb import setup
@@ -22,13 +21,14 @@ def main():
         try:
             for _ in range(30):
                 try:
-                    with urlopen("http://127.0.0.1:8879/index.php", timeout=1) as response:
-                        if response.status == 200:
+                    with httpx.Client(trust_env=False, timeout=1) as client:
+                        response = client.get("http://127.0.0.1:8879/index.php")
+                        if response.status_code == 200:
                             break
-                except URLError:
+                except httpx.HTTPError:
                     time.sleep(0.2)
             else:
-                raise RuntimeError("phpBB did not start")
+                raise RuntimeError("phpBB did not start: " + (directory / "server.log").read_text()[-4000:])
             report = asyncio.run(
                 check("http://127.0.0.1:8879", directory / "install.yml", directory / "result")
             )
