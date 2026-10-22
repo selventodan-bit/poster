@@ -63,7 +63,11 @@ IDENTITY = re.compile(r"(^id$|_id$|uuid|nonce|token|csrf|revision|version)", re.
 
 
 def identity_key(key):
-    return bool(IDENTITY.search(re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", key).replace("-", "_")))
+    normalized = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", key).replace("-", "_").lower()
+    # Shared forum/user context is not a causal draft/publication identity.
+    if normalized in {"forum_id", "category_id", "user_id", "board_id", "site_id", "account_id"}:
+        return False
+    return bool(IDENTITY.search(normalized))
 
 
 def rejected(response):
