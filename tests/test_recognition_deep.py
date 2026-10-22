@@ -299,10 +299,13 @@ async def test_response_keeps_original_action_after_async_delay(tmp_path):
     context.handlers["response"](res)
     await asyncio.sleep(0)
     recorder.capture.action_id = "next-action"
+    other = Req()
+    context.handlers["request"](other)
     event.set()
     await asyncio.gather(*recorder.pending)
     assert recorder.capture.responses[0]["action_id"] == "original"
     assert recorder.capture.responses[0]["request_id"] == "r0"
+    assert recorder.request_records[req]["id"] == "r0" and recorder.request_records[other]["id"] == "r1"
 
 
 def test_legacy_and_current_keys_remain_usable_without_overwrite(tmp_path, monkeypatch):

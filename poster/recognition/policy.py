@@ -1,6 +1,7 @@
 """Browser resource and mutation policies. Consent grants a bounded content-linked transaction."""
 
 import hashlib
+import json
 import re
 from urllib.parse import urlsplit
 
@@ -17,7 +18,9 @@ def origin(url):
 def dangerous_url(url):
     return bool(
         re.search(
-            r"(?:[/=?&_-])(?:delete|logout|unsubscribe|vote|remove|save-settings)(?:[/=?&_-]|$)", url, re.I
+            r"(?:[/=?&_-])(?:delete|logout|unsubscribe|vote|remove|settings|preferences|profile)(?:[/=?&_-]|$)",
+            url,
+            re.I,
         )
     )
 
@@ -40,12 +43,14 @@ class SubmissionScope:
         if len(self.sent) >= self.max_writes:
             return False
         raw = request.post_data_buffer or b""
-        identity = hashlib.sha256(request.method.encode() + request.url.encode() + b"\0" + raw).hexdigest()
-        if identity in self.sent:
-            return False
         try:
             _, payload = decode({"content_type": request.headers.get("content-type", ""), "body": raw})
         except (ValueError, UnicodeError, LookupError):
+            return False
+        identity = hashlib.sha256(
+            (request.method + request.url + "\0" + json.dumps(payload, sort_keys=True)).encode()
+        ).hexdigest()
+        if identity in self.sent:
             return False
         item = {"payload": payload, "url": request.url, "headers": request.headers}
         from .network import leaves

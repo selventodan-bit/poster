@@ -58,6 +58,9 @@ def test_separate_requests_need_correlation_and_dependency_not_just_time():
     assert not result.linked and "UNLINKED_REQUESTS" in result.diagnostics
     cap.responses = [{"request_id": "a", "time": 2, "status": 200, "body": '{"draft":{"id":42}}'}]
     assert NetworkAnalyzer().analyze(cap).linked
+    cap.requests[1]["body"] = json.dumps({"message": "Body", "draftId": 42})
+    cap.responses[0]["body"] = '{"draftId":42}'
+    assert NetworkAnalyzer().analyze(cap).linked
     cap.requests[1]["action_id"] = "another-action"
     result = NetworkAnalyzer().analyze(cap)
     assert not result.linked

@@ -62,11 +62,15 @@ def decode(request):
 IDENTITY = re.compile(r"(^id$|_id$|uuid|nonce|token|csrf|revision|version)", re.I)
 
 
+def identity_key(key):
+    return bool(IDENTITY.search(re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", key).replace("-", "_")))
+
+
 def response_values(response):
     """Only identity/token-like slots form a dependency, not arbitrary coincident strings."""
     try:
         for path, value in leaves(json.loads(response.get("body", ""))):
-            if IDENTITY.search(path.rsplit(".", 1)[-1]) and value is not None and not isinstance(value, bool):
+            if identity_key(path.rsplit(".", 1)[-1]) and value is not None and not isinstance(value, bool):
                 yield "json_path", path, value
     except (ValueError, TypeError):
         pass
@@ -77,17 +81,17 @@ def response_values(response):
 
 def request_values(request):
     for path, value in leaves(request.get("payload", {})):
-        if IDENTITY.search(path.rsplit(".", 1)[-1]):
+        if identity_key(path.rsplit(".", 1)[-1]):
             yield "payload", path, value
     parsed = urlsplit(request["url"])
     for key, value in parse_qsl(parsed.query, keep_blank_values=True):
-        if IDENTITY.search(key):
+        if identity_key(key):
             yield "query", key, value
     for i, segment in enumerate(parsed.path.split("/")):
         if segment:
             yield "path", str(i), unquote(segment)
     for key, value in request.get("headers", {}).items():
-        if IDENTITY.search(key):
+        if identity_key(key):
             yield "header", key, value
 
 

@@ -15,6 +15,7 @@
 - `DISPLAY=<Xvfb> python -m pytest -q`: **140 passed**, 151.59 секунды в полном прогоне. Базовые 65 тестов сохранены.
 - Реальный Tk: создание окна, состояния кнопок, выбор папки, copy/cut/paste/select-all с русскими keysyms и корректное закрытие worker loop. Это Linux Xvfb, не заявление о ручной проверке Windows.
 - `python -m poster benchmark-recognition --output .poster/benchmark-release`: завершён полный воспроизводимый набор.
+- Native Windows CI: запуск Recorder, clipboard и protocol smoke прошли (8 тестов); это автоматический smoke, а не полный browser → HTTP на Windows.
 - Настоящий локальный phpBB 3.3.15: login, обнаружение движка/формы, browser publication, закрытие Chromium, HTTP publication, экспорт HTTP_VERIFIED/READY — успешно.
 - Colab/Molab notebooks исполнены локально: HTTP + fresh CSRF + генератор + SQLite backup/restore — SUCCEEDED в обоих. Hosted runtimes и live Drive не использовались.
 

@@ -68,6 +68,7 @@ class Recorder:
         self.capture = Capture(url)
         self.profile = profile
         self.pending = set()
+        self.request_records = {}
 
     def task(self, coro):
         task = asyncio.create_task(coro)
@@ -120,6 +121,7 @@ class Recorder:
                         },
                     }
                 )
+                self.request_records[req] = self.capture.requests[-1]
 
         async def response(res):
             received_at = time.monotonic()

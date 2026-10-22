@@ -24,4 +24,4 @@ CSS, cookies, YAML и служебные маркеры вводить не ну
 .\.venv\Scripts\python.exe -m poster benchmark-recognition --output .poster\benchmark-windows
 ```
 
-Отчёт появится в `.poster\benchmark-windows\report.json`. На cloud выполнены браузерные и Tk-проверки в Linux; нативный запуск Windows остаётся отдельной платформенной проверкой.
+Отчёт появится в `.poster\benchmark-windows\report.json`. Браузерные и Tk-проверки выполнены в Linux; native Windows CI также проверяет запуск Recorder и буфер обмена. Полный browser → HTTP на Windows и пользовательские настройки Windows остаются отдельной платформенной проверкой.

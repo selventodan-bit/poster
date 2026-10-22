@@ -132,30 +132,14 @@ class RecognitionSession:
                 if self.recorder.pending:
                     await asyncio.wait(list(self.recorder.pending), timeout=0.25)
                 if not self.scope or not self.scope.allows(request):
-                    recorded = next(
-                        (
-                            r
-                            for r in reversed(self.recorder.capture.requests)
-                            if r["url"] == request.url and r["method"] == request.method
-                        ),
-                        None,
-                    )
+                    recorded = self.recorder.request_records.get(request)
                     if recorded:
                         recorded["blocked"] = True
                     await route.abort()
                     self.result.diagnostics.append("WRITE_SCOPE")
                     return
                 # Recorder's request event precedes routing; bind only the admitted request.
-                recorded = next(
-                    (
-                        r
-                        for r in reversed(self.recorder.capture.requests)
-                        if r["url"] == request.url
-                        and r["method"] == request.method
-                        and r.get("action_id") == self.recorder.capture.action_id
-                    ),
-                    None,
-                )
+                recorded = self.recorder.request_records.get(request)
                 if recorded:
                     self.scope.allowed_ids.add(recorded["id"])
             await route.continue_()
