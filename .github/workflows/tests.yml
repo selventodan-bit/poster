@@ -2,7 +2,7 @@ name: tests
 on: [push, pull_request]
 jobs:
   python:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       matrix:
         python: ['3.11', '3.13']
@@ -19,7 +19,7 @@ jobs:
       - run: sudo apt-get install -y xvfb libtk8.6
       - run: xvfb-run -a uv run --no-sync python -m pytest -q
   phpbb:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
