@@ -55,6 +55,14 @@ def setup(directory: Path):
             stderr=subprocess.STDOUT,
             check=True,
         )
+    config_file = root / "config.php"
+    if not config_file.exists() or "PHPBB_INSTALLED" not in config_file.read_text():
+        detail = (
+            (directory / "install.log")
+            .read_text()[-4000:]
+            .replace(config["installer"]["admin"]["password"], "[redacted]")
+        )
+        raise RuntimeError("phpBB installer did not create an installed configuration: " + detail)
     shutil.move(root / "install", directory / "installer-completed")
     (directory / "installation.json").write_text(
         json.dumps({"commit": COMMIT, "version": "3.3.15", "root": str(root)})
