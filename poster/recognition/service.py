@@ -22,7 +22,7 @@ from .editors import adapter_for
 from .navigation import NavigationDiscovery
 from .policy import ResourcePolicy, SubmissionScope, dangerous_url, origin
 from .learner import HTTPWorkflowLearner
-from .network import NetworkAnalyzer
+from .network import NetworkAnalyzer, rejected
 from .network import leaves
 from .types import FieldRef, FormCandidate, LearningState, Recognition
 
@@ -316,13 +316,13 @@ class RecognitionSession:
         capture = self.recorder.capture
         while asyncio.get_running_loop().time() < deadline:
             await self.session_state()
-            rejected = any(
+            explicitly_rejected = any(
                 r.get("action_id") == capture.action_id
                 and r["method"] in {"POST", "PUT", "PATCH"}
-                and (r["status"] >= 400 or '"success":false' in r["body"].replace(" ", "").lower())
+                and rejected(r)
                 for r in capture.responses
             )
-            candidate = None if rejected else await self.find_confirmation()
+            candidate = None if explicitly_rejected else await self.find_confirmation()
             if candidate:
                 capture.result_url, capture.confirmation = candidate
                 capture.browser_verified = True
@@ -370,11 +370,7 @@ class RecognitionSession:
                 else:
                     self.result.outcome = "workflow_not_built"
                 return
-            failed = any(
-                r["status"] >= 400 or '"success":false' in r["body"].replace(" ", "").lower()
-                for r in capture.responses
-                if r.get("action_id") == capture.action_id
-            )
+            failed = any(rejected(r) for r in capture.responses if r.get("action_id") == capture.action_id)
             if failed:
                 self.state(LearningState.FAILED)
                 self.result.diagnostics.append("PUBLICATION_REJECTED")

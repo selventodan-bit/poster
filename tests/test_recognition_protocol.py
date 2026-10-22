@@ -7,7 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from poster.recognition.knowledge import Rule
-from poster.recognition.network import NetworkAnalyzer, decode
+from poster.recognition.network import NetworkAnalyzer, decode, rejected
 from poster.recorder.capture import Capture
 from poster.recorder.preferences import Preferences
 from poster.runtime import render
@@ -67,6 +67,9 @@ def test_separate_requests_need_correlation_and_dependency_not_just_time():
 
 
 def test_binary_multipart_and_unknown_encodings_are_not_silently_accepted():
+    assert rejected({"status": 200, "body": '{"success":\n false,"url":"/old-post"}'})
+    assert rejected({"status": 200, "body": '{"errors":["denied"]}'})
+    assert not rejected({"status": 200, "body": '{"success":true}'})
     raw = '--b\r\nContent-Disposition: form-data; name="upload"; filename="a.txt"\r\n\r\nbytes\r\n--b--\r\n'
     with pytest.raises(ValueError):
         decode({"content_type": "multipart/form-data; boundary=b", "body": raw})

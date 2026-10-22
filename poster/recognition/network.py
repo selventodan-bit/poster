@@ -66,6 +66,16 @@ def identity_key(key):
     return bool(IDENTITY.search(re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", key).replace("-", "_")))
 
 
+def rejected(response):
+    if response["status"] >= 400:
+        return True
+    try:
+        payload = json.loads(response.get("body", ""))
+    except (ValueError, TypeError):
+        return False
+    return isinstance(payload, dict) and (payload.get("success") is False or bool(payload.get("errors")))
+
+
 def response_values(response):
     """Only identity/token-like slots form a dependency, not arbitrary coincident strings."""
     try:
