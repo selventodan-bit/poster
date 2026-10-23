@@ -4,6 +4,7 @@ import html
 import json
 import secrets
 from contextlib import contextmanager
+from http.cookies import SimpleCookie
 import threading
 from urllib.parse import parse_qs, urlsplit
 
@@ -14,6 +15,18 @@ class ReadinessHandler(Handler):
     def do_GET(self):
         path = urlsplit(self.path).path
         if path.startswith("/compose/"):
+            cookies = SimpleCookie(self.headers.get("Cookie", ""))
+            sid = cookies["poster_auth"].value if "poster_auth" in cookies else ""
+            headers = {}
+            with self.server.lock:
+                if self.server.authorized_sid is None:
+                    self.server.authorized_sid = secrets.token_hex(24)
+                    headers["Set-Cookie"] = (
+                        f"poster_auth={self.server.authorized_sid}; HttpOnly; SameSite=Lax; Path=/"
+                    )
+                elif sid != self.server.authorized_sid:
+                    self.reply(401, "Authorization required")
+                    return
             case = path.rsplit("/", 1)[-1]
             kind = case if case in {"reply", "comment"} else "topic"
             title = '<input name="x47" required>' if kind == "topic" else ""
@@ -29,7 +42,7 @@ class ReadinessHandler(Handler):
                 "format-only",
             }
             token = secrets.token_hex(24)
-            self.server.tokens[token] = True
+            self.server.tokens[token] = self.server.authorized_sid
             # The opaque names/classes and unknown language are independent of the old generator.
             button = "<button>ހުށަހެޅުން</button>"
             if js:
@@ -104,9 +117,15 @@ class ReadinessHandler(Handler):
             if not js:
                 script = ""
             self.reply(
-                200, '<!doctype html><meta charset="utf-8">' + markup + "<script>" + script + "</script>"
+                200,
+                '<!doctype html><meta charset="utf-8">' + markup + "<script>" + script + "</script>",
+                headers,
             )
         elif path.startswith("/entry/"):
+            cookies = SimpleCookie(self.headers.get("Cookie", ""))
+            if "poster_auth" not in cookies or cookies["poster_auth"].value != self.server.authorized_sid:
+                self.reply(401, "Authorization required")
+                return
             item = self.server.posts.get(path.rsplit("/", 1)[-1])
             if not item:
                 self.reply(404)
@@ -130,7 +149,14 @@ class ReadinessHandler(Handler):
         self.server.writes.append(path)
         assert not self.headers.get("x-poster-interaction"), "Private attribution header leaked"
         token = values.get("csrf_token", [""])[0]
-        if path not in {"/store", "/store-js"} or token not in self.server.tokens:
+        cookies = SimpleCookie(self.headers.get("Cookie", ""))
+        if (
+            path not in {"/store", "/store-js"}
+            or token not in self.server.tokens
+            or "poster_auth" not in cookies
+            or cookies["poster_auth"].value != self.server.authorized_sid
+            or self.server.tokens.get(token) != self.server.authorized_sid
+        ):
             self.reply(403)
             return
         del self.server.tokens[token]
@@ -147,6 +173,7 @@ class ReadinessHandler(Handler):
 def serve_readiness():
     server = FixtureServer(("127.0.0.1", 0), ReadinessHandler)
     server.writes = []
+    server.authorized_sid = None
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:

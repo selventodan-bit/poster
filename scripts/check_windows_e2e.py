@@ -47,6 +47,8 @@ async def check(directory, case="topic"):
             project = directory / "saved project Кириллица"
             session.save(project)
             assert kb.rules()[0].http_successes == 1
+            assert server.authorized_sid not in (project / "workflow.yaml").read_text(encoding="utf-8")
+            assert server.authorized_sid not in kb.rules()[0].model_dump_json()
         finally:
             await session.close()
             kb.close()
@@ -88,6 +90,7 @@ print(json.dumps({'status':r.status,'browser_imported':False}))
             "http": True,
             "runtime_new_process": True,
             "knowledge_restart": True,
+            "encrypted_authorization_reused": True,
             "writes": 3,
             "gui_e2e": False,
         }
