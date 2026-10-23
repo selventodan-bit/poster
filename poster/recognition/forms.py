@@ -15,9 +15,13 @@ SNAPSHOT_JS = r"""() => {
  for(const e of elements.filter(e=>e.matches('textarea,[contenteditable="true"],[role="textbox"]'))) {
    if(!roots.some(r=>r.contains(e))) {
      let root=e.closest('section,article,dialog,[role="dialog"],fieldset');
+     let fallback=null;
      if(!root) for(let p=e.parentElement,depth=0;p&&p!==document.body&&depth<6;p=p.parentElement,depth++) {
-       if(p.querySelector('button,[role="button"]')) {root=p;break;}
+       const buttons=[...p.querySelectorAll('button,[role="button"]')];
+       if(!fallback && buttons.some(b=>b.type==='submit'||(e.id&&(b.getAttribute('aria-controls')||'').split(' ').includes(e.id)))) fallback=p;
+       if(buttons.length&&p.querySelector('input[type="text"],input:not([type])')) {root=p;break;}
      }
+     root=root||fallback;
      root=root||e.parentElement;
      if(root&&!roots.includes(root)) roots.push(root);
    }

@@ -82,3 +82,15 @@ def test_launcher_install_failure_does_not_mark_environment_healthy(tmp_path, mo
     with pytest.raises(PermissionError):
         launcher.bootstrap(True)
     assert not (tmp_path / ".venv" / "poster-install.sha256").exists()
+
+
+def test_public_pytest_summary_excludes_traceback_and_secret_values(tmp_path, capsys):
+    source = tmp_path / "private.xml"
+    source.write_text(
+        '<testsuites><testsuite><testcase classname="checks" name="case"><failure>cookie=PRIVATE_TOKEN</failure></testcase></testsuite></testsuites>'
+    )
+    target = tmp_path / "public.json"
+    module("summarize_pytest").summarize(source, target)
+    report = json.loads(target.read_text())
+    assert report["tests"] == 1 and report["failures"][0]["test"] == "checks.case"
+    assert "PRIVATE_TOKEN" not in target.read_text() + capsys.readouterr().out

@@ -7,6 +7,7 @@ GUI initialization/clipboard are tested separately; this is a service E2E.
 import argparse
 import asyncio
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -71,7 +72,11 @@ print(json.dumps({'status':r.status,'browser_imported':False}))
         assert (
             len(server.posts) == 3
             and server.writes
-            == (["/store-js"] if case in {"ajax", "background", "synchronous", "listener"} else ["/store"])
+            == (
+                ["/store-js"]
+                if case in {"ajax", "background", "synchronous", "listener", "toolbar"}
+                else ["/store"]
+            )
             * 3
         ), server.writes
         assert all("<literal>" in p["body"] and "\n" in p["body"] for p in server.posts.values())
@@ -96,7 +101,10 @@ if __name__ == "__main__":
     parser.add_argument("--case", default="topic")
     args = parser.parse_args()
     try:
-        print(json.dumps(asyncio.run(check(args.output, args.case))))
+        report_json = json.dumps(asyncio.run(check(args.output, args.case)))
+        print(
+            ("::notice title=Windows E2E report::" if os.environ.get("GITHUB_ACTIONS") else "") + report_json
+        )
     except Exception as exc:
         locations = " > ".join(
             f"{Path(f.filename).name}:{f.lineno}:{f.name}"

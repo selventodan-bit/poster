@@ -1,0 +1,336 @@
+{
+  "execution": "Local development tree during this iteration; final commit is separately verified in Actions.",
+  "cms": [
+    {
+      "engine": "mybb",
+      "version": "1.8.41",
+      "source": "https://github.com/mybb/mybb",
+      "revision": "mybb_1841",
+      "archive_sha256": "48cc76e9e1146ea052756575991f43f51a634f125eea06d05ce9041b03eedeaa",
+      "installation": "controlled loopback Docker",
+      "language": "English",
+      "variant": "default",
+      "database": "SQLite",
+      "engine_detected": "mybb",
+      "editor": "native",
+      "editor_kind": "iframe:contenteditable",
+      "browser": true,
+      "chromium_closed_before_http": true,
+      "http": "SUCCEEDED",
+      "project_state": "HTTP_VERIFIED",
+      "reloaded_project": "SUCCEEDED",
+      "preflight": {},
+      "transfer": {
+        "applied": false,
+        "operations": 0,
+        "bindings": 0
+      },
+      "cold_candidate": "HTTP_CANDIDATE",
+      "cold_diagnostics": [],
+      "http_operations": [
+        {
+          "step": "open_form",
+          "method": "GET",
+          "status": 200,
+          "url": "http://127.0.0.1:18881/newthread.php"
+        },
+        {
+          "step": "write_0",
+          "method": "POST",
+          "status": 200,
+          "url": "http://127.0.0.1:18881/newthread.php"
+        },
+        {
+          "step": "read_result",
+          "method": "GET",
+          "status": 200,
+          "url": "http://127.0.0.1:18881/showthread.php"
+        }
+      ],
+      "result_url": "http://127.0.0.1:18881/showthread.php?tid=3",
+      "navigation_actions": 1
+    },
+    {
+      "engine": "mybb",
+      "version": "1.8.41",
+      "source": "https://github.com/mybb/mybb",
+      "revision": "mybb_1841",
+      "archive_sha256": "48cc76e9e1146ea052756575991f43f51a634f125eea06d05ce9041b03eedeaa",
+      "installation": "controlled loopback Docker",
+      "language": "English",
+      "variant": "token-source compatibility plugin",
+      "database": "SQLite",
+      "engine_detected": "mybb",
+      "editor": "native",
+      "editor_kind": "iframe:contenteditable",
+      "browser": true,
+      "chromium_closed_before_http": true,
+      "http": "SUCCEEDED",
+      "project_state": "HTTP_VERIFIED",
+      "reloaded_project": "SUCCEEDED",
+      "preflight": {
+        "applicable": true,
+        "reason": "local-form-bound",
+        "operations": 1,
+        "fresh_bindings": 2,
+        "writes": 0,
+        "http_verified": false
+      },
+      "transfer": {
+        "applicable": true,
+        "reason": "local-form-bound",
+        "operations": 1,
+        "fresh_bindings": 2,
+        "writes": 0,
+        "http_verified": false,
+        "applied": true,
+        "bindings": 2
+      },
+      "cold_candidate": "LEARNING_REQUIRED",
+      "cold_diagnostics": [
+        "UNKNOWN_DYNAMIC"
+      ],
+      "http_operations": [
+        {
+          "step": "open_form",
+          "method": "GET",
+          "status": 200,
+          "url": "http://127.0.0.1:18882/newthread.php"
+        },
+        {
+          "step": "write_0",
+          "method": "POST",
+          "status": 200,
+          "url": "http://127.0.0.1:18882/newthread.php"
+        },
+        {
+          "step": "read_result",
+          "method": "GET",
+          "status": 200,
+          "url": "http://127.0.0.1:18882/showthread.php"
+        }
+      ],
+      "result_url": "http://127.0.0.1:18882/showthread.php?tid=3",
+      "navigation_actions": 1
+    },
+    {
+      "engine": "smf",
+      "version": "2.1.8",
+      "source": "https://github.com/SimpleMachines/SMF",
+      "revision": "8d46c2749c51997d2526e7fa304229ef890316d9",
+      "archive_sha256": "81d3333008343098285f4e6b55fa46668142b5ad5a2994991f4a1b67e2c2ff8e",
+      "installation": "controlled loopback Docker",
+      "language": "English",
+      "variant": "default",
+      "database": "MariaDB 11.4",
+      "jquery_source": "original bundled local copy",
+      "engine_detected": "smf",
+      "editor": "native",
+      "editor_kind": "textarea",
+      "browser": true,
+      "chromium_closed_before_http": true,
+      "http": "SUCCEEDED",
+      "project_state": "HTTP_VERIFIED",
+      "reloaded_project": "SUCCEEDED",
+      "preflight": {},
+      "transfer": {
+        "applied": false,
+        "operations": 0,
+        "bindings": 0
+      },
+      "cold_candidate": "HTTP_CANDIDATE",
+      "cold_diagnostics": [],
+      "http_operations": [
+        {
+          "step": "open_form",
+          "method": "GET",
+          "status": 200,
+          "url": "http://127.0.0.1:18883/index.php"
+        },
+        {
+          "step": "write_0",
+          "method": "POST",
+          "status": 302,
+          "url": "http://127.0.0.1:18883/index.php"
+        },
+        {
+          "step": "write_0",
+          "method": "GET",
+          "status": 200,
+          "url": "http://127.0.0.1:18883/index.php"
+        }
+      ],
+      "result_url": "http://127.0.0.1:18883/index.php?topic=4.0",
+      "navigation_actions": 1
+    },
+    {
+      "engine": "flarum",
+      "version": "2.0.2",
+      "source": "https://github.com/flarum/flarum",
+      "revision": "30bc7b40cec6d49c0eb532f3ed531cf375ce4548",
+      "archive_sha256": "067a681cca8f08a3e7599a8aee0cbaa73363234ee8bf9b30457ff07f61d08878",
+      "installation": "controlled loopback Docker",
+      "language": "English",
+      "variant": "default",
+      "database": "SQLite",
+      "core_source": "https://github.com/flarum/flarum-core.git",
+      "core_revision": "dc86fcbcdc3eced94371ef939681cee750d742d0",
+      "engine_detected": "flarum",
+      "editor": "native",
+      "editor_kind": "textarea",
+      "browser": true,
+      "chromium_closed_before_http": true,
+      "http": "SUCCEEDED",
+      "project_state": "HTTP_VERIFIED",
+      "reloaded_project": "SUCCEEDED",
+      "preflight": {},
+      "transfer": {
+        "applied": false,
+        "operations": 0,
+        "bindings": 0
+      },
+      "cold_candidate": "HTTP_CANDIDATE",
+      "cold_diagnostics": [],
+      "http_operations": [
+        {
+          "step": "open_form",
+          "method": "GET",
+          "status": 200,
+          "url": "http://127.0.0.1:18884/"
+        },
+        {
+          "step": "write_0",
+          "method": "POST",
+          "status": 201,
+          "url": "http://127.0.0.1:18884/api/discussions"
+        },
+        {
+          "step": "read_result",
+          "method": "GET",
+          "status": 200,
+          "url": "http://127.0.0.1:18884/d/2"
+        }
+      ],
+      "result_url": "http://127.0.0.1:18884/d/3",
+      "navigation_actions": 1
+    }
+  ],
+  "phpbb": {
+    "engine": "phpbb",
+    "technologies": [
+      {
+        "family": "phpbb",
+        "layer": "forum",
+        "version": null,
+        "adapter_revision": 2,
+        "confidence": 0.8999999999999999,
+        "evidence": [
+          "assets",
+          "routes",
+          "dom"
+        ],
+        "capabilities": [
+          "identification",
+          "form-discovery",
+          "browser-publication",
+          "http-workflow"
+        ],
+        "tested_versions": [
+          "3.3.15 / prosilver / controlled SQLite installation"
+        ]
+      }
+    ],
+    "discovery": "DETECTED",
+    "navigation": [
+      {
+        "purpose": "compose",
+        "evidence": [
+          "accessible-compose-intent",
+          "compose-route",
+          "navigation-link"
+        ],
+        "score": 0.99
+      }
+    ],
+    "browser_state": "HTTP_CANDIDATE",
+    "diagnostics": [
+      "READ_ONLY",
+      "HTTP_UNVERIFIED"
+    ],
+    "http_operations": [
+      {
+        "step": "open_form",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:8879/posting.php"
+      },
+      {
+        "step": "write_0",
+        "method": "POST",
+        "status": 302,
+        "url": "http://127.0.0.1:8879/posting.php"
+      },
+      {
+        "step": "write_0",
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:8879/viewtopic.php"
+      }
+    ],
+    "http_status": "SUCCEEDED",
+    "http_reason": "",
+    "reloaded_project": "SUCCEEDED",
+    "result_url": "http://127.0.0.1:8879/viewtopic.php?t=20"
+  },
+  "editors": [
+    {
+      "editor": "tinymce",
+      "version": "7.9.1",
+      "server_text_matches": true,
+      "literal_markup_preserved": true,
+      "line_breaks_preserved": true,
+      "submissions": 1
+    },
+    {
+      "editor": "ckeditor",
+      "version": "4.22.1",
+      "server_text_matches": true,
+      "literal_markup_preserved": true,
+      "line_breaks_preserved": true,
+      "submissions": 1
+    },
+    {
+      "editor": "quill",
+      "version": "2.0.3",
+      "server_text_matches": true,
+      "literal_markup_preserved": true,
+      "line_breaks_preserved": true,
+      "submissions": 1
+    },
+    {
+      "editor": "prosemirror",
+      "version": "Tiptap 2.27.2",
+      "server_text_matches": true,
+      "literal_markup_preserved": true,
+      "line_breaks_preserved": true,
+      "submissions": 1
+    },
+    {
+      "editor": "summernote",
+      "version": "0.9.1",
+      "server_text_matches": true,
+      "literal_markup_preserved": true,
+      "line_breaks_preserved": true,
+      "submissions": 1
+    }
+  ],
+  "pytest": {
+    "passed": 171,
+    "skipped": 0,
+    "platform": "Linux Python 3.12 with Tk under Xvfb"
+  },
+  "independent_positive_shapes": 9,
+  "publications_per_shape": 3,
+  "windows_service_not_full_gui": true,
+  "targeted_after_last_policy_change": 32
+}

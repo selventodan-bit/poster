@@ -52,7 +52,7 @@ class SubmissionScope:
             return False
         raw = request.post_data_buffer or b""
         try:
-            _, payload = decode({"content_type": request.headers.get("content-type", ""), "body": raw})
+            encoding, payload = decode({"content_type": request.headers.get("content-type", ""), "body": raw})
         except (ValueError, UnicodeError, LookupError):
             return False
         if not self.sent:
@@ -74,14 +74,35 @@ class SubmissionScope:
 
                 # A title-only draft can start a multi-step topic transaction;
                 # storing a full post as a draft needs a previously proven recipe.
-                if (
-                    any(
-                        isinstance(v, str) and text(v) == text(self.capture.body_marker)
-                        for _, v in leaves(payload)
-                    )
-                    and not self.templates
+                if any(
+                    isinstance(v, str) and text(v) == text(self.capture.body_marker)
+                    for _, v in leaves(payload)
                 ):
-                    return False
+                    from .transfer import shape
+
+                    roles = sorted(
+                        role
+                        for role, marker in (
+                            ("title", self.capture.title_marker),
+                            ("body", self.capture.body_marker),
+                        )
+                        if role in self.capture.content_roles
+                        and any(
+                            isinstance(v, str)
+                            and (marker in v if role == "title" else text(v) == text(marker))
+                            for _, v in leaves(payload)
+                        )
+                    )
+                    if not any(
+                        t.operations
+                        and t.operations[0].route == "draft"
+                        and t.operations[0].method == request.method
+                        and t.operations[0].encoding == encoding
+                        and t.operations[0].roles == roles
+                        and t.operations[0].shape == shape(payload)
+                        for t in self.templates
+                    ):
+                        return False
             signed = self.interaction and request.headers.get("x-poster-interaction") == self.interaction
             # A selected click may GET a fresh token before its first POST. That
             # read and consumed high-entropy value establish causality only for

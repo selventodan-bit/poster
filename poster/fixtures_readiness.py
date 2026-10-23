@@ -17,7 +17,7 @@ class ReadinessHandler(Handler):
             case = path.rsplit("/", 1)[-1]
             kind = case if case in {"reply", "comment"} else "topic"
             title = '<input name="x47" required>' if kind == "topic" else ""
-            js = case in {"ajax", "background", "ambiguous", "delayed", "synchronous", "listener"}
+            js = case in {"ajax", "background", "ambiguous", "delayed", "synchronous", "listener", "toolbar"}
             token = secrets.token_hex(24)
             self.server.tokens[token] = True
             # The opaque names/classes and unknown language are independent of the old generator.
@@ -46,6 +46,19 @@ class ReadinessHandler(Handler):
             const payload=()=>new URLSearchParams(new FormData(f));
             function emit(){fetch('/store-js',{method:'POST',body:payload()}).then(r=>r.json()).then(r=>{location.href=r.url;});}
             """
+            if case == "toolbar":
+                markup = (
+                    markup.replace("<form ", "<div ")
+                    .replace("</form>", "</div>")
+                    .replace("<div><textarea", '<div><button type="button">↶</button><textarea')
+                )
+                script = script.replace(
+                    "document.querySelector('form')", "document.querySelector('[data-publication-type]')"
+                )
+                script = script.replace(
+                    "new FormData(f)",
+                    "{csrf_token:f.querySelector('[type=hidden]').value,x47:f.querySelector('[name=x47]').value,q86:f.querySelector('textarea').value}",
+                )
             if case == "listener":
                 markup = markup.replace(' onclick="emit()"', "")
                 script += "document.querySelector('button').addEventListener('click',emit);"

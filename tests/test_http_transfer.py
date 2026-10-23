@@ -176,6 +176,31 @@ def test_native_submitter_scope_blocks_content_bearing_background_drafts():
     assert scope.allows(request(post="Publish"))
 
 
+def test_a_template_for_another_operation_does_not_authorize_full_content_drafts():
+    from poster.recognition.transfer import HTTPTemplate, Operation, shape
+
+    cap = Capture("https://a.test/new", title_marker="Topic title", body_marker="Post body")
+    payload = {"subject": cap.title_marker, "message": cap.body_marker}
+    operation = Operation(
+        method="POST", encoding="json", roles=["body", "title"], shape=shape(payload), route="publish"
+    )
+    req = SimpleNamespace(
+        url="https://a.test/draft",
+        method="POST",
+        post_data_buffer=json.dumps(payload).encode(),
+        headers={"content-type": "application/json", "x-poster-interaction": "click"},
+    )
+    scope = SubmissionScope(
+        cap.start_url, cap, interaction="click", templates=[HTTPTemplate(operations=[operation])]
+    )
+    assert not scope.allows(req) and not scope.sent
+    proven = operation.model_copy(update={"route": "draft"})
+    scope = SubmissionScope(
+        cap.start_url, cap, interaction="click", templates=[HTTPTemplate(operations=[proven])]
+    )
+    assert scope.allows(req)
+
+
 def test_empty_file_controls_and_identical_scalar_multipart_values():
     empty = '--b\r\nContent-Disposition: form-data; name="file[]"; filename=""\r\n\r\n\r\n'
     scalar = '--b\r\nContent-Disposition: form-data; name="MAX_FILE_SIZE"\r\n\r\n100\r\n'

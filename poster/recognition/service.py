@@ -571,12 +571,19 @@ class RecognitionSession:
             except TimeoutError:
                 pass
             poll_interval = min(1, poll_interval * 1.5)
-        self.result.diagnostics.append("NO_PERMALINK")
-        self.result.diagnostics.append("CONFIRMATION_PENDING")
+        if self.write_admitted:
+            self.result.diagnostics.append("NO_PERMALINK")
+            self.result.diagnostics.append("CONFIRMATION_PENDING")
+        else:
+            self.result.diagnostics.append("NO_WRITE")
         self.result.diagnostics.extend(NetworkAnalyzer().analyze(capture).diagnostics)
         self.state(LearningState.UNKNOWN if self.write_admitted else LearningState.FAILED)
         self.result.outcome = (
-            "auth_expired" if "AUTH_EXPIRED" in self.result.diagnostics else "confirmation_timeout"
+            "blocked_before_write"
+            if not self.write_admitted
+            else "auth_expired"
+            if "AUTH_EXPIRED" in self.result.diagnostics
+            else "confirmation_timeout"
         )
 
     def learn_manual_fields(self):

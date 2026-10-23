@@ -9,7 +9,8 @@ from poster.recognition.policy import ResourcePolicy
 
 
 @pytest.mark.parametrize(
-    "case", ["topic", "reply", "comment", "ajax", "background", "synchronous", "navigation", "listener"]
+    "case",
+    ["topic", "reply", "comment", "ajax", "background", "synchronous", "navigation", "listener", "toolbar"],
 )
 async def test_independent_shapes_complete_export_restart(case, tmp_path):
     import importlib.util
