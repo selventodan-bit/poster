@@ -44,3 +44,50 @@ jobs:
           python-version: '3.13'
       - run: python -m pip install -e ".[dev,recorder]"
       - run: python -m pytest -q tests/test_recorder_ui.py tests/test_recognition_protocol.py
+  original-cms:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [mybb, smf, flarum]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.13'
+      - run: uv sync --frozen --extra dev --extra recorder
+      - run: uv run --no-sync python -m playwright install --with-deps chromium
+      - run: uv run --no-sync python scripts/run_cms_ci.py --engine ${{ matrix.engine }} --output .poster/cms-ci
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMPOSER_AUTH: '{"github-oauth":{"github.com":"${{ github.token }}"}}'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: original-${{ matrix.engine }}-report
+          path: .poster/cms-ci/report.json
+          include-hidden-files: true
+          if-no-files-found: error
+  original-editors:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: scripts/integration/editors/package-lock.json
+      - run: npm ci --prefix scripts/integration/editors
+      - run: uv sync --frozen --extra dev --extra recorder
+      - run: uv run --no-sync python -m playwright install --with-deps chromium
+      - run: uv run --no-sync python scripts/check_original_editors.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: original-editors-report
+          path: .poster/original-editors/report.json
+          include-hidden-files: true
+          if-no-files-found: error

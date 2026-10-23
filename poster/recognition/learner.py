@@ -30,6 +30,14 @@ class HTTPWorkflowLearner:
             "operations": transfer.reused_operations if transfer else 0,
             "bindings": transfer.reused_dependencies if transfer else 0,
         }
+        if knowledge_rule and knowledge_rule.http_templates and not transfer:
+            self.transfer_report["declined"] = sorted(
+                {
+                    code
+                    for template in knowledge_rule.http_templates
+                    for code in instantiate(template, capture).diagnostics
+                }
+            )
         diagnostics = list(analysis.diagnostics)
         if not capture.browser_verified or not capture.confirmation:
             diagnostics.append("NO_PERMALINK")
@@ -169,6 +177,8 @@ class HTTPWorkflowLearner:
                             selector=path,
                             attribute="value" if node.name == "input" else "content",
                         )
+                    if kind == "regex":
+                        return extraction(source, kind, pattern=path)
                     return extraction(
                         source, kind, **({"path": path} if kind == "json_path" else {"attribute": path})
                     )

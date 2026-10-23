@@ -7,6 +7,7 @@ bundles live outside the repository's source tree (.poster by default).
 import argparse
 import asyncio
 import json
+import re
 import shutil
 import subprocess
 import threading
@@ -143,6 +144,12 @@ async def check(directory, output):
                     if len(block.contents) == 1 and getattr(block.contents[0], "name", None) == "br":
                         block.clear()
                     for br in block.select("br"):
+                        # CKEditor's HTML writer adds formatting CRLF after a
+                        # <br>. That whitespace is collapsed by HTML rendering;
+                        # it is not an additional user-entered line break.
+                        following = br.next_sibling
+                        if isinstance(following, str):
+                            following.replace_with(re.sub(r"^\r?\n[\t ]*", "", following, count=1))
                         br.replace_with("\n")
                     lines.append(block.get_text())
                 assert "\n".join(lines).rstrip("\n") == value, (name, "line breaks", actual)

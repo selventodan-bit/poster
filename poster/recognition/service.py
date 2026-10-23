@@ -307,10 +307,23 @@ class RecognitionSession:
         form = await self.fill(title, body)
         self.browser_attempted = True
         self.recorder.capture.action_id = uuid.uuid4().hex
+        ref = form.fields["submit"]
+        control = (
+            await self.page.frames[ref.frame]
+            .locator(ref.selector)
+            .evaluate(
+                """e=>({name:e.name||'',value:e.value||'',action:e.form?
+            new URL(e.getAttribute('formaction')||e.form.getAttribute('action')||location.href,e.baseURI).href:null})"""
+            )
+        )
         self.scope = SubmissionScope(
             self.url,
             self.recorder.capture,
             templates=self.transfer_rule.http_templates if self.transfer_rule else (),
+            submitter=(control["name"], control["value"]) if control["name"] else None,
+            action_url=urlsplit(control["action"])._replace(fragment="").geturl()
+            if control["action"] and control["name"]
+            else None,
         )
         self.read_only = False
         try:

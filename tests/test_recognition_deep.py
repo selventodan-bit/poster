@@ -230,7 +230,10 @@ def test_engine_channels_and_false_positives(adapter):
     found = detector.inspect(both)
     assert any(t.family == adapter.id and len(t.evidence) >= 2 for t in found)
     assert all(
-        t.capabilities == ("identification",) or t.family == "phpbb" and t.tested_versions for t in found
+        t.capabilities == ("identification",)
+        or t.family in {"phpbb", "mybb", "smf", "flarum"}
+        and t.tested_versions
+        for t in found
     )
 
 

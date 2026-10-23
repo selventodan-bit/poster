@@ -34,7 +34,7 @@ class Binding(Closed):
     target: int = Field(ge=0, le=299)
     target_kind: Literal["payload", "path", "query", "header"] = "payload"
     parent: int = Field(ge=-1, le=19)  # -1 = local composer GET
-    kind: Literal["json_path", "css_attribute", "header", "cookie"]
+    kind: Literal["json_path", "css_attribute", "header", "cookie", "regex"]
     slot: int = Field(ge=0, le=299)
     role: Literal["identity", "fresh"] = "fresh"
 
@@ -85,6 +85,10 @@ def shape(value):
 
 
 def source_slots(response, kind):
+    if kind == "regex":
+        from .javascript import token_slots
+
+        return token_slots(response.get("body", ""))
     if kind == "json_path":
         try:
             return list(leaves(json.loads(response.get("body", ""))))
@@ -175,11 +179,13 @@ def compile_template(capture, workflow, known_templates=()):
             ]
         else:
             matches = [
-                j for j, (path, _) in enumerate(candidates) if path == s.get("path", s.get("attribute"))
+                j
+                for j, (path, _) in enumerate(candidates)
+                if path == s.get("path", s.get("attribute", s.get("pattern")))
             ]
         if len(matches) == 1:
             value = candidates[matches[0]][1]
-            if parent == -1 and (not isinstance(value, str) or len(value) < 16):
+            if parent == -1 and (not isinstance(value, str) or len(value) < (8 if kind == "regex" else 16)):
                 continue
             variables[s["save_as"]] = (parent, kind, matches[0])
     for i, s in enumerate(write_steps):

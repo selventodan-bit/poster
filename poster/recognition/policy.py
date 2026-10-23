@@ -18,7 +18,7 @@ def origin(url):
 def dangerous_url(url):
     return bool(
         re.search(
-            r"(?:[/=?&_-])(?:delete|logout|unsubscribe|vote|remove|settings|preferences|profile)(?:[/=?&_-]|$)",
+            r"(?:[/=?&;_-])(?:delete|logout|unsubscribe|vote|remove|settings|preferences|profile)(?:[/=?&;_-]|$)",
             url,
             re.I,
         )
@@ -26,13 +26,14 @@ def dangerous_url(url):
 
 
 class SubmissionScope:
-    def __init__(self, url, capture, *, max_writes=6, templates=()):
+    def __init__(self, url, capture, *, max_writes=6, templates=(), submitter=None, action_url=None):
         self.origin = origin(url)
         self.capture = capture
         self.max_writes = max_writes
         self.sent = set()
         self.allowed_ids = set()
         self.templates = templates
+        self.submitter, self.action_url = submitter, action_url
 
     def allows(self, request):
         if (
@@ -48,6 +49,13 @@ class SubmissionScope:
             _, payload = decode({"content_type": request.headers.get("content-type", ""), "body": raw})
         except (ValueError, UnicodeError, LookupError):
             return False
+        if not self.sent:
+            if self.submitter and (
+                not isinstance(payload, dict) or payload.get(self.submitter[0]) != self.submitter[1]
+            ):
+                return False
+            if self.action_url and urlsplit(request.url)._replace(fragment="").geturl() != self.action_url:
+                return False
         identity = hashlib.sha256(
             (request.method + request.url + "\0" + json.dumps(payload, sort_keys=True)).encode()
         ).hexdigest()

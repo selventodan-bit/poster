@@ -37,7 +37,8 @@
             "json_path",
             "css_attribute",
             "header",
-            "cookie"
+            "cookie",
+            "regex"
           ],
           "title": "Kind",
           "type": "string"
@@ -563,6 +564,7 @@
             "json",
             "header",
             "cookie",
+            "javascript",
             "unknown"
           ],
           "title": "Source",

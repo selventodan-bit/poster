@@ -76,7 +76,12 @@ def result_permalink(url: str) -> str:
     parsed = urlsplit(str(url))
     pairs = parse_qsl(re.sub(r";(?=[A-Za-z_][A-Za-z0-9_]*=)", "&", parsed.query))
     pairs = [
-        (k, v.split(".", 1)[0] + ".0" if k == "topic" and re.fullmatch(r"\d+\.msg\d+", v) else v)
+        (
+            k,
+            v.split(".", 1)[0] + ".0"
+            if k == "topic" and re.fullmatch(r"\d+\.(?:msg\d+|new)(?:;boardseen)?", v)
+            else v,
+        )
         for k, v in pairs
     ]
     permitted = {"t", "p", "f", "tid", "pid", "fid", "topic", "board"}

@@ -121,7 +121,7 @@ class TokenPattern(Closed):
         "other",
     ]
     role: Literal["csrf", "identity", "nonce"]
-    source: Literal["html-hidden", "html-meta", "json", "header", "cookie", "unknown"]
+    source: Literal["html-hidden", "html-meta", "json", "header", "cookie", "javascript", "unknown"]
     fresh: bool = True
 
 
@@ -374,6 +374,8 @@ class KnowledgeBase:
                 if kind == "header"
                 else "cookie"
                 if kind == "cookie"
+                else "javascript"
+                if kind == "regex"
                 else "json"
             )
 
@@ -388,7 +390,9 @@ class KnowledgeBase:
             patterns.append(
                 TokenPattern(
                     name=name if name in allowed else "other",
-                    role="csrf" if source.startswith("html") or source == "header" else "identity",
+                    role="csrf"
+                    if source.startswith("html") or source in {"header", "javascript"}
+                    else "identity",
                     source=source,
                 )
             )

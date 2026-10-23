@@ -63,6 +63,8 @@ ADAPTERS = (
         r"mybb\.js|/jscripts/thread.js",
         r"newthread\.php|showthread\.php",
         r"xmlhttp\.php",
+        ("identification", "form-discovery", "browser-publication", "http-workflow"),
+        ("1.8.41 / bundled SCEditor / controlled SQLite, default and token-source plugin",),
     ),
     EngineAdapter(
         "discourse",
@@ -83,6 +85,8 @@ ADAPTERS = (
         r"/Themes/[^/]+/scripts/(?:script|jquery.sceditor|(?:minified_)[a-f0-9]+)",
         r"index.php\?.*(?:topic|action=post)",
         r"index.php\?.*action=xmlhttp",
+        ("identification", "form-discovery", "browser-publication", "http-workflow"),
+        ("2.1.8 / default theme, textarea / controlled MariaDB 11.4",),
     ),
     EngineAdapter(
         "invision",
@@ -103,6 +107,8 @@ ADAPTERS = (
         r"/assets/forum-[^/]+\.js|flarum\.core",
         r"/d/\d+",
         r"/api/discussions|/api/posts",
+        ("identification", "form-discovery", "browser-publication", "http-workflow"),
+        ("2.0.2 / English, Markdown / controlled SQLite",),
     ),
     EngineAdapter(
         "wpforo",

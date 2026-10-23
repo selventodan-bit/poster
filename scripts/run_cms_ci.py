@@ -9,6 +9,7 @@ import argparse
 import asyncio
 import hashlib
 import json
+import os
 import secrets
 import shutil
 import subprocess
@@ -90,11 +91,13 @@ class Installation:
         self.password = secrets.token_urlsafe(18)
         self.username = "admin"
 
-    def docker(self, args):
-        return command(["docker", *args])
+    def docker(self, args, **kwargs):
+        return command(["docker", *args], **kwargs)
 
     def exec(self, args, *, workdir="/srv", log=None):
-        return command(["docker", "exec", "-w", workdir, self.container, *args], log=log)
+        return command(
+            ["docker", "exec", "-e", "COMPOSER_AUTH", "-w", workdir, self.container, *args], log=log
+        )
 
     def start(self):
         directory, engine = self.directory, self.engine
@@ -144,9 +147,10 @@ class Installation:
                     "--network",
                     self.network,
                     "-e",
-                    "MARIADB_ROOT_PASSWORD=" + db_password,
+                    "MARIADB_ROOT_PASSWORD",
                     "mariadb:11.4",
-                ]
+                ],
+                env={**os.environ, "MARIADB_ROOT_PASSWORD": db_password},
             )
             self.containers.append(database)
             for _ in range(60):
@@ -308,6 +312,22 @@ class Installation:
             # Complete the normal installer cleanup. No CMS code is patched.
             if engine == "smf":
                 (self.root / "install.php").unlink()
+                # Supported CMS setting: use the original bundled jQuery, so
+                # editor initialization does not depend on an external CDN.
+                self.docker(
+                    [
+                        "exec",
+                        "-e",
+                        "MYSQL_PWD",
+                        database,
+                        "mariadb",
+                        "-uroot",
+                        "forum",
+                        "-e",
+                        "REPLACE INTO smf_settings(variable,value) VALUES('jquery_source','local')",
+                    ],
+                    env={**os.environ, "MYSQL_PWD": db_password},
+                )
             if engine == "mybb" and self.variant:
                 shutil.copy(
                     "scripts/integration/mybb/transfer_probe.php",
@@ -322,7 +342,7 @@ class Installation:
                     ]
                 )
         self.wait()
-        return {
+        metadata = {
             "engine": engine,
             "version": version,
             "source": f"https://github.com/{repo}",
@@ -333,6 +353,13 @@ class Installation:
             "variant": "token-source compatibility plugin" if self.variant else "default",
             "database": "MariaDB 11.4" if engine == "smf" else "SQLite",
         }
+        if engine == "flarum":
+            locked = json.loads((self.root / "composer.lock").read_text())
+            core = next(p for p in locked["packages"] if p["name"] == "flarum/core")
+            metadata.update(core_source=core["source"]["url"], core_revision=core["source"]["reference"])
+        if engine == "smf":
+            metadata["jquery_source"] = "original bundled local copy"
+        return metadata
 
     def wait(self):
         for _ in range(40):
@@ -347,7 +374,7 @@ class Installation:
 
     def stop(self):
         for name in reversed(self.containers):
-            subprocess.run(["docker", "rm", "-f", name], stdout=subprocess.DEVNULL, check=False)
+            subprocess.run(["docker", "rm", "-f", "-v", name], stdout=subprocess.DEVNULL, check=False)
         if self.network:
             subprocess.run(["docker", "network", "rm", self.network], stdout=subprocess.DEVNULL, check=False)
 
@@ -399,6 +426,10 @@ async def publication(install, directory, kb_path):
         assert session.result.state == "HTTP_CANDIDATE", session.result.summary()
         baseline = HTTPWorkflowLearner().learn(session.recorder.capture, "cold-comparison")
         transfer = session.result.transfer.copy()
+        if install.variant:
+            assert baseline.site["recognition"]["state"] == "LEARNING_REQUIRED", baseline.diagnostics
+            assert transfer.get("applied") and transfer.get("bindings", 0) > 0, transfer
+            assert preflight.get("writes") == 0 and not preflight.get("http_verified"), preflight
         await session.close()
         # Respect original server flood intervals. Never disable or retry them.
         delay = 2.1 if engine == "smf" else 0
@@ -454,7 +485,7 @@ def main():
         command(
             ["docker", "build", "-t", "poster-cms-php", "scripts/integration"],
             log=log,
-            env={**__import__("os").environ, "DOCKER_BUILDKIT": "0"},
+            env={**os.environ, "DOCKER_BUILDKIT": "0"},
         )
     report = []
     for index in range(2 if args.engine == "mybb" else 1):

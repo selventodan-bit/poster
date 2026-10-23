@@ -156,6 +156,26 @@ def test_dependency_graph_reused_for_opaque_payload_and_path_and_browser_scope()
     assert instantiate(template, broken).diagnostics
 
 
+def test_native_submitter_scope_blocks_content_bearing_background_drafts():
+    cap = observation()
+    endpoint = cap.requests[0]["url"]
+    scope = SubmissionScope(endpoint, cap, submitter=("post", "Publish"), action_url=endpoint)
+
+    def request(**extra):
+        return SimpleNamespace(
+            method="POST",
+            url=endpoint,
+            headers={"content-type": "application/json"},
+            post_data_buffer=json.dumps(
+                {"subject": cap.title_marker, "message": cap.body_marker, **extra}
+            ).encode(),
+        )
+
+    assert not scope.allows(request(save_draft="1"))
+    assert not scope.sent
+    assert scope.allows(request(post="Publish"))
+
+
 def test_empty_file_controls_and_identical_scalar_multipart_values():
     empty = '--b\r\nContent-Disposition: form-data; name="file[]"; filename=""\r\n\r\n\r\n'
     scalar = '--b\r\nContent-Disposition: form-data; name="MAX_FILE_SIZE"\r\n\r\n100\r\n'
@@ -181,6 +201,36 @@ def test_safe_multiline_html_and_useful_redacted_forum_permalinks():
         result_permalink("https://x.test/showthread.php?tid=4&token=SECRET")
         == "https://x.test/showthread.php?tid=4"
     )
+
+
+def test_inline_json_nonce_sources_are_fresh_and_never_execute_javascript():
+    from poster.recognition.javascript import token_slots
+
+    assert (
+        result_permalink("https://x.test/index.php?topic=12.new#new") == "https://x.test/index.php?topic=12.0"
+    )
+
+    cap = observation()
+    cap.responses[0]["body"] = '<script>var ajaxConfig={"nonce":"abcdefgh12"};</script>'
+    payload = json.loads(cap.requests[0]["body"])
+    payload["csrf"] = "abcdefgh12"
+    cap.requests[0]["body"] = json.dumps(payload)
+    built = HTTPWorkflowLearner().learn(cap, "inline")
+    assert built.site["recognition"]["state"] == "HTTP_CANDIDATE"
+    assert "abcdefgh12" not in json.dumps(built.workflow)
+    template = compile_template(cap, built.workflow)
+    assert template.bindings[0].kind == "regex"
+    cap.responses[0]["body"] = '<script>var ajaxConfig={"rotated":"abcdefgh34"};</script>'
+    payload["csrf"] = "abcdefgh34"
+    cap.requests[0]["body"] = json.dumps(payload)
+    assert (
+        HTTPWorkflowLearner()
+        .learn(cap, "rotated", knowledge_rule=rule(template))
+        .site["recognition"]["state"]
+        == "HTTP_CANDIDATE"
+    )
+    assert not token_slots('<script>var nonce=decrypt("abcdefgh12");</script>')
+    assert not token_slots('<script>var a={"nonce":"abcdefgh12"};var b={"nonce":"abcdefgh12"};</script>')
 
 
 @pytest.mark.parametrize("timeout,expected", [(None, "HTTP_CANDIDATE"), (0.3, "UNKNOWN")])
