@@ -77,4 +77,6 @@ def make_project():
 def pytest_runtest_logreport(report):
     # CI annotations contain only a test identifier; never request bodies/secrets.
     if report.failed:
-        print("\n::error::pytest failed " + report.nodeid.replace("\n", " "), flush=True)
+        crash = getattr(report.longrepr, "reprcrash", None)
+        where = f" at line {crash.lineno}" if crash else ""
+        print("\n::error::pytest failed " + report.nodeid.replace("\n", " ") + where, flush=True)

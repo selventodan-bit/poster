@@ -56,6 +56,8 @@ class DesktopMixin:
         self.operation_task = None
         self.operation_tasks = set()
         self.local_report = None
+        self.last_error = None
+        self.last_progress = ""
         self.desktop_widgets = {}
         self.project_paths = {}
         self.engine_status = tk.StringVar(value="Engine остановлен")
@@ -204,6 +206,7 @@ class DesktopMixin:
             self.status.set(value)
             self.write(value)
         elif kind == "progress":
+            self.last_progress = value
             self.status.set(value)
         elif kind == "local_report":
             self.local_report = value
@@ -535,6 +538,8 @@ class DesktopMixin:
             "local_test_ports": list(self.workspace.test_ports),
             "temporary_active": len(self.workspace.active),
             "status": self.status.get(),
+            "last_error": self.last_error,
+            "last_progress": self.last_progress,
             "thread": threading.get_ident(),
             "observed_at": time.time(),
         }

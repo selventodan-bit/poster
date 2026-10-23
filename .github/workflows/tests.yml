@@ -138,6 +138,7 @@ jobs:
         working-directory: Poster Проверка с пробелами
         run: .venv/Scripts/python.exe -m pip install pytest pytest-asyncio pywinauto==0.6.9 Pillow==11.3.0
       - name: Native Tk, clipboard and independent network regression checks
+        id: native-tests
         working-directory: Poster Проверка с пробелами
         shell: pwsh
         run: |
@@ -146,6 +147,7 @@ jobs:
           .venv/Scripts/python.exe scripts/summarize_pytest.py .poster/windows-tests.xml .poster/windows-tests-report.json
           exit $testExit
       - name: Full packaged GUI via real OS mouse keyboard and native dialogs
+        if: ${{ !cancelled() && (success() || steps.native-tests.outcome == 'failure') }}
         working-directory: Poster Проверка с пробелами
         shell: pwsh
         run: |

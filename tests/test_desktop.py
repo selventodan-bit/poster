@@ -1,4 +1,5 @@
 import asyncio
+import json
 from dataclasses import replace
 import socket
 import os
@@ -140,6 +141,21 @@ def test_gui_local_button_and_cancel_own_and_stop_server(tmp_path, monkeypatch):
         for port in ports:
             with socket.socket() as client:
                 assert client.connect_ex(("127.0.0.1", port)) != 0
+    except Exception:
+        print(
+            "\n::error::Desktop local GUI "
+            + json.dumps(
+                {
+                    "error": app.last_error,
+                    "progress": app.last_progress,
+                    "status": app.status.get(),
+                    "busy": app.busy,
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+        raise
     finally:
         app.close()
         deadline = time.monotonic() + 10

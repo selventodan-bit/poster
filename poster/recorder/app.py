@@ -5,6 +5,7 @@ import json
 import queue
 import re
 import threading
+import traceback
 import uuid
 import tkinter as tk
 from pathlib import Path
@@ -187,6 +188,13 @@ class App(DesktopMixin, ClipboardMixin):
             except Exception as exc:
                 if generation != self.generation:
                     return
+                self.last_error = {
+                    "type": type(exc).__name__,
+                    "frames": [
+                        f"{Path(f.filename).name}:{f.lineno}:{f.name}"
+                        for f in traceback.extract_tb(exc.__traceback__)[-5:]
+                    ],
+                }
                 code = str(exc) if isinstance(exc, (PermissionError, ValueError)) else ""
                 if code not in MESSAGES:
                     if self.session:

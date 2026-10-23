@@ -217,6 +217,7 @@ def check(executable, output):
         print("::notice title=Windows GUI E2E::" + json.dumps(report), flush=True)
         return report
     except Exception as exc:
+        safe_state = snapshot()
         try:
             screenshot("failure.png")
         except Exception:
@@ -233,6 +234,14 @@ def check(executable, output):
             + phase
             + "; completed="
             + ",".join(completed),
+            flush=True,
+        )
+        print(
+            "::error::GUI state "
+            + json.dumps(
+                {k: safe_state.get(k) for k in ["busy", "state", "last_error", "last_progress", "status"]},
+                ensure_ascii=False,
+            ),
             flush=True,
         )
         raise
