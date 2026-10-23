@@ -24,7 +24,10 @@ async def test_independent_shapes_complete_export_restart(case, tmp_path):
     assert report["writes"] == 3 and report["runtime_new_process"]
 
 
-@pytest.mark.parametrize("case,detected", [("ambiguous", False), ("unsafe", False), ("delayed", True)])
+@pytest.mark.parametrize(
+    "case,detected",
+    [("ambiguous", False), ("unsafe", False), ("delayed", True), ("mismatch", True), ("format-only", False)],
+)
 async def test_ambiguous_unsafe_and_deferred_click_are_not_mutations(case, detected, tmp_path):
     with serve_readiness() as (server, base):
         s = RecognitionSession(

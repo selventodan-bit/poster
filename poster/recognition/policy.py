@@ -1,6 +1,7 @@
 """Browser resource and mutation policies. Consent grants a bounded content-linked transaction."""
 
 import hashlib
+import html
 import json
 import re
 import asyncio
@@ -10,7 +11,7 @@ from urllib.parse import urlsplit, parse_qsl, unquote
 
 import httpx
 
-from .network import decode, request_values, response_values, text
+from .network import decode, request_values, response_values, text, leaves
 
 
 def origin(url):
@@ -55,6 +56,33 @@ class SubmissionScope:
             encoding, payload = decode({"content_type": request.headers.get("content-type", ""), "body": raw})
         except (ValueError, UnicodeError, LookupError):
             return False
+        values = [v for _, v in leaves(payload) if isinstance(v, str)]
+        matched = set()
+        if "title" in self.capture.content_roles and any(
+            self.capture.title_marker in html.unescape(v) for v in values
+        ):
+            matched.add("title")
+        expected_body = " ".join(self.capture.body_marker.split())
+        if expected_body and any(
+            " ".join(v.split()) == expected_body or text(v) == expected_body for v in values
+        ):
+            matched.add("body")
+        if not self.sent and matched != self.capture.content_roles:
+            from .transfer import route_purpose, shape
+
+            partial_draft = matched == {"title"} and route_purpose(request.url) == "draft"
+            proven = bool(matched) and any(
+                t.operations
+                and t.operations[0].roles == sorted(matched)
+                and t.operations[0].method == request.method
+                and t.operations[0].encoding == encoding
+                and t.operations[0].shape == shape(payload)
+                and t.operations[0].route != "other"
+                and t.operations[0].route == route_purpose(request.url)
+                for t in self.templates
+            )
+            if not partial_draft and not proven:
+                return False
         if not self.sent:
             purpose = urlsplit(request.url).path + "?" + urlsplit(request.url).query
             if isinstance(payload, dict):
@@ -70,8 +98,6 @@ class SubmissionScope:
             ):
                 return False
             if re.search(r"(?:^|[/=?&;_\s-])drafts?(?:$|[/=?&;_\s-])", purpose, re.I):
-                from .network import leaves
-
                 # A title-only draft can start a multi-step topic transaction;
                 # storing a full post as a draft needs a previously proven recipe.
                 if any(
@@ -147,16 +173,7 @@ class SubmissionScope:
         if identity in self.sent:
             return False
         item = {"payload": payload, "url": request.url, "headers": request.headers}
-        from .network import leaves
-
-        content = any(
-            isinstance(v, str)
-            and (
-                ("title" in self.capture.content_roles and self.capture.title_marker in v)
-                or text(self.capture.body_marker) == text(v)
-            )
-            for _, v in leaves(payload)
-        )
+        content = bool(matched)
         dependency = False
         for response in self.capture.responses:
             if response.get("request_id") not in self.allowed_ids or response.get("status", 500) >= 400:

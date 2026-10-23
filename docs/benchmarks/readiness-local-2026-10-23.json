@@ -325,7 +325,7 @@
     }
   ],
   "pytest": {
-    "passed": 174,
+    "passed": 176,
     "skipped": 0,
     "platform": "Linux Python 3.12 with Tk under Xvfb"
   },
@@ -334,5 +334,9 @@
   "windows_service_not_full_gui": true,
   "targeted_after_last_policy_change": 32,
   "gui_foreign_thread_collection_regression": "old code reproduced Tcl_AsyncDelete; fixed subprocess passes",
-  "windows_environment_ghost_install_regression": "isolated health probe rejects source-only imports plus egg-info"
+  "windows_environment_ghost_install_regression": "isolated health probe rejects source-only imports plus egg-info",
+  "additional_negative_cases": [
+    "modified body before first POST",
+    "format-only control with content autosave"
+  ]
 }

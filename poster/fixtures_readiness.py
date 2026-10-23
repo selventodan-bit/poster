@@ -17,7 +17,17 @@ class ReadinessHandler(Handler):
             case = path.rsplit("/", 1)[-1]
             kind = case if case in {"reply", "comment"} else "topic"
             title = '<input name="x47" required>' if kind == "topic" else ""
-            js = case in {"ajax", "background", "ambiguous", "delayed", "synchronous", "listener", "toolbar"}
+            js = case in {
+                "ajax",
+                "background",
+                "ambiguous",
+                "delayed",
+                "synchronous",
+                "listener",
+                "toolbar",
+                "mismatch",
+                "format-only",
+            }
             token = secrets.token_hex(24)
             self.server.tokens[token] = True
             # The opaque names/classes and unknown language are independent of the old generator.
@@ -59,6 +69,17 @@ class ReadinessHandler(Handler):
                     "new FormData(f)",
                     "{csrf_token:f.querySelector('[type=hidden]').value,x47:f.querySelector('[name=x47]').value,q86:f.querySelector('textarea').value}",
                 )
+            if case == "mismatch":
+                script = script.replace(
+                    "function emit(){",
+                    "function emit(){f.querySelector('textarea').value='Different content';",
+                )
+            if case == "format-only":
+                handler = "document.querySelector('textarea').dispatchEvent(new Event('input'))"
+                markup = markup.replace('class="u38"', 'class="editor"').replace(
+                    'onclick="emit()"', f'onclick="{html.escape(handler, quote=True)}"'
+                )
+                script += "f.addEventListener('input',emit);"
             if case == "listener":
                 markup = markup.replace(' onclick="emit()"', "")
                 script += "document.querySelector('button').addEventListener('click',emit);"

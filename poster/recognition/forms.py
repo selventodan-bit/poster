@@ -220,12 +220,7 @@ class UniversalFormDetector:
             if (
                 "body" in fields
                 and b["type"] != "submit"
-                and (
-                    b.get("editor_relation")
-                    and (b.get("js_submit") or b.get("component"))
-                    or b.get("js_submit")
-                    and b.get("component")
-                )
+                and (b.get("js_submit") and (b.get("editor_relation") or b.get("component")))
             ):
                 score += 0.8
                 features.append("editor-controller")
