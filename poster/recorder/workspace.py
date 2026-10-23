@@ -10,6 +10,7 @@ import stat
 import sys
 import tempfile
 import uuid
+from filelock import FileLock, Timeout
 
 from ..browser import find_browser
 from ..engine import Engine
@@ -44,7 +45,14 @@ def directory_size(root):
         return 0
     size = 0
     for folder, dirs, files in os.walk(root, followlinks=False):
-        dirs[:] = [d for d in dirs if not linked(Path(folder) / d)]
+        existing = []
+        for name in dirs:
+            try:
+                if not linked(Path(folder) / name):
+                    existing.append(name)
+            except OSError:
+                pass  # Browser/cache directories can disappear during this survey.
+        dirs[:] = existing
         for name in files:
             path = Path(folder) / name
             try:
@@ -62,6 +70,7 @@ class Workspace:
         self.temporary = self.root / "tmp"
         self.db = self.root / "state.sqlite"
         self.active = set()
+        self.temp_locks = {}
         self.test_ports = set()
         self.root.mkdir(parents=True, exist_ok=True)
         self.projects.mkdir(exist_ok=True)
@@ -71,11 +80,32 @@ class Workspace:
         if linked(self.root) or linked(self.temporary):
             raise ValueError("UNSAFE_TEMP")
         path = Path(tempfile.mkdtemp(prefix="poster-", dir=self.temporary))
+        lock = FileLock(str(path / ".active.lock"), timeout=0)
+        lock.acquire()
+        self.temp_locks[path] = lock
         (path / ".poster-owned").write_text("poster-desktop-temp-v1", encoding="ascii")
         self.active.add(path)
         return path
 
+    def release_temp(self, path):
+        self.active.discard(path)
+        lock = self.temp_locks.pop(path, None)
+        if lock:
+            lock.release()
+
     def clean_temp(self):
+        if linked(self.root) or not self.temporary.exists() or linked(self.temporary):
+            return 0
+        lock_path = self.temporary / ".cleanup.lock"
+        if lock_path.exists() and linked(lock_path):
+            return 0
+        try:
+            with FileLock(str(lock_path), timeout=0):
+                return self._clean_temp()
+        except Timeout:
+            return 0
+
+    def _clean_temp(self):
         removed = 0
         if linked(self.root) or not self.temporary.exists() or linked(self.temporary):
             return removed
@@ -105,6 +135,12 @@ class Workspace:
                 for name in dirs + files
             ):
                 continue
+            try:
+                probe = FileLock(str(path / ".active.lock"), timeout=0)
+                with probe:
+                    pass
+            except Timeout:
+                continue  # Another Poster process still owns this temporary directory.
             size = directory_size(path)
             shutil.rmtree(path)
             removed += size
@@ -168,6 +204,14 @@ class Workspace:
                 dependencies[name] = importlib.metadata.version(name)
             except importlib.metadata.PackageNotFoundError:
                 dependencies[name] = "встроен" if getattr(sys, "frozen", False) else "не найден"
+        application = (
+            Path(sys.executable).parent / "_internal"
+            if getattr(sys, "frozen", False)
+            else Path(__file__).parent.parent
+        )
+        application_bytes = directory_size(application)
+        if getattr(sys, "frozen", False):
+            application_bytes += Path(sys.executable).stat().st_size
         return {
             "python": sys.version.split()[0],
             "dependencies": dependencies,
@@ -176,6 +220,7 @@ class Workspace:
             "data_bytes": directory_size(self.root),
             "temp_bytes": directory_size(self.temporary),
             "projects_bytes": directory_size(self.projects),
+            "application_bytes": application_bytes,
         }
 
 
@@ -244,7 +289,13 @@ class EngineBridge:
     def rows(self):
         state = State(self.workspace.db)
         try:
-            return state.rows()
+            labels = {}
+            for row in state.db.execute("SELECT id,variables FROM jobs"):
+                values = json.loads(row["variables"])
+                labels[row["id"]] = str(values.get("title") or values.get("body") or "Публикация").replace(
+                    "\n", " "
+                )[:100]
+            return [{**row, "title": labels.get(row["id"], "Публикация")} for row in state.rows()]
         finally:
             state.close()
 
@@ -308,10 +359,14 @@ async def local_test(workspace, progress):
             finally:
                 state.close()
     finally:
-        if session:
-            await session.close()
-        if knowledge:
-            knowledge.close()
-        workspace.active.discard(directory)
-        workspace.test_ports.discard(port)
-        workspace.clean_temp()
+        try:
+            if session:
+                await session.close()
+        finally:
+            try:
+                if knowledge:
+                    knowledge.close()
+            finally:
+                workspace.release_temp(directory)
+                workspace.test_ports.discard(port)
+                workspace.clean_temp()

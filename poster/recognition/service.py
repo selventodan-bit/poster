@@ -914,11 +914,15 @@ class RecognitionSession:
         self.scope = None
         self.login_scope = None
         self.closed = True
-        if self.context:
-            await self.context.close()
-            self.context = None
-        if self.recorder.pending:
-            await asyncio.gather(*list(self.recorder.pending), return_exceptions=True)
-        if self.playwright:
-            await self.playwright.stop()
-            self.playwright = None
+        context, playwright = self.context, self.playwright
+        self.context = self.playwright = None
+        try:
+            if context:
+                await context.close()
+        finally:
+            try:
+                if self.recorder.pending:
+                    await asyncio.gather(*list(self.recorder.pending), return_exceptions=True)
+            finally:
+                if playwright:
+                    await playwright.stop()

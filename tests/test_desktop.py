@@ -43,7 +43,7 @@ def test_cleanup_only_marked_inactive_temp_preserves_user_data(tmp_path):
     (private / "session.key").write_text("never delete")
     project = workspace.projects / "my-site"
     project.mkdir()
-    workspace.active.discard(owned)
+    workspace.release_temp(owned)
     assert workspace.clean_temp() > 0
     assert not owned.exists() and active.exists() and unknown.exists()
     assert (private / "session.key").read_text() == "never delete" and project.exists()
@@ -61,9 +61,19 @@ def test_cleanup_refuses_symlink_tree(tmp_path):
         )
     else:
         (owned / "link").symlink_to(outside, target_is_directory=True)
-    workspace.active.clear()
+    workspace.release_temp(owned)
     assert workspace.clean_temp() == 0
     assert owned.exists() and (outside / "valuable.txt").read_text() == "keep"
+
+
+def test_another_desktop_cannot_clean_an_active_test(tmp_path):
+    first = Workspace(tmp_path / ".poster")
+    active = first.create_temp()
+    (active / "test-data").write_text("active test")
+    second = Workspace(first.root)
+    assert second.clean_temp() == 0 and active.exists()
+    first.release_temp(active)
+    assert second.clean_temp() > 0 and not active.exists()
 
 
 async def test_desktop_engine_queue_stop_restart_does_not_resend(tmp_path, fixture_site, make_project):
@@ -73,6 +83,7 @@ async def test_desktop_engine_queue_stop_restart_does_not_resend(tmp_path, fixtu
     bridge = EngineBridge(workspace)
     job = bridge.enqueue("csrf", "Desktop Ж", "Body & <literal>\n日本語")
     assert bridge.rows()[0]["status"] == "PENDING"
+    assert bridge.rows()[0]["title"] == "Desktop Ж"
     await bridge.start()
     try:
         for _ in range(100):
@@ -86,6 +97,7 @@ async def test_desktop_engine_queue_stop_restart_does_not_resend(tmp_path, fixtu
     await asyncio.sleep(0.6)
     await bridge.stop()
     assert len(server.posts) == 1 and bridge.rows()[0]["id"] == job
+    assert bridge.rows()[0]["title"] == "Desktop Ж"
     pending = bridge.enqueue("csrf", "Cancel", "Never sent")
     bridge.cancel_pending(pending)
     assert bridge.rows()[-1]["status"] == "CANCELLED"
@@ -209,3 +221,24 @@ def test_localization_resources_are_independent_of_windows_ansi(monkeypatch):
     monkeypatch.setattr(io, "text_encoding", lambda encoding, stacklevel=2: encoding or "cp1252")
     words = Localizations()
     assert words.has("publish", "Опубликовать")
+
+
+async def test_session_releases_driver_when_context_close_fails(tmp_path):
+    from poster.recognition.service import RecognitionSession
+
+    stopped = []
+
+    class Context:
+        async def close(self):
+            raise RuntimeError("closed by the browser")
+
+    class Driver:
+        async def stop(self):
+            stopped.append(True)
+
+    session = RecognitionSession("https://example.test/", tmp_path / "profile")
+    session.context, session.playwright = Context(), Driver()
+    with pytest.raises(RuntimeError):
+        await session.close()
+    assert stopped == [True] and session.context is session.playwright is None
+    assert session.closed and session.read_only and session.scope is None

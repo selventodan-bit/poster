@@ -65,7 +65,8 @@ def check(executable, output):
         handle = window.handle
         pid = win32process.GetWindowThreadProcessId(handle)[1]
         process = win32api.OpenProcess(win32con.SYNCHRONIZE | win32con.PROCESS_QUERY_INFORMATION, False, pid)
-        wait(lambda s: bool(s.get("positions", {}).get("local_test")), "initial window")
+        initial = wait(lambda s: bool(s.get("positions", {}).get("local_test")), "initial window")
+        assert initial["frozen"] and initial["utf8_mode"] == 1
 
     def focus():
         window.set_focus()

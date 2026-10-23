@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import sys
 from pathlib import Path
 import threading
 import time
@@ -139,9 +140,9 @@ class DesktopMixin:
         )
         self.desktop_widgets["enqueue"].pack(anchor="w", pady=4)
         self.queue_tree = ttk.Treeview(
-            self.queue_page, columns=("project", "status"), show="headings", height=6
+            self.queue_page, columns=("project", "status", "title"), show="headings", height=6
         )
-        for key, label in (("project", "Проект"), ("status", "Состояние")):
+        for key, label in (("project", "Проект"), ("status", "Состояние"), ("title", "Публикация")):
             self.queue_tree.heading(key, text=label)
         self.queue_tree.pack(fill="both", expand=True, pady=4)
         ttk.Button(
@@ -149,9 +150,14 @@ class DesktopMixin:
         ).pack(anchor="w")
         ttk.Label(self.results_page, textvariable=self.result_text, wraplength=950).pack(anchor="w", pady=6)
         self.results_tree = ttk.Treeview(
-            self.results_page, columns=("project", "status", "url"), show="headings", height=12
+            self.results_page, columns=("project", "status", "url", "title"), show="headings", height=12
         )
-        for key, label in (("project", "Проект"), ("status", "Результат"), ("url", "Ссылка")):
+        for key, label in (
+            ("project", "Проект"),
+            ("status", "Результат"),
+            ("url", "Ссылка"),
+            ("title", "Публикация"),
+        ):
             self.results_tree.heading(key, text=label)
         self.results_tree.pack(fill="both", expand=True)
         self.results_tree.bind("<<TreeviewSelect>>", self.result_selected)
@@ -203,6 +209,7 @@ class DesktopMixin:
 
     def desktop_message(self, kind, value):
         if kind == "desktop_error":
+            self.refreshing = False
             self.status.set(value)
             self.write(value)
         elif kind == "progress":
@@ -219,6 +226,7 @@ class DesktopMixin:
             self.system_text.set(
                 f"Python: {value['python']}\nБраузер: {value['browser'] or 'не найден — выберите установленный или разрешите загрузку'}\n"
                 f"Свободно: {value['free_bytes'] / mb:.0f} МБ\nДанные Poster: {value['data_bytes'] / mb:.1f} МБ; проекты: {value['projects_bytes'] / mb:.1f} МБ; временные: {value['temp_bytes'] / mb:.1f} МБ\n"
+                f"Приложение и встроенные зависимости: {value['application_bytes'] / mb:.1f} МБ\n"
                 + "\n".join(f"{k}: {v}" for k, v in value["dependencies"].items())
             )
         elif kind == "desktop_snapshot":
@@ -251,6 +259,7 @@ class DesktopMixin:
                     values = (item["project_id"], JOB_TEXT.get(item["status"], "Требуется проверка"))
                     if tree is self.results_tree:
                         values += (item["result_url"] or "",)
+                    values += (item["title"],)
                     tree.insert("", "end", iid=item["id"], values=values)
                 if selection and tree.exists(selection[0]):
                     tree.selection_set(selection)
@@ -540,6 +549,8 @@ class DesktopMixin:
             "status": self.status.get(),
             "last_error": self.last_error,
             "last_progress": self.last_progress,
+            "frozen": bool(getattr(sys, "frozen", False)),
+            "utf8_mode": sys.flags.utf8_mode,
             "thread": threading.get_ident(),
             "observed_at": time.time(),
         }
