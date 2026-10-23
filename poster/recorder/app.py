@@ -19,6 +19,7 @@ from ..recognition.types import MESSAGES
 from ..recognition.policy import ResourcePolicy
 from .clipboard import ClipboardMixin
 from .preferences import Preferences
+from .desktop import DesktopMixin, friendly_error
 
 STATE_TEXT = {
     "DETECTED": "Форма найдена. Проверьте предпросмотр и разрешите одну тестовую публикацию.",
@@ -31,10 +32,10 @@ STATE_TEXT = {
 }
 
 
-class App(ClipboardMixin):
+class App(DesktopMixin, ClipboardMixin):
     def __init__(self, root):
         self.root = root
-        root.title("Poster 2.0 — распознавание и обучение")
+        root.title("Poster 2.0 — рабочее место")
         self.preferences = Preferences(Path(".poster/recorder-settings.json"))
         saved = self.preferences.load()
         ensure_local_key(Path(".poster/private"))
@@ -46,19 +47,28 @@ class App(ClipboardMixin):
         self.future = self.session = self.knowledge = self.existing_site = None
         self.busy = False
         self.snapshot = {}
-        self.url = tk.StringVar(value=saved.get("url", "http://127.0.0.1:8765/recognize/ajax"))
+        self.url = tk.StringVar(value=saved.get("url", ""))
         self.project_id = tk.StringVar(value=saved.get("project_id", ""))
         self.publication_kind = tk.StringVar(value="auto")
         self.static_origins = tk.StringVar(value="")
         self.title = tk.StringVar(value="Проверка Poster")
-        self.status = tk.StringVar(value="Введите адрес, заголовок и текст, затем нажмите «Распознать сайт».")
+        self.status = tk.StringVar(
+            value="Нажмите «Локальный тест» или введите адрес сайта и выберите «Проверить распознавание»."
+        )
         self.advanced = tk.BooleanVar(value=False)
         self.output_parent = tk.StringVar(value="")
+        self.desktop_init(root)
+        self.output_parent.set(str(self.workspace.projects))
+        root = self.recorder_page
         for label, variable in (("Адрес сайта или формы", self.url), ("Заголовок", self.title)):
             ttk.Label(root, text=label).pack(anchor="w", padx=12)
             widget = ttk.Entry(root, textvariable=variable, width=95)
             widget.pack(fill="x", padx=12, pady=4)
             self._enable_clipboard(widget)
+            if variable is self.url:
+                self.url_entry = widget
+            else:
+                self.title_entry = widget
         kind_row = ttk.Frame(root)
         kind_row.pack(fill="x", padx=12)
         ttk.Label(
@@ -72,7 +82,7 @@ class App(ClipboardMixin):
             width=12,
         ).pack(side="right")
         ttk.Label(root, text="Текст публикации").pack(anchor="w", padx=12)
-        self.body = tk.Text(root, width=90, height=6, wrap="word", undo=True)
+        self.body = tk.Text(root, width=90, height=4, wrap="word", undo=True)
         self.body.insert("1.0", "Тестовая публикация для проверки формы.")
         self.body.pack(fill="both", expand=True, padx=12, pady=4)
         self._enable_clipboard(self.body)
@@ -88,10 +98,10 @@ class App(ClipboardMixin):
         self.buttons = {}
         for index, (key, label, callback) in enumerate(
             (
-                ("recognize", "Распознать сайт", self.recognize),
+                ("recognize", "Проверить распознавание", self.recognize),
                 ("publish", "Тестовая публикация", self.publish),
                 ("http", "Проверить HTTP", self.http_verify),
-                ("manual", "Обучить вручную", self.manual),
+                ("manual", "Обучить сайт", self.manual),
                 ("finish", "Завершить обучение", self.finish_manual),
                 ("save", "Сохранить проект", self.save),
                 ("stop", "Стоп / закрыть браузер", self.stop),
@@ -125,12 +135,13 @@ class App(ClipboardMixin):
         self.form_choice.pack(fill="x", pady=4)
         ttk.Button(self.details, text="Выбрать эту форму", command=self.select_form).pack(side="left")
         ttk.Button(self.details, text="Открыть проект для переобучения", command=self.open).pack(side="left")
-        self.log = tk.Text(root, height=7, state="disabled", wrap="word")
+        self.log = tk.Text(root, height=4, state="disabled", wrap="word")
         self.log.pack(fill="both", padx=12, pady=8)
         self._enable_clipboard(self.log)
+        self.desktop_views()
         self.update_buttons()
-        root.after(100, self.pump)
-        root.protocol("WM_DELETE_WINDOW", self.close)
+        self.pump_after = root.after(100, self.pump)
+        self.root.protocol("WM_DELETE_WINDOW", self.close)
 
     def toggle_advanced(self):
         if self.advanced.get():
@@ -164,6 +175,9 @@ class App(ClipboardMixin):
         self.update_buttons()
 
         async def work():
+            task = asyncio.current_task()
+            self.operation_task = task
+            self.operation_tasks.add(task)
             try:
                 await operation()
                 summary = self.session.result.summary() if self.session else {}
@@ -179,8 +193,11 @@ class App(ClipboardMixin):
                         await self.session.close()
                         self.session = None
                     self.messages.put((generation, "reset", None))
-                self.messages.put((generation, "error", MESSAGES.get(code, MESSAGES["BROWSER_ERROR"])))
+                self.messages.put((generation, "error", MESSAGES.get(code, friendly_error(exc))))
             finally:
+                if self.operation_task is task:
+                    self.operation_task = None
+                self.operation_tasks.discard(task)
                 self.messages.put((generation, "done", None))
 
         self.future = asyncio.run_coroutine_threadsafe(work(), self.loop)
@@ -188,8 +205,11 @@ class App(ClipboardMixin):
     def pump(self):
         while not self.messages.empty():
             generation, kind, value = self.messages.get_nowait()
-            if generation != self.generation:
+            if generation is not None and generation != self.generation:
                 continue  # A stopped/previous run cannot update this run's UI.
+            if kind in {"desktop_error", "desktop_snapshot", "local_report", "system_report", "progress"}:
+                self.desktop_message(kind, value)
+                continue
             if kind == "result":
                 self.snapshot = value
                 self.status.set(
@@ -229,7 +249,8 @@ class App(ClipboardMixin):
                 self.busy = False
                 self.future = None
             self.update_buttons()
-        self.root.after(100, self.pump)
+        if not self.closing:
+            self.pump_after = self.root.after(100, self.pump)
 
     def update_buttons(self):
         state = self.snapshot.get("state")
@@ -247,11 +268,14 @@ class App(ClipboardMixin):
         }
         for key, button in self.buttons.items():
             button.configure(
-                state="normal" if enabled[key] and (not self.busy or key == "stop") else "disabled"
+                state="normal"
+                if not self.closing and enabled[key] and (not self.busy or key == "stop")
+                else "disabled"
             )
+        self.desktop_buttons()
 
     def recognize(self):
-        if self.busy:
+        if self.busy or not self.ensure_browser():
             return
         try:
             project_id, url = self.identity(), self.url.get().strip()
@@ -324,36 +348,17 @@ class App(ClipboardMixin):
         suffix = uuid.uuid4().hex[:6]
         title = title + " [HTTP " + suffix + "]"
         body = body + "\nHTTP-проверка " + suffix
-        output = Path(self.output_parent.get()) / self.identity() if self.output_parent.get() else None
-        if output and output.exists() and any(output.iterdir()):
-            self.status.set("Выберите пустую папку проекта перед автоматическим сохранением.")
-            return
         if not messagebox.askyesno(
             "Отдельная HTTP-проверка",
             "Создать вторую настоящую публикацию через HTTP с новым заголовком «"
-            + title
-            + "» и отдельной пометкой в тексте? После подтверждения проект будет сохранён в выбранную папку."
-            if output
-            else "Создать вторую настоящую публикацию через HTTP с новым заголовком «"
             + title
             + "» и отдельной пометкой в тексте?",
         ):
             return
 
         async def work():
+            await self.session.close()
             await self.session.verify_http(title, body, confirmed=True)
-            if output and self.session.result.state == "HTTP_VERIFIED":
-                try:
-                    self.session.save(output)
-                    self.messages.put((self.generation, "saved", str(output)))
-                except (ValueError, OSError):
-                    self.messages.put(
-                        (
-                            self.generation,
-                            "saved",
-                            "Автосохранение не выполнено. Выберите другую папку и нажмите «Сохранить проект».",
-                        )
-                    )
 
         self.run(work)
 
@@ -400,7 +405,9 @@ class App(ClipboardMixin):
             "HTTP ещё не проверен. Сохранить только REVIEW-кандидат? Очередь Engine не будет его выполнять.",
         ):
             return
-        parent = filedialog.askdirectory(title="Каталог проектов — внутри будет создана папка с ID")
+        parent = self.output_parent.get() or filedialog.askdirectory(
+            title="Каталог проектов — внутри будет создана папка с ID"
+        )
         if parent:
             output = Path(parent) / self.identity()
             if output.exists() and any(output.iterdir()):
@@ -409,6 +416,8 @@ class App(ClipboardMixin):
 
             async def work():
                 self.session.save(output)
+                self.workspace.import_project(output)
+                self.messages.put((self.generation, "saved", str(output)))
 
             self.run(work)
 
@@ -439,6 +448,12 @@ class App(ClipboardMixin):
         self.snapshot = {}
 
         async def work():
+            tasks = [t for t in self.operation_tasks if t is not asyncio.current_task() and not t.done()]
+            for task in tasks:
+                if not task.cancelling():
+                    task.cancel()
+            if tasks:
+                await asyncio.shield(asyncio.gather(*tasks, return_exceptions=True))
             if self.session:
                 await self.session.close()
                 self.session = None
@@ -446,18 +461,34 @@ class App(ClipboardMixin):
         self.run(work)
 
     def close(self):
+        if self.closing:
+            return
+        self.closing = True
+        for token in (self.pump_after, self.tick_after):
+            self.root.after_cancel(token)
         self.busy = True
         for button in self.buttons.values():
             button.configure(state="disabled")
         self.generation += 1
         if self.future:
             self.future.cancel()
+        self.status.set("Закрываю браузер и завершаю начатые HTTP-отправки…")
+        self.desktop_buttons()
 
         async def cleanup():
+            tasks = [t for t in self.operation_tasks if not t.done()]
+            for task in tasks:
+                if not task.cancelling():
+                    task.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            await self.engine_bridge.stop()
             if self.session:
                 await self.session.close()
             if self.knowledge:
                 self.knowledge.close()
+            await self.loop.shutdown_asyncgens()
+            await self.loop.shutdown_default_executor()
 
         future = asyncio.run_coroutine_threadsafe(cleanup(), self.loop)
 
@@ -473,6 +504,7 @@ class App(ClipboardMixin):
             # Future/coroutine cycles can be collected by a network thread.
             # Release Tcl references here, on their owning Tk thread.
             self.buttons.clear()
+            self.desktop_widgets.clear()
             for name, value in list(vars(self).items()):
                 if isinstance(value, (tk.Variable, tk.Misc)):
                     setattr(self, name, None)

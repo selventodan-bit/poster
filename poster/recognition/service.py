@@ -102,7 +102,16 @@ class RecognitionSession:
     async def start(self):
         from playwright.async_api import async_playwright
 
-        self.playwright = await async_playwright().start()
+        starting = asyncio.create_task(async_playwright().start())
+        try:
+            self.playwright = await asyncio.shield(starting)
+        except asyncio.CancelledError:
+            # Cancellation during driver startup otherwise loses the transport
+            # before this session can own and close it (GUI Stop / window close).
+            self.playwright = await starting
+            await self.playwright.stop()
+            self.playwright = None
+            raise
         try:
             self.profile.mkdir(parents=True, exist_ok=True)
             self.context = await self.playwright.chromium.launch_persistent_context(

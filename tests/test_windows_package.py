@@ -64,7 +64,7 @@ def test_launcher_repairs_old_environment_and_preserves_user_data(tmp_path, monk
         return SimpleNamespace(returncode=0)
 
     monkeypatch.setattr(launcher.subprocess, "run", run)
-    launcher.bootstrap(True)
+    launcher.bootstrap(True, accept_dependencies=True)
     assert list(tmp_path.glob(".venv-backup-*"))
     assert (private / "session.key").read_text() == "preserved key"
     assert any("pip" in c and "install" in c for c in calls)
@@ -82,7 +82,7 @@ def test_launcher_install_failure_does_not_mark_environment_healthy(tmp_path, mo
 
     monkeypatch.setattr(launcher.subprocess, "run", denied)
     with pytest.raises(PermissionError):
-        launcher.bootstrap(True)
+        launcher.bootstrap(True, accept_dependencies=True)
     assert not (tmp_path / ".venv" / "poster-install.sha256").exists()
 
 
@@ -119,3 +119,50 @@ def test_source_imports_and_egg_info_cannot_disguise_an_uninstalled_package(tmp_
     probe = 'import poster.recorder.app,playwright;from importlib.metadata import version;assert version("poster-http")=="0.2.0"'
     assert subprocess.run([str(python), "-c", probe], cwd=tmp_path).returncode == 0
     assert not launcher.environment_healthy(python)
+
+
+def test_source_launcher_requires_dependency_consent_before_mutation(tmp_path, monkeypatch):
+    launcher = module("windows_bootstrap")
+    monkeypatch.setattr(launcher, "ROOT", tmp_path)
+    with pytest.raises(ValueError, match="--accept-dependencies"):
+        launcher.bootstrap(True)
+    assert not (tmp_path / ".venv").exists()
+
+
+def test_missing_browser_is_never_implicitly_downloaded(tmp_path, monkeypatch):
+    launcher = module("windows_bootstrap")
+    monkeypatch.setattr(launcher, "ROOT", tmp_path)
+    monkeypatch.delenv("POSTER_CHROMIUM", raising=False)
+    (tmp_path / "requirements-recorder.txt").write_text("")
+    (tmp_path / "pyproject.toml").write_text("[project]")
+    python = tmp_path / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    python.parent.mkdir(parents=True)
+    python.write_text("existing")
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append(args)
+        if "import json,sys;" in args[-1]:
+            return SimpleNamespace(returncode=0, stdout=json.dumps(list(sys.version_info[:2])))
+        return SimpleNamespace(returncode=int("with sync_playwright()" in args[-1]))
+
+    monkeypatch.setattr(launcher.subprocess, "run", run)
+    with pytest.raises(ValueError, match="--install-browser"):
+        launcher.bootstrap(True, accept_dependencies=True)
+    assert not any("playwright" in call and "install" in call for call in calls)
+
+
+def test_executable_bundle_identifies_commit_and_excludes_private_state(tmp_path):
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    (bundle / "Poster.exe").write_bytes(b"test executable")
+    builder = module("build_windows_app")
+    checksum = builder.package(bundle, tmp_path / "out", "a" * 40)
+    with zipfile.ZipFile(tmp_path / "out/poster-windows.zip") as archive:
+        assert {"Poster.exe", "BUILD_INFO.json", "WINDOWS_README.txt"} <= set(archive.namelist())
+        assert json.loads(archive.read("BUILD_INFO.json")) == {"commit": "a" * 40, "browser_bundled": False}
+        assert checksum in (tmp_path / "out/poster-windows.sha256").read_text()
+    (bundle / ".poster").mkdir()
+    (bundle / ".poster/session.key").write_text("private")
+    with pytest.raises(ValueError, match="Private"):
+        builder.package(bundle, tmp_path / "bad", "b" * 40)

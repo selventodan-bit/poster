@@ -26,7 +26,7 @@ def test_recorder_launch_clipboard_localization_destination_and_close(tmp_path, 
     root.update()
     assert str(app.buttons["recognize"].cget("state")) == "normal"
     assert str(app.buttons["publish"].cget("state")) == "disabled"
-    assert app.output_parent.get() == ""
+    assert app.output_parent.get() == str(tmp_path / ".poster/projects")
     app.output_parent.set(str(tmp_path / "projects"))
     app.body.delete("1.0", "end")
     app.body.insert("1.0", "Текст для буфера")

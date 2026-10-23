@@ -25,6 +25,7 @@ def build(output):
         "pyproject.toml",
         "uv.lock",
         "requirements-recorder.txt",
+        "requirements-windows-build.txt",
         "start_recorder.cmd",
         "WINDOWS_README.txt",
     }

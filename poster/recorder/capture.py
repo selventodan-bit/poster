@@ -1,14 +1,14 @@
 """Playwright is intentionally imported only by the Recorder, never by the Engine."""
 
 import asyncio
-import os
-import shutil
 import time
 import uuid
 from email.message import Message
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
+
+from ..browser import find_browser
 
 
 @dataclass
@@ -60,10 +60,7 @@ document.addEventListener('input', e => {
 
 
 def chromium_options(headless=False, managed_executable=None):
-    executable = os.environ.get("POSTER_CHROMIUM")
-    if not executable and not (managed_executable and Path(managed_executable).is_file()):
-        # Playwright's managed Chromium is preferred; system Chromium is a supported fallback.
-        executable = shutil.which("chromium") or shutil.which("chromium-browser")
+    executable = find_browser(managed_executable)
     options = {"headless": headless}
     if executable:
         options["executable_path"] = executable

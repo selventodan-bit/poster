@@ -1,6 +1,10 @@
 @echo off
 setlocal
 cd /d "%~dp0"
+if exist "%~dp0Poster.exe" (
+  start "" "%~dp0Poster.exe"
+  exit /b 0
+)
 set "PYTHONUTF8=1"
 if defined POSTER_PYTHON (
   "%POSTER_PYTHON%" scripts\windows_bootstrap.py %*

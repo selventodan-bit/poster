@@ -1,5 +1,11 @@
 # Poster 2.0: результаты подготовки к пользовательским испытаниям
 
+Этот отчёт фиксирует этап до коммита `4cdc667` (Recorder и сервисный Windows E2E).
+Актуальное единое Windows-приложение с `Poster.exe`, GUI-очередью и настоящим
+OS mouse/keyboard E2E описано в [WINDOWS_DESKTOP.md](WINDOWS_DESKTOP.md).
+Прежние ограничения CMS ниже сохраняются; прежняя инструкция с Python/CMD
+не является инструкцией установки нового portable-пакета.
+
 Работа выполнена в существующей ветке `codex/poster-2-recognition`, PR №2.
 Итог конкретного коммита подтверждают [проверки PR](https://github.com/selventodan-bit/poster/pull/2/checks).
 Windows ZIP и его SHA256 публикуются artifact `poster-windows` каждого запуска Actions.

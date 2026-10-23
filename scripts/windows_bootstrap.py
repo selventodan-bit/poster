@@ -35,7 +35,7 @@ def environment_healthy(python):
     )
 
 
-def bootstrap(check_only=False):
+def bootstrap(check_only=False, *, accept_dependencies=False, install_chromium=False):
     if sys.version_info[:2] not in {(3, 11), (3, 12), (3, 13)}:
         raise ValueError("Install Python 3.11, 3.12 or 3.13 from python.org (include Tcl/Tk and pip).")
     env = ROOT / ".venv"
@@ -57,6 +57,10 @@ def bootstrap(check_only=False):
         if not compatible:
             env.rename(ROOT / (".venv-backup-" + uuid.uuid4().hex[:8]))
     if not python.exists():
+        if not accept_dependencies:
+            raise ValueError(
+                "Python dependencies need installation. Use the portable Poster.exe package, or explicitly pass --accept-dependencies."
+            )
         print("Creating Python environment...", flush=True)
         run([sys.executable, "-m", "venv", str(env)])
     stamp = env / "poster-install.sha256"
@@ -67,6 +71,8 @@ def bootstrap(check_only=False):
     ).hexdigest()
     healthy = environment_healthy(python)
     if not healthy or not stamp.exists() or stamp.read_text() != fingerprint:
+        if not accept_dependencies:
+            raise ValueError("Dependency repair requires consent. Use --accept-dependencies.")
         print("Installing current Poster and Recorder dependencies...", flush=True)
         run([str(python), "-m", "pip", "install", "-e", ".[recorder]", "-c", "requirements-recorder.txt"])
         run([str(python), "-m", "pip", "check"])
@@ -81,9 +87,14 @@ with sync_playwright() as p:
             raise ValueError(
                 "POSTER_CHROMIUM points to an unusable browser. Correct or remove this variable."
             )
-        print("Installing Chromium...", flush=True)
-        run([str(python), "-m", "playwright", "install", "chromium"])
-        run([str(python), "-c", browser_probe])
+        if install_chromium:
+            print("Installing Chromium with explicit consent...", flush=True)
+            run([str(python), "-m", "playwright", "install", "chromium"])
+            run([str(python), "-c", browser_probe])
+        elif check_only:
+            raise ValueError(
+                "Chrome/Chromium is missing. Choose an installed browser in the app, or explicitly pass --install-browser."
+            )
     print("Poster environment and Chromium verified.", flush=True)
     if not check_only:
         run([str(python), "-m", "poster", "recorder"])
@@ -92,9 +103,13 @@ with sync_playwright() as p:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--check", action="store_true")
+    parser.add_argument("--accept-dependencies", action="store_true")
+    parser.add_argument("--install-browser", action="store_true")
     args = parser.parse_args()
     try:
-        bootstrap(args.check)
+        bootstrap(
+            args.check, accept_dependencies=args.accept_dependencies, install_chromium=args.install_browser
+        )
     except (OSError, ValueError, subprocess.CalledProcessError) as exc:
         print(
             "Recorder startup failed: "
