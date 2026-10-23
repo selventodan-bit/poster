@@ -17,7 +17,7 @@ class ReadinessHandler(Handler):
             case = path.rsplit("/", 1)[-1]
             kind = case if case in {"reply", "comment"} else "topic"
             title = '<input name="x47" required>' if kind == "topic" else ""
-            js = case in {"ajax", "background", "ambiguous", "delayed"}
+            js = case in {"ajax", "background", "ambiguous", "delayed", "synchronous"}
             token = secrets.token_hex(24)
             self.server.tokens[token] = True
             # The opaque names/classes and unknown language are independent of the old generator.
@@ -36,6 +36,11 @@ class ReadinessHandler(Handler):
             const payload=()=>new URLSearchParams(new FormData(f));
             function emit(){fetch('/store-js',{method:'POST',body:payload()}).then(r=>r.json()).then(r=>{location.href=r.url;});}
             """
+            if case == "synchronous":
+                script = script.replace(
+                    "function emit(){",
+                    "function emit(){fetch('/autosave',{method:'POST',body:payload()}).catch(()=>{});",
+                )
             if case == "background":
                 script += r"""
                 document.querySelector('button').addEventListener('pointerdown',()=>{

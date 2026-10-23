@@ -56,6 +56,32 @@ class SubmissionScope:
         except (ValueError, UnicodeError, LookupError):
             return False
         if not self.sent:
+            purpose = urlsplit(request.url).path + "?" + urlsplit(request.url).query
+            if isinstance(payload, dict):
+                purpose += " " + " ".join(
+                    str(v)
+                    for k, v in payload.items()
+                    if k.lower() in {"action", "mode", "operation", "op", "do"}
+                )
+            if re.search(
+                r"(?:^|[/=?&;_\s-])(?:autosave|preview|upload|attachment|edit|delete|vote|settings)(?:$|[/=?&;_\s-])",
+                purpose,
+                re.I,
+            ):
+                return False
+            if re.search(r"(?:^|[/=?&;_\s-])drafts?(?:$|[/=?&;_\s-])", purpose, re.I):
+                from .network import leaves
+
+                # A title-only draft can start a multi-step topic transaction;
+                # storing a full post as a draft needs a previously proven recipe.
+                if (
+                    any(
+                        isinstance(v, str) and text(v) == text(self.capture.body_marker)
+                        for _, v in leaves(payload)
+                    )
+                    and not self.templates
+                ):
+                    return False
             signed = self.interaction and request.headers.get("x-poster-interaction") == self.interaction
             # A selected click may GET a fresh token before its first POST. That
             # read and consumed high-entropy value establish causality only for

@@ -8,7 +8,7 @@ from poster.recognition.service import RecognitionSession
 from poster.recognition.policy import ResourcePolicy
 
 
-@pytest.mark.parametrize("case", ["topic", "reply", "comment", "ajax", "background"])
+@pytest.mark.parametrize("case", ["topic", "reply", "comment", "ajax", "background", "synchronous"])
 async def test_independent_shapes_complete_export_restart(case, tmp_path):
     import importlib.util
 
@@ -33,7 +33,7 @@ async def test_ambiguous_unsafe_and_deferred_click_are_not_mutations(case, detec
             assert (s.result.state == "DETECTED") == detected, s.result.summary()
             if detected:
                 await s.test_publish("Unfamiliar", "Текст публикации", "probe", confirmed=True)
-                assert s.result.state == "UNKNOWN"
+                assert s.result.state == "FAILED"
                 with pytest.raises(ValueError, match="ALREADY_ATTEMPTED"):
                     await s.test_publish("Again", "Other", "probe", confirmed=True)
             assert not server.writes

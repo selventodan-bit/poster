@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+import traceback
 
 from poster.auth import ensure_local_key
 from poster.fixtures_readiness import serve_readiness
@@ -69,7 +70,8 @@ print(json.dumps({'status':r.status,'browser_imported':False}))
         assert process.returncode == 0, process.stderr
         assert (
             len(server.posts) == 3
-            and server.writes == (["/store-js"] if case in {"ajax", "background"} else ["/store"]) * 3
+            and server.writes
+            == (["/store-js"] if case in {"ajax", "background", "synchronous"} else ["/store"]) * 3
         ), server.writes
         assert all("<literal>" in p["body"] and "\n" in p["body"] for p in server.posts.values())
         report = {
@@ -92,4 +94,12 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=Path, default=Path(".poster/windows-e2e"))
     parser.add_argument("--case", default="topic")
     args = parser.parse_args()
-    print(json.dumps(asyncio.run(check(args.output, args.case))))
+    try:
+        print(json.dumps(asyncio.run(check(args.output, args.case))))
+    except Exception as exc:
+        locations = " > ".join(
+            f"{Path(f.filename).name}:{f.lineno}:{f.name}"
+            for f in traceback.extract_tb(exc.__traceback__)[-4:]
+        )
+        print(f"::error::Windows acceptance {type(exc).__name__} at {locations}", flush=True)
+        raise

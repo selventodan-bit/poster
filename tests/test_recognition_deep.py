@@ -33,7 +33,7 @@ async def test_heldout_browser_to_http(case, broad_site, tmp_path):
     assert result["form"] and result["fields"], result
     negative = case.get("negative")
     assert not result["false_confirmation"]
-    if negative in {"rejected", "silent", "hidden", "login"}:
+    if negative in {"rejected", "silent", "hidden", "login", "background"}:
         assert not result["browser"] and not result["http"], result
     elif negative == "opaque":
         assert result["browser"] and not result["http"] and result["state"] == "LEARNING_REQUIRED", result

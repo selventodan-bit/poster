@@ -50,6 +50,8 @@ jobs:
           if-no-files-found: error
   windows-recorder:
     needs: windows-package
+    env:
+      PYTHONUTF8: '1'
     runs-on: windows-latest
     timeout-minutes: 25
     strategy:

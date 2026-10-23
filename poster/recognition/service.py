@@ -553,7 +553,7 @@ class RecognitionSession:
         self.result.diagnostics.append("NO_PERMALINK")
         self.result.diagnostics.append("CONFIRMATION_PENDING")
         self.result.diagnostics.extend(NetworkAnalyzer().analyze(capture).diagnostics)
-        self.state(LearningState.UNKNOWN)
+        self.state(LearningState.UNKNOWN if self.scope and self.scope.sent else LearningState.FAILED)
         self.result.outcome = (
             "auth_expired" if "AUTH_EXPIRED" in self.result.diagnostics else "confirmation_timeout"
         )

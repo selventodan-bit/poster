@@ -174,6 +174,7 @@ class NavigationDiscovery:
                     ):
                         ref.features = list(dict.fromkeys([*ref.features, "previous-stage"]))
                         form.fields["title"] = ref
+                        form.publication_kind = "topic"
                         form.evidence.append("staged-title")
                         from .forms import UniversalFormDetector
 
