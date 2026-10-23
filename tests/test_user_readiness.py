@@ -54,12 +54,14 @@ async def test_static_ssrf_and_redirect_query_validation(monkeypatch):
     with pytest.raises(ValueError):
         ResourcePolicy(["http://127.0.0.1"])
 
-    async def lookup(*args, **kwargs):
-        return [(2, 1, 6, "", ("127.0.0.1", 443))]
+    for address in ("127.0.0.1", "169.254.169.254", "224.0.0.1", "::1"):
 
-    monkeypatch.setattr(asyncio.get_running_loop(), "getaddrinfo", lookup)
-    with pytest.raises(ValueError, match="private"):
-        await p.public_addresses("static.example", 443)
+        async def lookup(*args, _address=address, **kwargs):
+            return [(2, 1, 6, "", (_address, 443))]
+
+        monkeypatch.setattr(asyncio.get_running_loop(), "getaddrinfo", lookup)
+        with pytest.raises(ValueError, match="private"):
+            await p.public_addresses("static.example", 443)
 
 
 async def test_disappeared_control_and_secret_free_diagnostics(tmp_path):
@@ -86,6 +88,7 @@ async def test_blocked_unknown_cdn_is_explained(tmp_path):
             await s.start()
             await s.recognize()
             assert "STATIC_RESOURCE_BLOCKED" in s.result.diagnostics
+            assert "STATIC_ORIGIN_UNAPPROVED" in s.result.diagnostics
         finally:
             await s.close()
 

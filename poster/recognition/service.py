@@ -146,6 +146,8 @@ class RecognitionSession:
                 return
             if request.resource_type in self.resources.TYPES:
                 self.diagnose("STATIC_RESOURCE_BLOCKED")
+                if self.resources.last_reason:
+                    self.diagnose(self.resources.last_reason)
             if "BLOCKED_HOST" not in self.result.diagnostics:
                 self.result.diagnostics.append("BLOCKED_HOST")
             await route.abort()
@@ -227,7 +229,7 @@ class RecognitionSession:
         self.result = Recognition(
             diagnostics=[
                 "READ_ONLY",
-                *[c for c in self.result.diagnostics if c in {"STATIC_RESOURCE_BLOCKED", "BLOCKED_HOST"}],
+                *[c for c in self.result.diagnostics if c.startswith("STATIC_") or c == "BLOCKED_HOST"],
             ]
         )
         detector = UniversalFormDetector(self.locales, self.publication_kind)

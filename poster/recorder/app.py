@@ -466,7 +466,16 @@ class App(ClipboardMixin):
                 self.root.after(50, finish)
                 return
             self.loop.call_soon_threadsafe(self.loop.stop)
+            self.thread.join(timeout=1)
+            if not self.thread.is_alive():
+                self.loop.close()
             self.root.destroy()
+            # Future/coroutine cycles can be collected by a network thread.
+            # Release Tcl references here, on their owning Tk thread.
+            self.buttons.clear()
+            for name, value in list(vars(self).items()):
+                if isinstance(value, (tk.Variable, tk.Misc)):
+                    setattr(self, name, None)
 
         finish()
 

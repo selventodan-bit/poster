@@ -202,11 +202,13 @@ class ResourcePolicy:
             ):
                 raise ValueError("Static resources require exact HTTPS origins")
         self.static_origins = {origin(u) for u in urls}
+        self.last_reason = None
 
     async def public_addresses(self, hostname, port):
         records = await asyncio.get_running_loop().getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
         addresses = list(dict.fromkeys(r[4][0] for r in records))
-        if not addresses or any(not ipaddress.ip_address(a).is_global for a in addresses):
+        parsed_addresses = [ipaddress.ip_address(a) for a in addresses]
+        if not addresses or any(not a.is_global or a.is_multicast or a.is_reserved for a in parsed_addresses):
             raise ValueError("Static origin resolves to a private or reserved address")
         return addresses
 
@@ -236,6 +238,7 @@ class ResourcePolicy:
         )
 
     async def fulfill_static(self, route):
+        self.last_reason = "STATIC_ORIGIN_UNAPPROVED"
         request = route.request
         if (
             origin(request.url) not in self.static_origins
@@ -246,12 +249,14 @@ class ResourcePolicy:
         # A new client is deliberately used: browser cookies, Authorization, Referer,
         # query secrets, redirect cookies and Set-Cookie cannot cross this boundary.
         if not self.safe_url(request.url):
+            self.last_reason = "STATIC_ADDRESS_REJECTED"
             return False
         url = request.url
         try:
             async with httpx.AsyncClient(timeout=10, follow_redirects=False, trust_env=False) as client:
                 for _ in range(4):
                     if not self.safe_url(url):
+                        self.last_reason = "STATIC_REDIRECT_REJECTED"
                         return False
                     parsed = urlsplit(url)
                     addresses = await self.public_addresses(parsed.hostname, parsed.port or 443)
@@ -269,15 +274,18 @@ class ResourcePolicy:
 
                             url = urljoin(url, response.headers.get("location", ""))
                             if origin(url) not in self.static_origins:
+                                self.last_reason = "STATIC_REDIRECT_REJECTED"
                                 return False
                             continue
                         if response.status_code != 200:
+                            self.last_reason = "STATIC_HTTP_FAILED"
                             return False
                         chunks = []
                         size = 0
                         async for chunk in response.aiter_bytes():
                             size += len(chunk)
                             if size > 3_000_000:
+                                self.last_reason = "STATIC_SIZE_LIMIT"
                                 return False
                             chunks.append(chunk)
                         await route.fulfill(
@@ -290,7 +298,10 @@ class ResourcePolicy:
                                 "access-control-allow-origin": "*",
                             },
                         )
+                        self.last_reason = None
                         return True
-        except (httpx.HTTPError, OSError, ValueError):
-            pass
+        except ValueError:
+            self.last_reason = "STATIC_ADDRESS_REJECTED"
+        except (httpx.HTTPError, OSError):
+            self.last_reason = "STATIC_NETWORK_FAILED"
         return False

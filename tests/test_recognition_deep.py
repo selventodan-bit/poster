@@ -375,8 +375,10 @@ async def test_static_fetch_does_not_forward_secrets_or_accept_redirect_escape(m
     assert "set-cookie" not in filled[0]["headers"]
     request.url = "https://assets.test/style.css?token=private"
     assert not await policy.fulfill_static(route)
+    assert policy.last_reason == "STATIC_ADDRESS_REJECTED"
     request.url = "https://assets.test/redirect"
     assert not await policy.fulfill_static(route)
+    assert policy.last_reason == "STATIC_REDIRECT_REJECTED"
     assert len(seen) == 2 and all(
         r.headers["host"] == "assets.test" and r.url.host == "93.184.216.34" for r in seen
     )

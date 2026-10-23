@@ -16,6 +16,25 @@ def run(command):
     subprocess.run(command, cwd=ROOT, check=True)
 
 
+def environment_healthy(python):
+    # -I excludes the working directory and PYTHONPATH. Otherwise source
+    # imports + leftover egg-info can disguise an uninstalled editable package.
+    probe = subprocess.run(
+        [
+            str(python),
+            "-I",
+            "-c",
+            'import poster.recorder.app,playwright;from importlib.metadata import version;assert version("poster-http")=="0.2.0"',
+        ],
+        cwd=ROOT,
+        capture_output=True,
+    )
+    return (
+        probe.returncode == 0
+        and subprocess.run([str(python), "-m", "pip", "check"], cwd=ROOT, capture_output=True).returncode == 0
+    )
+
+
 def bootstrap(check_only=False):
     if sys.version_info[:2] not in {(3, 11), (3, 12), (3, 13)}:
         raise ValueError("Install Python 3.11, 3.12 or 3.13 from python.org (include Tcl/Tk and pip).")
@@ -24,7 +43,11 @@ def bootstrap(check_only=False):
     if python.exists():
         try:
             probe = subprocess.run(
-                [str(python), "-c", "import json,sys;print(json.dumps(list(sys.version_info[:2])))"],
+                [
+                    str(python),
+                    "-c",
+                    "import json,sys;import pip;print(json.dumps(list(sys.version_info[:2])))",
+                ],
                 capture_output=True,
                 text=True,
             )
@@ -42,20 +65,7 @@ def bootstrap(check_only=False):
         + (ROOT / "requirements-recorder.txt").read_bytes()
         + str(ROOT).encode()
     ).hexdigest()
-    healthy = (
-        subprocess.run(
-            [
-                str(python),
-                "-c",
-                'import poster.recorder.app,playwright;from importlib.metadata import version;assert version("poster-http")=="0.2.0"',
-            ],
-            capture_output=True,
-        ).returncode
-        == 0
-    )
-    healthy = (
-        healthy and subprocess.run([str(python), "-m", "pip", "check"], capture_output=True).returncode == 0
-    )
+    healthy = environment_healthy(python)
     if not healthy or not stamp.exists() or stamp.read_text() != fingerprint:
         print("Installing current Poster and Recorder dependencies...", flush=True)
         run([str(python), "-m", "pip", "install", "-e", ".[recorder]", "-c", "requirements-recorder.txt"])

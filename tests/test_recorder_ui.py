@@ -4,6 +4,8 @@ import os
 import time
 import asyncio
 import threading
+import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -82,3 +84,31 @@ def test_recorder_launch_clipboard_localization_destination_and_close(tmp_path, 
         time.sleep(0.02)
     app.thread.join(timeout=3)
     assert not app.thread.is_alive()
+
+
+def test_closed_gui_can_be_collected_on_a_network_thread(tmp_path):
+    script = """import gc,threading,time,tkinter as tk
+from poster.recorder.app import App
+root=tk.Tk(); app=App(root);root.update();app.close()
+deadline=time.monotonic()+5
+while time.monotonic()<deadline:
+    try:
+        root.update()
+        if not root.winfo_exists():break
+    except tk.TclError:break
+    time.sleep(.02)
+app.thread.join(timeout=3)
+assert not app.thread.is_alive()
+del root
+holder=[app]
+del app
+def collect():
+    holder.clear();gc.collect()
+t=threading.Thread(target=collect);t.start();t.join(timeout=3)
+assert not t.is_alive()
+print("closed GUI collected safely")
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script], cwd=tmp_path, capture_output=True, text=True, timeout=15
+    )
+    assert result.returncode == 0, result.stderr

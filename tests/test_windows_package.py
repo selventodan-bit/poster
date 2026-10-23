@@ -1,6 +1,8 @@
 import importlib.util
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 import zipfile
@@ -94,3 +96,26 @@ def test_public_pytest_summary_excludes_traceback_and_secret_values(tmp_path, ca
     report = json.loads(target.read_text())
     assert report["tests"] == 1 and report["failures"][0]["test"] == "checks.case"
     assert "PRIVATE_TOKEN" not in target.read_text() + capsys.readouterr().out
+
+
+def test_source_imports_and_egg_info_cannot_disguise_an_uninstalled_package(tmp_path, monkeypatch):
+    launcher = module("windows_bootstrap")
+    monkeypatch.setattr(launcher, "ROOT", tmp_path)
+    env = tmp_path / "clean env"
+    subprocess.run([sys.executable, "-m", "venv", str(env)], check=True)
+    python = env / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    for name in [
+        "poster/__init__.py",
+        "poster/recorder/__init__.py",
+        "poster/recorder/app.py",
+        "playwright.py",
+    ]:
+        p = tmp_path / name
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("")
+    metadata = tmp_path / "poster_http.egg-info"
+    metadata.mkdir()
+    (metadata / "PKG-INFO").write_text("Metadata-Version: 2.1\nName: poster-http\nVersion: 0.2.0\n")
+    probe = 'import poster.recorder.app,playwright;from importlib.metadata import version;assert version("poster-http")=="0.2.0"'
+    assert subprocess.run([str(python), "-c", probe], cwd=tmp_path).returncode == 0
+    assert not launcher.environment_healthy(python)
