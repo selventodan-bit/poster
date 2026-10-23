@@ -71,7 +71,8 @@ print(json.dumps({'status':r.status,'browser_imported':False}))
         assert (
             len(server.posts) == 3
             and server.writes
-            == (["/store-js"] if case in {"ajax", "background", "synchronous"} else ["/store"]) * 3
+            == (["/store-js"] if case in {"ajax", "background", "synchronous", "listener"} else ["/store"])
+            * 3
         ), server.writes
         assert all("<literal>" in p["body"] and "\n" in p["body"] for p in server.posts.values())
         report = {

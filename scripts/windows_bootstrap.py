@@ -22,14 +22,14 @@ def bootstrap(check_only=False):
     env = ROOT / ".venv"
     python = env / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     if python.exists():
-        probe = subprocess.run(
-            [str(python), "-c", "import json,sys;print(json.dumps(list(sys.version_info[:2])))"],
-            capture_output=True,
-            text=True,
-        )
         try:
+            probe = subprocess.run(
+                [str(python), "-c", "import json,sys;print(json.dumps(list(sys.version_info[:2])))"],
+                capture_output=True,
+                text=True,
+            )
             compatible = probe.returncode == 0 and json.loads(probe.stdout) == list(sys.version_info[:2])
-        except ValueError:
+        except (OSError, ValueError):
             compatible = False
         if not compatible:
             env.rename(ROOT / (".venv-backup-" + uuid.uuid4().hex[:8]))
@@ -48,6 +48,9 @@ def bootstrap(check_only=False):
             capture_output=True,
         ).returncode
         == 0
+    )
+    healthy = (
+        healthy and subprocess.run([str(python), "-m", "pip", "check"], capture_output=True).returncode == 0
     )
     if not healthy or not stamp.exists() or stamp.read_text() != fingerprint:
         print("Installing current Poster and Recorder dependencies...", flush=True)

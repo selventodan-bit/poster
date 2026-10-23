@@ -52,6 +52,7 @@ jobs:
     needs: windows-package
     env:
       PYTHONUTF8: '1'
+      PLAYWRIGHT_BROWSERS_PATH: '${{ github.workspace }}/Poster Проверка с пробелами/.poster/browser-cache'
     runs-on: windows-latest
     timeout-minutes: 25
     strategy:
@@ -82,6 +83,23 @@ jobs:
         working-directory: Poster Проверка с пробелами
         shell: cmd
         run: start_recorder.cmd --check
+      - name: Repair a stale installation via the same launcher
+        working-directory: Poster Проверка с пробелами
+        shell: cmd
+        run: |
+          .venv\Scripts\python.exe -m pip uninstall --yes poster-http
+          if errorlevel 1 exit /b 1
+          call start_recorder.cmd --check
+          if errorlevel 1 exit /b 1
+      - name: Invalid explicit Chromium produces a clear failure
+        working-directory: Poster Проверка с пробелами
+        shell: pwsh
+        run: |
+          $env:POSTER_CHROMIUM = 'C:\poster-browser-does-not-exist.exe'
+          cmd /c 'start_recorder.cmd --check'
+          if ($LASTEXITCODE -eq 0) { throw 'Invalid Chromium accepted' }
+          Remove-Item Env:POSTER_CHROMIUM
+          exit 0
       - name: Real Windows service E2E and process restart
         working-directory: Poster Проверка с пробелами
         shell: pwsh

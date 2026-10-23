@@ -64,4 +64,19 @@ INTERACTION_JS = r"""(() => {
    if(active && addresses.get(this)?.origin===location.origin) this.setRequestHeader('x-poster-interaction',active);
    return send.call(this,body);
  };
+ const add=EventTarget.prototype.addEventListener,controllers=new WeakSet();
+ const networkHandler=(handler,depth=0)=>{
+   if(typeof handler!=='function'||depth>2) return false;
+   const code=String(handler).slice(0,10000);
+   if(/fetch\s*\(|\.send\s*\(|requestSubmit\s*\(/.test(code)) return true;
+   // Inspect a bounded chain of ordinary global function calls, without eval,
+   // getters or executing any handler. Lexical/obfuscated handlers stay unknown.
+   return [...code.matchAll(/\b([A-Za-z_$][\w$]*)\s*\(/g)].slice(0,8).some(m=>
+     networkHandler(Object.getOwnPropertyDescriptor(window,m[1])?.value,depth+1));
+ };
+ window.__posterController=e=>controllers.has(e)||networkHandler(e.onclick);
+ EventTarget.prototype.addEventListener=function(type,handler,options) {
+   if(['click','submit'].includes(type) && networkHandler(handler)) controllers.add(this);
+   return add.call(this,type,handler,options);
+ };
 })();"""

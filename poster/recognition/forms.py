@@ -16,7 +16,7 @@ SNAPSHOT_JS = r"""() => {
    if(!roots.some(r=>r.contains(e))) {
      let root=e.closest('section,article,dialog,[role="dialog"],fieldset');
      if(!root) for(let p=e.parentElement,depth=0;p&&p!==document.body&&depth<6;p=p.parentElement,depth++) {
-       if(p.querySelector('input[type="text"],input:not([type])')&&p.querySelector('button,[role="button"]')) {root=p;break;}
+       if(p.querySelector('button,[role="button"]')) {root=p;break;}
      }
      root=root||e.parentElement;
      if(root&&!roots.includes(root)) roots.push(root);
@@ -24,7 +24,7 @@ SNAPSHOT_JS = r"""() => {
  }
  return roots.map((root,i)=>{
   const key='form-'+i;root.setAttribute('data-poster-form',key);
-  const descendants=[root,...all(root)];
+  const descendants=[...new Set([root,...all(root),...(root.elements||[])])];
   const controls=descendants.filter(e=>e.matches('input,textarea,select,[contenteditable="true"],[role="textbox"]'));
   const editor=controls.find(e=>e.matches('textarea,[contenteditable="true"],[role="textbox"]'));
   const fields=controls.map((e,j)=>{
@@ -39,7 +39,7 @@ SNAPSHOT_JS = r"""() => {
     accessibility:accessibility.slice(0,400),name:e.name||'',tag:e.tagName.toLowerCase(),type:e.type||'',
     editable:e.isContentEditable,visible:visible(e),adapter,
     before_editor:!!editor && e!==editor && !!(e.compareDocumentPosition(editor)&Node.DOCUMENT_POSITION_FOLLOWING),
-    required:e.required||e.getAttribute('aria-required')==='true',maxlength:e.maxLength||0};
+    required:!e.disabled&&(e.required||e.getAttribute('aria-required')==='true'),has_value:e.type==='checkbox'||e.type==='radio'?e.checked:!!e.value, maxlength:e.maxLength||0};
   });
   const buttons=descendants.filter(e=>e.matches('button,input[type="submit"],[role="button"]')).filter(visible).map((e,j)=>{
    const id=key+'-submit-'+j;e.setAttribute('data-poster-submit',id);
@@ -47,7 +47,7 @@ SNAPSHOT_JS = r"""() => {
     type:e.type||'',tag:e.tagName.toLowerCase(),form_owned:e.form===root,
     action:[e.name,e.getAttribute('data-action'),e.getAttribute('formaction')].filter(Boolean).join(' '),
     editor_relation:!!editor && ((e.getAttribute('aria-controls')||'').split(' ').includes(editor.id) && !!editor.id),
-    js_submit:!!e.onclick && /fetch\s*\(|\.send\s*\(|requestSubmit\s*\(/.test(String(e.onclick)),
+    js_submit:window.__posterController?.(e) || (!!e.onclick && /fetch\s*\(|\.send\s*\(|requestSubmit\s*\(/.test(String(e.onclick))),
     component:/composer|editor|submit|primary/i.test([root.className,e.className,e.getAttribute('data-action')].join(' ')),
     endpoint:e.getAttribute('data-endpoint')||e.getAttribute('data-url')||''};
   });
@@ -268,6 +268,10 @@ class UniversalFormDetector:
         if candidate.publication_kind in {"reply", "comment"}:
             candidate.fields.pop("title", None)
             candidate.confidence = 0.95 if {"body", "submit"} <= fields.keys() else self.confidence(fields)
+        mapped = {f.selector for role, f in candidate.fields.items() if role in {"title", "body"}}
+        if any(f.get("required") and not f.get("has_value") and f["selector"] not in mapped for f in visible):
+            candidate.fields.pop("submit", None)
+            candidate.evidence.append("unresolved-required-control")
         candidate.text_inputs = [
             next(
                 (r for r in alternatives.get("title", []) if r.selector == f["selector"]),

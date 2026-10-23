@@ -191,6 +191,17 @@ class ResourcePolicy:
 
     def safe_url(self, url):
         parsed = urlsplit(url)
+        queries = parse_qsl(parsed.query, keep_blank_values=True)
+        defaults = {origin(u) for u in self.DEFAULT_STATIC}
+        # Custom origins are intentionally path-only: opaque query parameters
+        # cannot be proven free of secrets by their names alone.
+        if queries and origin(url) not in defaults:
+            return False
+        if any(
+            k not in {"v", "ver", "version", "family", "display", "subset", "icon_names", "module"}
+            for k, _ in queries
+        ):
+            return False
         return (
             origin(url) in self.static_origins
             and not parsed.username

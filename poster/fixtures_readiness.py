@@ -17,7 +17,7 @@ class ReadinessHandler(Handler):
             case = path.rsplit("/", 1)[-1]
             kind = case if case in {"reply", "comment"} else "topic"
             title = '<input name="x47" required>' if kind == "topic" else ""
-            js = case in {"ajax", "background", "ambiguous", "delayed", "synchronous"}
+            js = case in {"ajax", "background", "ambiguous", "delayed", "synchronous", "listener"}
             token = secrets.token_hex(24)
             self.server.tokens[token] = True
             # The opaque names/classes and unknown language are independent of the old generator.
@@ -26,9 +26,19 @@ class ReadinessHandler(Handler):
                 button = '<button type="button" aria-controls="z91" onclick="emit()"><svg width="20" height="20"><circle cx="8" cy="8" r="6"/></svg></button>'
             if case == "ambiguous":
                 button += button
-            markup = f'''<form class="editor" data-publication-type="{kind}" method="post" action="/store">
+            markup = f'''<form class="u38" data-publication-type="{kind}" method="post" action="/store">
               <input type="hidden" name="csrf_token" value="{token}">{title}
               <div><textarea id="z91" name="q86" required></textarea></div>{button}</form>'''
+            if case == "required":
+                markup = markup.replace("</form>", '<input type="email" required name="r62"></form>')
+            if case == "navigation":
+                markup = (
+                    """<nav><button type="button" aria-haspopup="menu" aria-controls="r17" onclick="document.getElementById('r17').hidden=false">◈</button></nav>
+                          <aside id="r17" role="menu" hidden><button type="button" aria-controls="j42" onclick="document.getElementById('j42').hidden=false;this.parentElement.hidden=true">◆</button></aside>
+                          <main id="j42" hidden>"""
+                    + markup
+                    + "</main>"
+                )
             if case == "unsafe":
                 markup = markup.replace("/store", "/edit")
             script = r"""
@@ -36,6 +46,11 @@ class ReadinessHandler(Handler):
             const payload=()=>new URLSearchParams(new FormData(f));
             function emit(){fetch('/store-js',{method:'POST',body:payload()}).then(r=>r.json()).then(r=>{location.href=r.url;});}
             """
+            if case == "listener":
+                markup = markup.replace(' onclick="emit()"', "")
+                script += "document.querySelector('button').addEventListener('click',emit);"
+            if case == "cdn":
+                markup += '<script src="https://unknown.invalid/build.js"></script>'
             if case == "synchronous":
                 script = script.replace(
                     "function emit(){",
@@ -49,9 +64,9 @@ class ReadinessHandler(Handler):
                 setInterval(()=>{if(f.q86.value) fetch('/autosave',{method:'POST',body:payload()}).catch(()=>{});},30);
                 """
             if case == "delayed":
-                script = script.replace("fetch('/store'", "setTimeout(()=>fetch('/store'").replace(
-                    "location.href=r.url;});}", "location.href=r.url;}),50);}"
-                )
+                script = script.replace(
+                    "function emit(){fetch(", "function emit(){setTimeout(()=>fetch("
+                ).replace("location.href=r.url;});}", "location.href=r.url;}),50);}")
             if not js:
                 script = ""
             self.reply(

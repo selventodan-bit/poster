@@ -78,6 +78,7 @@ class Recorder:
         self.request_records = {}
         self.response_event = asyncio.Event()
         self.browser_bodies = {}
+        self.record_request = None
 
     def task(self, coro):
         task = asyncio.create_task(coro)
@@ -107,6 +108,8 @@ class Recorder:
         await context.expose_binding("__poster_response_body", browser_body)
 
         def request(req):
+            if req in self.request_records:
+                return
             if req.resource_type in {"document", "xhr", "fetch"}:
                 request_id = f"r{len(self.capture.requests)}"
                 request_ids[req] = request_id
@@ -196,6 +199,7 @@ class Recorder:
 
         await context.expose_binding("__poster_action", action)
         await context.add_init_script(INIT_JS)
+        self.record_request = request
         context.on("request", request)
         context.on("response", lambda res: self.task(response(res)))
 

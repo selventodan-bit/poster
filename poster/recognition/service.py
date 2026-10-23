@@ -86,6 +86,7 @@ class RecognitionSession:
         self.manual = False
         self.manual_finished = False
         self.sent_writes = set()
+        self.write_admitted = False
         self.scope = None
         self.resources = ResourcePolicy(static_origins)
         self.navigation = NavigationDiscovery(locales=locales, knowledge=knowledge)
@@ -128,6 +129,11 @@ class RecognitionSession:
 
     async def gate(self, route):
         request = route.request
+        # Routing can precede delivery of the context event on another platform.
+        # Register synchronously and deduplicate the later event, so blocked
+        # writes can never enter learning as apparently admitted requests.
+        if self.recorder.record_request:
+            self.recorder.record_request(request)
         recorded = self.recorder.request_records.get(request)
         if recorded and request.method not in {"GET", "HEAD", "OPTIONS"}:
             recorded["blocked"] = True
@@ -155,7 +161,10 @@ class RecognitionSession:
             self.login_scope["used"] = True
             if recorded:
                 recorded["blocked"] = False
-            await route.continue_()
+            headers = {
+                k: v for k, v in request.headers.items() if k not in {ACTION_HEADER, "x-poster-capture"}
+            }
+            await route.continue_(headers=headers)
         elif self.read_only and request.method not in {"GET", "HEAD", "OPTIONS"}:
             await route.abort()
         else:
@@ -174,7 +183,8 @@ class RecognitionSession:
                     await route.abort()
                     self.result.diagnostics.append("WRITE_SCOPE")
                     return
-                # Recorder's request event precedes routing; bind only the admitted request.
+                self.write_admitted = True
+                # Bind only the admitted request.
                 recorded = self.recorder.request_records.get(request)
                 if recorded:
                     recorded["blocked"] = False
@@ -214,7 +224,12 @@ class RecognitionSession:
         if self.closed:
             raise ValueError("Session closed")
         self.read_only = True
-        self.result = Recognition(diagnostics=["READ_ONLY"])
+        self.result = Recognition(
+            diagnostics=[
+                "READ_ONLY",
+                *[c for c in self.result.diagnostics if c in {"STATIC_RESOURCE_BLOCKED", "BLOCKED_HOST"}],
+            ]
+        )
         detector = UniversalFormDetector(self.locales, self.publication_kind)
         forms = await self.navigation.discover(self.page, lambda: detector.inspect(self.page, self.hosts))
         # Editors may replace the textarea with an iframe after DOMContentLoaded.
@@ -259,6 +274,8 @@ class RecognitionSession:
             self.result.diagnostics.append("AUTH_REQUIRED")
         complete = [f for f in forms if f.complete]
         if not complete:
+            if any("unresolved-required-control" in f.evidence for f in forms):
+                self.result.diagnostics.append("MISSING_REQUIRED_FIELDS")
             self.result.diagnostics.append("NO_FORM")
             self.state(LearningState.LEARNING_REQUIRED)
         elif len(complete) > 1 and complete[0].confidence - complete[1].confidence < 0.1:
@@ -349,48 +366,49 @@ class RecognitionSession:
             return self.result
         self.browser_attempted = True
         self.recorder.capture.action_id = uuid.uuid4().hex
-        ref = form.fields["submit"]
-        control = (
-            await self.page.frames[ref.frame]
-            .locator(ref.selector)
-            .evaluate(
-                """e=>({name:e.name||'',value:e.value||'',native:e.type==='submit',action:e.form?
-            new URL(e.getAttribute('formaction')||e.form.getAttribute('action')||location.href,e.baseURI).href:null})"""
-            )
-        )
-        self.scope = SubmissionScope(
-            self.url,
-            self.recorder.capture,
-            templates=self.transfer_rule.http_templates if self.transfer_rule else (),
-            submitter=(control["name"], control["value"]) if control["name"] else None,
-            interaction=self.recorder.capture.action_id,
-            action_url=urlsplit(control["action"] or form.action)._replace(fragment="").geturl()
-            if (control["action"] and control["native"]) or form.method.upper() == "POST"
-            else None,
-        )
-        await self.page.frames[ref.frame].evaluate(
-            "([selector,ticket])=>window.__posterArm(selector,ticket)",
-            [ref.selector, self.recorder.capture.action_id],
-        )
-        self.read_only = False
-        stage = "CLICK_FAILED"
+        stage = "BUTTON_DISAPPEARED"
         try:
             ref = form.fields["submit"]
             if await self.page.frames[ref.frame].locator(ref.selector).count() != 1:
                 raise ValueError("BUTTON_DISAPPEARED")
+            ref = form.fields["submit"]
+            control = (
+                await self.page.frames[ref.frame]
+                .locator(ref.selector)
+                .evaluate(
+                    """e=>({name:e.name||'',value:e.value||'',native:e.type==='submit',action:e.form?
+                new URL(e.getAttribute('formaction')||e.form.getAttribute('action')||location.href,e.baseURI).href:null})"""
+                )
+            )
+            self.scope = SubmissionScope(
+                self.url,
+                self.recorder.capture,
+                templates=self.transfer_rule.http_templates if self.transfer_rule else (),
+                submitter=(control["name"], control["value"]) if control["name"] else None,
+                interaction=self.recorder.capture.action_id,
+                action_url=urlsplit(control["action"] or form.action)._replace(fragment="").geturl()
+                if (control["action"] and control["native"]) or form.method.upper() == "POST"
+                else None,
+            )
+            await self.page.frames[ref.frame].evaluate(
+                "([selector,ticket])=>window.__posterArm(selector,ticket)",
+                [ref.selector, self.recorder.capture.action_id],
+            )
+            self.read_only = False
+            stage = "CLICK_FAILED"
             await self.page.frames[ref.frame].locator(ref.selector).click(timeout=5000, no_wait_after=True)
             stage = "RESULT_READ_FAILED"
             await self.confirm_and_learn(project_id, existing_site=existing_site)
         except asyncio.CancelledError:
-            self.diagnose("PUBLICATION_UNCERTAIN" if self.scope.sent else "OPERATION_CANCELLED")
-            self.state(LearningState.UNKNOWN if self.scope.sent else LearningState.FAILED)
+            self.diagnose("PUBLICATION_UNCERTAIN" if self.write_admitted else "OPERATION_CANCELLED")
+            self.state(LearningState.UNKNOWN if self.write_admitted else LearningState.FAILED)
             raise
         except Exception as exc:
             code = str(exc) if str(exc) == "BUTTON_DISAPPEARED" else stage
             self.diagnose(code, exc)
-            if self.scope.sent:
+            if self.write_admitted:
                 self.diagnose("PUBLICATION_UNCERTAIN")
-            self.state(LearningState.UNKNOWN if self.scope.sent else LearningState.FAILED)
+            self.state(LearningState.UNKNOWN if self.write_admitted else LearningState.FAILED)
         finally:
             self.read_only = True
         return self.result
@@ -399,19 +417,22 @@ class RecognitionSession:
         self.result.diagnostics.append(code)
         # Never serialize exception messages: Playwright/httpx include URLs,
         # payloads and page text. The class and stage suffice for local triage.
-        self.profile.parent.mkdir(parents=True, exist_ok=True)
-        path = self.profile.parent / "diagnostics.jsonl"
-        with path.open("a", encoding="utf-8") as stream:
-            stream.write(
-                json.dumps(
-                    {
-                        "code": code,
-                        "exception": type(exc).__name__ if exc else None,
-                        "write_admitted": bool(self.scope and self.scope.sent),
-                    }
+        try:
+            self.profile.parent.mkdir(parents=True, exist_ok=True)
+            path = self.profile.parent / "diagnostics.jsonl"
+            with path.open("a", encoding="utf-8") as stream:
+                stream.write(
+                    json.dumps(
+                        {
+                            "code": code,
+                            "exception": type(exc).__name__ if exc else None,
+                            "write_admitted": self.write_admitted,
+                        }
+                    )
+                    + "\n"
                 )
-                + "\n"
-            )
+        except OSError:
+            self.result.diagnostics.append("DIAGNOSTIC_UNAVAILABLE")
 
     async def session_state(self):
         for _ in range(3):
@@ -553,7 +574,7 @@ class RecognitionSession:
         self.result.diagnostics.append("NO_PERMALINK")
         self.result.diagnostics.append("CONFIRMATION_PENDING")
         self.result.diagnostics.extend(NetworkAnalyzer().analyze(capture).diagnostics)
-        self.state(LearningState.UNKNOWN if self.scope and self.scope.sent else LearningState.FAILED)
+        self.state(LearningState.UNKNOWN if self.write_admitted else LearningState.FAILED)
         self.result.outcome = (
             "auth_expired" if "AUTH_EXPIRED" in self.result.diagnostics else "confirmation_timeout"
         )
@@ -565,14 +586,20 @@ class RecognitionSession:
             if action.get("event") != "field-input":
                 continue
             for role, value in (("title", capture.title_marker), ("body", capture.body_marker)):
-                if action.get("value") == value:
+                if role in capture.content_roles and action.get("value") == value:
                     kind = ("iframe:" if action.get("iframe") else "") + action["kind"]
                     fields[role] = FieldRef(role, action["selector"], 0, kind, 1, action.get("position", 0))
-        if not all(role in fields for role in ("title", "body")):
+        if not capture.content_roles <= fields.keys():
             return None
         fields["submit"] = FieldRef("submit", "observed-write", 0, "button", 1)
         capture.body_format = "html" if "contenteditable" in fields["body"].kind else "text"
-        return FormCandidate("manual-observation", fields, 1, evidence=["operator-demonstrated-fields"])
+        return FormCandidate(
+            "manual-observation",
+            fields,
+            1,
+            evidence=["operator-demonstrated-fields"],
+            publication_kind=capture.publication_kind,
+        )
 
     async def find_confirmation(self):
         capture = self.recorder.capture
@@ -793,16 +820,34 @@ class RecognitionSession:
             raise PermissionError("CONSENT_REQUIRED")
         if self.browser_attempted:
             raise ValueError("ALREADY_ATTEMPTED")
-        if not title.strip() or not body.strip() or title == body:
+        form = next((f for f in self.result.forms if f.key == self.result.selected), None)
+        kind = (
+            form.publication_kind
+            if form
+            else (self.publication_kind if self.publication_kind != "auto" else "topic")
+        )
+        if not body.strip() or (kind == "topic" and (not title.strip() or title == body)):
             raise ValueError("CONTENT_REQUIRED")
         self.check_key()
-        if self.result.selected:
+        if form:
             await self.fill(title, body)
         else:
-            self.recorder.capture.title_marker, self.recorder.capture.body_marker = title, body
+            self.recorder.capture.publication_kind = kind
+            self.recorder.capture.title_marker = title if kind == "topic" else ""
+            self.recorder.capture.body_marker = body
         self.manual, self.browser_attempted = True, True
         self.recorder.capture.action_id = uuid.uuid4().hex
-        self.scope = SubmissionScope(self.url, self.recorder.capture)
+        self.scope = SubmissionScope(
+            self.url, self.recorder.capture, interaction=self.recorder.capture.action_id
+        )
+        ref = form.fields["submit"] if form else None
+        await self.page.frames[ref.frame if ref else 0].evaluate(
+            "([selector,ticket])=>window.__posterArm(selector,ticket)",
+            [
+                ref.selector if ref else 'button,input[type="submit"],[role="button"]',
+                self.recorder.capture.action_id,
+            ],
+        )
         self.read_only = False
         self.result.diagnostics.append("MANUAL_READY")
 
@@ -839,6 +884,17 @@ class RecognitionSession:
         mark_ready(output)
 
     async def close(self):
+        if (
+            self.write_admitted
+            and not self.recorder.capture.browser_verified
+            and self.result.outcome not in {"publication_rejected", "auth_expired"}
+        ):
+            self.state(LearningState.UNKNOWN)
+            if "PUBLICATION_UNCERTAIN" not in self.result.diagnostics:
+                self.result.diagnostics.append("PUBLICATION_UNCERTAIN")
+        self.read_only = True
+        self.scope = None
+        self.login_scope = None
         self.closed = True
         if self.context:
             await self.context.close()
