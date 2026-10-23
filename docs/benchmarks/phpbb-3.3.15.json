@@ -1,0 +1,60 @@
+{
+  "engine": "phpbb",
+  "technologies": [
+    {
+      "family": "phpbb",
+      "layer": "forum",
+      "version": null,
+      "adapter_revision": 2,
+      "confidence": 0.8999999999999999,
+      "evidence": [
+        "assets",
+        "routes",
+        "dom"
+      ],
+      "capabilities": [
+        "identification"
+      ],
+      "tested_versions": []
+    }
+  ],
+  "discovery": "DETECTED",
+  "navigation": [
+    {
+      "purpose": "compose",
+      "evidence": [
+        "accessible-compose-intent",
+        "compose-route",
+        "navigation-link"
+      ],
+      "score": 0.99
+    }
+  ],
+  "browser_state": "HTTP_CANDIDATE",
+  "diagnostics": [
+    "READ_ONLY",
+    "HTTP_UNVERIFIED"
+  ],
+  "http_operations": [
+    {
+      "step": "open_form",
+      "method": "GET",
+      "status": 200,
+      "url": "http://127.0.0.1:8879/posting.php"
+    },
+    {
+      "step": "write_0",
+      "method": "POST",
+      "status": 302,
+      "url": "http://127.0.0.1:8879/posting.php"
+    },
+    {
+      "step": "write_0",
+      "method": "GET",
+      "status": 200,
+      "url": "http://127.0.0.1:8879/viewtopic.php"
+    }
+  ],
+  "http_status": "SUCCEEDED",
+  "http_reason": ""
+}

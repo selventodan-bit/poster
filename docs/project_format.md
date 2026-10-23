@@ -73,3 +73,25 @@ python -m poster replay path/to/project --title Test --body Text --dry-run
 ```
 
 HTTP_READY — результат анализа; READY — полнота выгрузки; SUCCEEDED — выполнена семантическая проверка конкретного задания. Это разные состояния.
+
+## Метаданные распознавания 2.0 — совместимое расширение schema v1
+
+```yaml
+recognition:
+  state: HTTP_VERIFIED
+  recognizer: semantic-2.0
+  rule_id: form-0123456789abcdef
+  browser_verified: true
+  http_verified: true
+  diagnostics: []
+```
+
+Поле optional: существующие проекты без recognition читаются как прежде. Новые HTTP-кандидаты имеют `status: REVIEW`, `recognition.state: HTTP_CANDIDATE` и `http_verified: false`. Registry и Runtime блокируют их даже при ручной смене status на HTTP_READY. После отдельной успешной HTTP-проверки оба evidence-флага true, состояние HTTP_VERIFIED, статус HTTP_READY. Семантика исторического HTTP_READY не меняется задним числом.
+
+Дополнительное поле шага `normalize: whitespace` сравнивает текст без различий в пробелах. Строгие подстановки дополнены ограниченными фильтрами `{{body|html}}` и `{{title|url}}`: только escaping, без функций или произвольного кода. Простой JSON-path по-прежнему поддерживает словари/индексы, не полный JSONPath-язык.
+
+`recognition.json` — диагностические оценки и история состояний без сырых сетевых тел. Индивидуальные cookies остаются в session.enc; глобальные правила knowledge.sqlite в папку проекта не копируются.
+
+### Дополнения recognition 2.1
+
+Schema v1 сохранена. Extraction `header` разрешает только X-CSRF-Token/X-XSRF-Token/X-Draft-ID/ETag/Location через `attribute`; extraction `cookie` читает указанное имя из текущего cookie jar, ограниченного доменом ответа. Значения не сохраняются в YAML. Для новых распознанных проектов Runtime проверяет точный origin, включая порт. Legacy проекты без recognition сохраняют прежнюю семантику `allowed_hosts`.

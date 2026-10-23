@@ -1,9 +1,14 @@
 .venv/
+.venv-backup-*/
+release/
 __pycache__/
 *.py[cod]
 *.egg-info/
 .pytest_cache/
 .ruff_cache/
+node_modules/
+*.bundle.js
+poster-tiptap.js
 .poster/
 demo-output/
 *.sqlite*

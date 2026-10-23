@@ -1,5 +1,6 @@
 """Versioned, deliberately small data-only workflow language."""
 
+import re
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlsplit
@@ -15,6 +16,32 @@ class StrictModel(BaseModel):
 class Schedule(StrictModel):
     max_concurrent: int = Field(default=1, ge=1, le=100)
     min_interval_seconds: float = Field(default=0, ge=0, le=86400)
+
+
+class RecognitionInfo(StrictModel):
+    state: Literal[
+        "DETECTED",
+        "BROWSER_VERIFIED",
+        "HTTP_CANDIDATE",
+        "HTTP_VERIFIED",
+        "LEARNING_REQUIRED",
+        "UNKNOWN",
+        "FAILED",
+    ]
+    publication_kind: Literal["topic", "reply", "comment"] = "topic"
+    recognizer: str = "semantic-2.0"
+    rule_id: str | None = None
+    browser_verified: bool = False
+    http_verified: bool = False
+    diagnostics: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def verified_flags(self):
+        if self.state == "HTTP_VERIFIED" and not (self.browser_verified and self.http_verified):
+            raise ValueError("HTTP_VERIFIED requires both browser and HTTP evidence")
+        if self.http_verified and self.state != "HTTP_VERIFIED":
+            raise ValueError("HTTP evidence flag and state disagree")
+        return self
 
 
 class Site(StrictModel):
@@ -33,6 +60,7 @@ class Site(StrictModel):
     get_retries: int = Field(default=2, ge=0, le=5)
     retry_delay: float = Field(default=0.25, ge=0, le=60)
     headers: dict[str, str] = Field(default_factory=dict)
+    recognition: RecognitionInfo | None = None
 
     @model_validator(mode="after")
     def urls(self):
@@ -60,7 +88,10 @@ class Step(StrictModel):
     headers: dict[str, str] = Field(default_factory=dict)
     save_as: str | None = None
     source: str | None = None
-    kind: Literal["css_text", "css_attribute", "json_path", "regex", "contains", "status"] | None = None
+    kind: (
+        Literal["css_text", "css_attribute", "json_path", "header", "cookie", "regex", "contains", "status"]
+        | None
+    ) = None
     selector: str | None = None
     attribute: str | None = None
     path: str | None = None
@@ -69,6 +100,7 @@ class Step(StrictModel):
     values: dict[str, Any] | None = None
     seconds: float = Field(default=0, ge=0, le=60)
     result_url: bool = False
+    normalize: Literal["none", "whitespace"] = "none"
 
     @model_validator(mode="after")
     def shape(self):
@@ -89,6 +121,16 @@ class Step(StrictModel):
                 raise ValueError("css_attribute needs attribute")
             if self.kind == "json_path" and not self.path:
                 raise ValueError("json_path needs path")
+            if self.kind == "cookie" and (
+                not self.attribute or not re.fullmatch(r"[A-Za-z0-9_\-]{1,100}", self.attribute)
+            ):
+                raise ValueError("cookie extraction needs a cookie name")
+            if self.kind == "header" and (
+                not self.attribute
+                or self.attribute.lower()
+                not in {"x-csrf-token", "x-xsrf-token", "x-draft-id", "etag", "location"}
+            ):
+                raise ValueError("Unsupported response header extraction")
             if self.kind == "regex" and (not self.pattern or len(self.pattern) > 500):
                 raise ValueError("regex needs an explicit pattern up to 500 characters")
             if self.op == "extract" and not self.save_as:

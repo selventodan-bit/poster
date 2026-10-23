@@ -1,0 +1,446 @@
+{
+  "schema_version": 1,
+  "seed": 20261022,
+  "cases": [
+    {
+      "id": "holdout-00",
+      "locale": "en",
+      "editor": "textarea",
+      "nav": "direct",
+      "protocol": "json",
+      "layout": "classic",
+      "reorder": true,
+      "stratum": "new-variant"
+    },
+    {
+      "id": "holdout-01",
+      "locale": "es",
+      "editor": "contenteditable",
+      "nav": "link",
+      "protocol": "array",
+      "layout": "classic",
+      "reorder": false,
+      "stratum": "new-variant"
+    },
+    {
+      "id": "holdout-02",
+      "locale": "fr",
+      "editor": "iframe",
+      "nav": "menu",
+      "protocol": "form",
+      "layout": "classic",
+      "reorder": false,
+      "stratum": "new-variant"
+    },
+    {
+      "id": "holdout-03",
+      "locale": "de",
+      "editor": "tinymce",
+      "nav": "icon",
+      "protocol": "multipart",
+      "layout": "classic",
+      "reorder": false,
+      "stratum": "new-variant"
+    },
+    {
+      "id": "holdout-04",
+      "locale": "it",
+      "editor": "ckeditor",
+      "nav": "modal",
+      "protocol": "header",
+      "layout": "classic",
+      "reorder": true,
+      "stratum": "new-variant"
+    },
+    {
+      "id": "holdout-05",
+      "locale": "pt",
+      "editor": "quill",
+      "nav": "tab",
+      "protocol": "draft",
+      "layout": "classic",
+      "reorder": false,
+      "stratum": "new-variant"
+    },
+    {
+      "id": "holdout-06",
+      "locale": "ru",
+      "editor": "prosemirror",
+      "nav": "direct",
+      "protocol": "array",
+      "layout": "spa",
+      "reorder": false,
+      "stratum": "new-variant"
+    },
+    {
+      "id": "holdout-07",
+      "locale": "uk",
+      "editor": "summernote",
+      "nav": "link",
+      "protocol": "form",
+      "layout": "classic",
+      "reorder": false,
+      "stratum": "new-variant"
+    },
+    {
+      "id": "holdout-08",
+      "locale": "pl",
+      "editor": "froala",
+      "nav": "menu",
+      "protocol": "multipart",
+      "layout": "classic",
+      "reorder": true,
+      "stratum": "new-variant"
+    },
+    {
+      "id": "holdout-09",
+      "locale": "ar",
+      "editor": "textarea",
+      "nav": "icon",
+      "protocol": "header",
+      "layout": "classic",
+      "reorder": false,
+      "stratum": "new-variant"
+    },
+    {
+      "id": "holdout-10",
+      "locale": "he",
+      "editor": "contenteditable",
+      "nav": "modal",
+      "protocol": "draft",
+      "layout": "classic",
+      "reorder": false,
+      "stratum": "new-variant"
+    },
+    {
+      "id": "holdout-11",
+      "locale": "en",
+      "editor": "iframe",
+      "nav": "tab",
+      "protocol": "json",
+      "layout": "classic",
+      "reorder": false,
+      "stratum": "new-variant"
+    },
+    {
+      "id": "holdout-12",
+      "locale": "es",
+      "editor": "tinymce",
+      "nav": "direct",
+      "protocol": "header",
+      "layout": "shadow",
+      "reorder": true,
+      "stratum": "new-variant"
+    },
+    {
+      "id": "holdout-13",
+      "locale": "fr",
+      "editor": "ckeditor",
+      "nav": "link",
+      "protocol": "multipart",
+      "layout": "classic",
+      "reorder": false,
+      "stratum": "new-variant"
+    },
+    {
+      "id": "holdout-14",
+      "locale": "de",
+      "editor": "quill",
+      "nav": "menu",
+      "protocol": "header",
+      "layout": "classic",
+      "reorder": false,
+      "stratum": "new-variant"
+    },
+    {
+      "id": "holdout-15",
+      "locale": "it",
+      "editor": "prosemirror",
+      "nav": "icon",
+      "protocol": "draft",
+      "layout": "classic",
+      "reorder": false,
+      "stratum": "new-variant"
+    },
+    {
+      "id": "holdout-16",
+      "locale": "pt",
+      "editor": "summernote",
+      "nav": "modal",
+      "protocol": "json",
+      "layout": "classic",
+      "reorder": true,
+      "stratum": "new-variant"
+    },
+    {
+      "id": "holdout-17",
+      "locale": "ru",
+      "editor": "froala",
+      "nav": "tab",
+      "protocol": "array",
+      "layout": "classic",
+      "reorder": false,
+      "stratum": "new-variant"
+    },
+    {
+      "id": "holdout-18",
+      "locale": "uk",
+      "editor": "textarea",
+      "nav": "direct",
+      "protocol": "multipart",
+      "layout": "classic",
+      "reorder": false,
+      "stratum": "unknown-structure"
+    },
+    {
+      "id": "holdout-19",
+      "locale": "pl",
+      "editor": "contenteditable",
+      "nav": "link",
+      "protocol": "header",
+      "layout": "classic",
+      "reorder": false,
+      "stratum": "unknown-structure"
+    },
+    {
+      "id": "holdout-20",
+      "locale": "ar",
+      "editor": "iframe",
+      "nav": "menu",
+      "protocol": "draft",
+      "layout": "classic",
+      "reorder": true,
+      "stratum": "unknown-structure"
+    },
+    {
+      "id": "holdout-21",
+      "locale": "he",
+      "editor": "tinymce",
+      "nav": "icon",
+      "protocol": "json",
+      "layout": "classic",
+      "reorder": false,
+      "stratum": "unknown-structure"
+    },
+    {
+      "id": "holdout-22",
+      "locale": "en",
+      "editor": "ckeditor",
+      "nav": "modal",
+      "protocol": "array",
+      "layout": "classic",
+      "reorder": false,
+      "stratum": "unknown-structure"
+    },
+    {
+      "id": "holdout-23",
+      "locale": "es",
+      "editor": "quill",
+      "nav": "tab",
+      "protocol": "form",
+      "layout": "classic",
+      "reorder": false,
+      "stratum": "unknown-structure"
+    },
+    {
+      "id": "holdout-24",
+      "locale": "fr",
+      "editor": "prosemirror",
+      "nav": "direct",
+      "protocol": "header",
+      "layout": "spa",
+      "reorder": true,
+      "stratum": "unknown-structure"
+    },
+    {
+      "id": "holdout-25",
+      "locale": "de",
+      "editor": "summernote",
+      "nav": "link",
+      "protocol": "draft",
+      "layout": "classic",
+      "reorder": false,
+      "stratum": "unknown-structure"
+    },
+    {
+      "id": "holdout-26",
+      "locale": "it",
+      "editor": "froala",
+      "nav": "menu",
+      "protocol": "json",
+      "layout": "classic",
+      "reorder": false,
+      "stratum": "unknown-structure"
+    },
+    {
+      "id": "holdout-27",
+      "locale": "pt",
+      "editor": "textarea",
+      "nav": "icon",
+      "protocol": "array",
+      "layout": "classic",
+      "reorder": false,
+      "stratum": "unknown-structure"
+    },
+    {
+      "id": "holdout-28",
+      "locale": "ru",
+      "editor": "contenteditable",
+      "nav": "modal",
+      "protocol": "form",
+      "layout": "classic",
+      "reorder": true,
+      "stratum": "unknown-structure"
+    },
+    {
+      "id": "holdout-29",
+      "locale": "uk",
+      "editor": "iframe",
+      "nav": "tab",
+      "protocol": "multipart",
+      "layout": "classic",
+      "reorder": false,
+      "stratum": "unknown-structure"
+    },
+    {
+      "id": "holdout-30",
+      "locale": "pl",
+      "editor": "tinymce",
+      "nav": "direct",
+      "protocol": "draft",
+      "layout": "shadow",
+      "reorder": false,
+      "stratum": "unknown-structure"
+    },
+    {
+      "id": "holdout-31",
+      "locale": "ar",
+      "editor": "ckeditor",
+      "nav": "link",
+      "protocol": "json",
+      "layout": "classic",
+      "reorder": false,
+      "stratum": "unknown-structure"
+    },
+    {
+      "id": "holdout-32",
+      "locale": "he",
+      "editor": "quill",
+      "nav": "menu",
+      "protocol": "array",
+      "layout": "classic",
+      "reorder": true,
+      "stratum": "unknown-structure"
+    },
+    {
+      "id": "holdout-33",
+      "locale": "en",
+      "editor": "prosemirror",
+      "nav": "icon",
+      "protocol": "form",
+      "layout": "classic",
+      "reorder": false,
+      "stratum": "unknown-structure"
+    },
+    {
+      "id": "holdout-34",
+      "locale": "es",
+      "editor": "summernote",
+      "nav": "modal",
+      "protocol": "multipart",
+      "layout": "classic",
+      "reorder": false,
+      "stratum": "unknown-structure"
+    },
+    {
+      "id": "holdout-35",
+      "locale": "fr",
+      "editor": "froala",
+      "nav": "tab",
+      "protocol": "header",
+      "layout": "classic",
+      "reorder": false,
+      "stratum": "unknown-structure"
+    },
+    {
+      "id": "negative-rejected",
+      "locale": "en",
+      "editor": "textarea",
+      "nav": "direct",
+      "protocol": "json",
+      "layout": "spa",
+      "negative": "rejected",
+      "stratum": "negative"
+    },
+    {
+      "id": "negative-silent",
+      "locale": "es",
+      "editor": "textarea",
+      "nav": "direct",
+      "protocol": "json",
+      "layout": "spa",
+      "negative": "silent",
+      "stratum": "negative"
+    },
+    {
+      "id": "negative-hidden",
+      "locale": "fr",
+      "editor": "textarea",
+      "nav": "direct",
+      "protocol": "json",
+      "layout": "spa",
+      "negative": "hidden",
+      "stratum": "negative"
+    },
+    {
+      "id": "negative-login",
+      "locale": "de",
+      "editor": "textarea",
+      "nav": "direct",
+      "protocol": "json",
+      "layout": "spa",
+      "negative": "login",
+      "stratum": "negative"
+    },
+    {
+      "id": "negative-opaque",
+      "locale": "it",
+      "editor": "textarea",
+      "nav": "direct",
+      "protocol": "json",
+      "layout": "spa",
+      "negative": "opaque",
+      "stratum": "negative"
+    },
+    {
+      "id": "negative-background",
+      "locale": "pt",
+      "editor": "textarea",
+      "nav": "direct",
+      "protocol": "json",
+      "layout": "spa",
+      "negative": "background",
+      "stratum": "negative"
+    },
+    {
+      "id": "negative-slow",
+      "locale": "ru",
+      "editor": "textarea",
+      "nav": "direct",
+      "protocol": "json",
+      "layout": "spa",
+      "negative": "slow",
+      "stratum": "negative"
+    },
+    {
+      "id": "holdout-staged",
+      "locale": "pl",
+      "editor": "textarea",
+      "nav": "direct",
+      "protocol": "json",
+      "layout": "classic",
+      "staged": true,
+      "stratum": "unknown-structure"
+    }
+  ]
+}

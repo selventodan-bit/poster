@@ -2,7 +2,7 @@ name: tests
 on: [push, pull_request]
 jobs:
   python:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       matrix:
         python: ['3.11', '3.13']
@@ -16,4 +16,198 @@ jobs:
       - run: uv run --no-sync ruff format --diff .
       - run: uv run --no-sync ruff format --check .
       - run: uv run --no-sync python -m playwright install --with-deps chromium
-      - run: uv run --no-sync python -m pytest -q
+      - run: sudo apt-get install -y xvfb libtk8.6
+      - run: xvfb-run -a uv run --no-sync python -m pytest -q
+  phpbb:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.13'
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: sqlite3, mbstring, xml
+          tools: composer:v2
+      - run: uv sync --frozen --extra dev --extra recorder
+      - run: uv run --no-sync python -m playwright install --with-deps chromium
+      - run: uv run --no-sync python scripts/run_phpbb_ci.py
+        env:
+          COMPOSER_AUTH: '{"github-oauth":{"github.com":"${{ github.token }}"}}'
+  windows-source:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python scripts/build_windows_package.py --output release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: poster-windows-source
+          path: release/
+          if-no-files-found: error
+  windows-package:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install ".[recorder]" -c requirements-recorder.txt -r requirements-windows-build.txt
+      - name: Build portable windowed executable without a bundled browser
+        run: python scripts/build_windows_app.py --output release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: poster-windows
+          path: release/
+          if-no-files-found: error
+  windows-recorder:
+    needs: [windows-source, windows-package]
+    env:
+      PYTHONUTF8: '1'
+      PLAYWRIGHT_BROWSERS_PATH: '${{ github.workspace }}/Poster Проверка с пробелами/.poster/browser-cache'
+      EXPECTED_POSTER_COMMIT: '${{ github.event.pull_request.head.sha || github.sha }}'
+    runs-on: windows-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: poster-windows-source
+          path: download
+      - uses: actions/download-artifact@v4
+        with:
+          name: poster-windows
+          path: app-download
+      - name: Verify archive and extract into a fresh Unicode path
+        shell: pwsh
+        run: |
+          $expected = (Get-Content download/poster-windows.sha256).Split(' ')[0]
+          if ((Get-FileHash download/poster-windows.zip -Algorithm SHA256).Hash.ToLower() -ne $expected) { throw 'ZIP checksum mismatch' }
+          Expand-Archive download/poster-windows.zip 'Poster Проверка с пробелами'
+          $appExpected = (Get-Content app-download/poster-windows.sha256).Split(' ')[0]
+          if ((Get-FileHash app-download/poster-windows.zip -Algorithm SHA256).Hash.ToLower() -ne $appExpected) { throw 'App ZIP checksum mismatch' }
+          Expand-Archive app-download/poster-windows.zip 'Portable Poster Проверка'
+          $env:POSTER_PYTHON = (Get-Command python).Source
+          "POSTER_PYTHON=$env:POSTER_PYTHON" >> $env:GITHUB_ENV
+      - name: Source launcher explicitly installs dependencies and reuses installed Chrome
+        working-directory: Poster Проверка с пробелами
+        shell: cmd
+        run: start_recorder.cmd --check --accept-dependencies
+      - name: Reuse existing environment
+        working-directory: Poster Проверка с пробелами
+        shell: cmd
+        run: start_recorder.cmd --check --accept-dependencies
+      - name: Repair a stale installation via the same launcher
+        working-directory: Poster Проверка с пробелами
+        shell: cmd
+        run: |
+          .venv\Scripts\python.exe -m pip uninstall --yes poster-http
+          if errorlevel 1 exit /b 1
+          call start_recorder.cmd --check --accept-dependencies
+          if errorlevel 1 exit /b 1
+      - name: Invalid explicit Chromium produces a clear failure
+        working-directory: Poster Проверка с пробелами
+        shell: pwsh
+        run: |
+          $env:POSTER_CHROMIUM = 'C:\poster-browser-does-not-exist.exe'
+          cmd /c 'start_recorder.cmd --check --accept-dependencies'
+          if ($LASTEXITCODE -eq 0) { throw 'Invalid Chromium accepted' }
+          Remove-Item Env:POSTER_CHROMIUM
+          exit 0
+      - name: Windows Chromium to HTTP and new process Runtime (topic)
+        working-directory: Poster Проверка с пробелами
+        run: .venv/Scripts/python.exe scripts/check_windows_e2e.py --output .poster/windows-topic
+      - name: Windows body-only service E2E and knowledge restart (reply)
+        working-directory: Poster Проверка с пробелами
+        run: .venv/Scripts/python.exe scripts/check_windows_e2e.py --case reply --output .poster/windows-reply
+      - name: Install pytest for GUI and safety checks
+        working-directory: Poster Проверка с пробелами
+        run: .venv/Scripts/python.exe -m pip install pytest pytest-asyncio pywinauto==0.6.9 Pillow==11.3.0
+      - name: Native Tk, clipboard and independent network regression checks
+        id: native-tests
+        working-directory: Poster Проверка с пробелами
+        shell: pwsh
+        run: |
+          .venv/Scripts/python.exe -m pytest -q tests/test_recorder_ui.py tests/test_recognition_protocol.py tests/test_user_readiness.py tests/test_desktop.py --junitxml=.poster/windows-tests.xml
+          $testExit = $LASTEXITCODE
+          .venv/Scripts/python.exe scripts/summarize_pytest.py .poster/windows-tests.xml .poster/windows-tests-report.json
+          exit $testExit
+      - name: Full packaged GUI via real OS mouse keyboard and native dialogs
+        if: ${{ !cancelled() && (success() || steps.native-tests.outcome == 'failure') }}
+        working-directory: Poster Проверка с пробелами
+        shell: pwsh
+        run: |
+          Remove-Item Env:PLAYWRIGHT_BROWSERS_PATH
+          .venv/Scripts/python.exe scripts/check_windows_gui.py --exe '../Portable Poster Проверка/Poster.exe' --output .poster/windows-gui
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-e2e-${{ matrix.python }}
+          path: |
+            Poster Проверка с пробелами/.poster/windows-*/report.json
+            Poster Проверка с пробелами/.poster/windows-tests-report.json
+            Poster Проверка с пробелами/.poster/windows-gui/report.json
+            Poster Проверка с пробелами/.poster/windows-gui/*.png
+          include-hidden-files: true
+          if-no-files-found: warn
+  original-cms:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [mybb, smf, flarum]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.13'
+      - run: uv sync --frozen --extra dev --extra recorder
+      - run: uv run --no-sync python -m playwright install --with-deps chromium
+      - run: uv run --no-sync python scripts/run_cms_ci.py --engine ${{ matrix.engine }} --output .poster/cms-ci
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMPOSER_AUTH: '{"github-oauth":{"github.com":"${{ github.token }}"}}'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: original-${{ matrix.engine }}-report
+          path: .poster/cms-ci/report.json
+          include-hidden-files: true
+          if-no-files-found: error
+  original-editors:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: scripts/integration/editors/package-lock.json
+      - run: npm ci --prefix scripts/integration/editors
+      - run: uv sync --frozen --extra dev --extra recorder
+      - run: uv run --no-sync python -m playwright install --with-deps chromium
+      - run: uv run --no-sync python scripts/check_original_editors.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: original-editors-report
+          path: .poster/original-editors/report.json
+          include-hidden-files: true
+          if-no-files-found: error

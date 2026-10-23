@@ -1,22 +1,22 @@
 """The executor imports no browser modules. All redirects pass through the host gate."""
 
 import asyncio
-import json
+import html
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from http.cookiejar import Cookie
-from urllib.parse import urljoin, urlsplit, urlunsplit
+from urllib.parse import quote, urljoin, urlsplit, urlunsplit
 
 import httpx
 from bs4 import BeautifulSoup
-from cryptography.fernet import Fernet, InvalidToken
+from cryptography.fernet import InvalidToken
 
-from .auth import session_key
+from .auth import decrypt_bytes
 from .models import Step
 from .project import Project
 
-TOKEN = re.compile(r"{{\s*([a-zA-Z_][\w.]*)\s*}}")
+TOKEN = re.compile(r"{{\s*([a-zA-Z_][\w.]*)(?:\|(html|html_lines|url))?\s*}}")
 
 
 class WorkflowError(Exception):
@@ -34,7 +34,7 @@ class AmbiguousWrite(WorkflowError):
 def render(value, context):
     if isinstance(value, str):
 
-        def substitute(m):
+        def resolve(m):
             data = context
             for key in m[1].split("."):
                 if not isinstance(data, dict) or key not in data:
@@ -42,12 +42,21 @@ def render(value, context):
                 data = data[key]
             if isinstance(data, (httpx.Response, dict, list)):
                 raise WorkflowError("Variable must be a scalar")
-            return str(data)
+            if m[2] == "html":
+                return html.escape(str(data), quote=False)
+            if m[2] == "html_lines":
+                return html.escape(str(data), quote=False).replace("\r\n", "\n").replace("\n", "<br>")
+            if m[2] == "url":
+                return quote(str(data), safe="")
+            return data
 
-        result = TOKEN.sub(substitute, value)
-        if "{{" in result or "}}" in result:
+        remainder = TOKEN.sub("", value)
+        if "{{" in remainder or "}}" in remainder:
             raise WorkflowError("Unsupported template expression")
-        return result
+        exact = TOKEN.fullmatch(value)
+        if exact:
+            return resolve(exact)
+        return TOKEN.sub(lambda m: str(resolve(m)), value)
     if isinstance(value, dict):
         return {k: render(v, context) for k, v in value.items()}
     if isinstance(value, list):
@@ -60,12 +69,38 @@ def safe_url(url: str) -> str:
     return urlunsplit((u.scheme, u.netloc.rsplit("@", 1)[-1], u.path, "", ""))
 
 
+def result_permalink(url: str) -> str:
+    """Keep numeric forum identities needed for a useful permalink, drop secrets."""
+    from urllib.parse import parse_qsl, urlencode
+
+    parsed = urlsplit(str(url))
+    pairs = parse_qsl(re.sub(r";(?=[A-Za-z_][A-Za-z0-9_]*=)", "&", parsed.query))
+    pairs = [
+        (
+            k,
+            v.split(".", 1)[0] + ".0"
+            if k == "topic" and re.fullmatch(r"\d+\.(?:msg\d+|new)(?:;boardseen)?", v)
+            else v,
+        )
+        for k, v in pairs
+    ]
+    permitted = {"t", "p", "f", "tid", "pid", "fid", "topic", "board"}
+    query = urlencode([(k, v) for k, v in pairs if k in permitted and re.fullmatch(r"\d+(?:\.\d+)?", v)])
+    return urlunsplit((parsed.scheme, parsed.netloc.rsplit("@", 1)[-1], parsed.path, query, ""))
+
+
 def extract(step: Step, response: httpx.Response):
     if step.kind in {"css_text", "css_attribute"}:
         node = BeautifulSoup(response.text, "html.parser").select_one(step.selector)
         if node is None:
             raise WorkflowError("Expected confirmation/extraction element is absent")
-        value = node.get_text(strip=True) if step.kind == "css_text" else node.get(step.attribute)
+        value = (
+            node.get_text(" ", strip=True)
+            if step.kind == "css_text" and step.normalize == "whitespace"
+            else node.get_text(strip=True)
+            if step.kind == "css_text"
+            else node.get(step.attribute)
+        )
         if value is None or value == "":
             raise WorkflowError("Expected element value is absent")
         return value
@@ -73,6 +108,11 @@ def extract(step: Step, response: httpx.Response):
         value = response.json()
         for key in step.path.removeprefix("$.").split("."):
             value = value[int(key)] if isinstance(value, list) else value[key]
+        return value
+    if step.kind == "header":
+        value = response.headers.get(step.attribute)
+        if not value:
+            raise WorkflowError("Expected response header is absent")
         return value
     if step.kind == "regex":
         match = re.search(step.pattern, response.text[:1_000_000])
@@ -95,13 +135,14 @@ class Result:
 
 
 class Runtime:
-    def __init__(self, project: Project, transport=None, host_limits=None):
+    def __init__(self, project: Project, transport=None, host_limits=None, *, strict_origin=False):
         self.project = project
         self.transport = transport
         self.operations = []
         self.wrote = False
         self.verified = False
         self.result_url = None
+        self.strict_origin = strict_origin or bool(project.site.recognition)
         self.host_limits = (
             host_limits if host_limits is not None else defaultdict(lambda: asyncio.Semaphore(1))
         )
@@ -118,11 +159,19 @@ class Runtime:
             raise WorkflowError("Request/redirect host is outside allowed_hosts")
         if urlsplit(self.project.site.base_url).scheme == "https" and parsed.scheme != "https":
             raise WorkflowError("HTTPS downgrade is forbidden")
+        if self.strict_origin:
+            base = urlsplit(self.project.site.base_url)
+
+            def address(p):
+                return p.scheme, p.hostname, p.port or (443 if p.scheme == "https" else 80)
+
+            if address(parsed) != address(base):
+                raise WorkflowError("Recognized workflow origin is outside the verified origin")
 
     def load_auth(self, client):
         if not self.project.session:
             return {}
-        state = json.loads(Fernet(session_key()).decrypt(self.project.session))
+        state = decrypt_bytes(self.project.session)
         for c in state.get("cookies", []):
             domain = c["domain"]
             if not any(
@@ -154,7 +203,7 @@ class Runtime:
         return {
             k: v
             for k, v in state.get("headers", {}).items()
-            if k.lower() in {"authorization", "x-api-key", "x-auth-token"}
+            if k.lower() in {"authorization", "x-api-key", "x-auth-token", "user-agent"}
         }
 
     async def request(self, client, step, context, auth_headers):
@@ -242,13 +291,28 @@ class Runtime:
                 response = context.get(step.source)
                 if not isinstance(response, httpx.Response):
                     raise WorkflowError("Extraction source is not an HTTP response")
-                actual = extract(
-                    step.model_copy(update={"expected": render(step.expected, context)}), response
-                )
+                if step.kind == "cookie":
+                    host = response.url.host
+                    values = {
+                        c.value
+                        for c in client.cookies.jar
+                        if c.name == step.attribute
+                        and (host == c.domain.lstrip(".") or host.endswith("." + c.domain.lstrip(".")))
+                    }
+                    if len(values) != 1:
+                        raise WorkflowError("Session cookie is absent or ambiguous")
+                    actual = values.pop()
+                else:
+                    actual = extract(
+                        step.model_copy(update={"expected": render(step.expected, context)}), response
+                    )
                 if step.op == "extract":
                     context[step.save_as] = actual
                 else:
                     expected = render(step.expected, context)
+                    if step.normalize == "whitespace":
+                        actual = " ".join(str(actual).split())
+                        expected = " ".join(str(expected).split()) if expected is not None else None
                     passed = (
                         bool(actual)
                         if expected is None or step.kind == "contains"
@@ -259,12 +323,18 @@ class Runtime:
                     if step.op == "verify":
                         self.verified = True
                         if step.result_url:
-                            self.result_url = safe_url(str(response.url))
+                            self.result_url = result_permalink(str(response.url))
 
     async def run(self, variables: dict, *, dry_run=False, recovery=False) -> Result:
         site = self.project.site
         if site.status != "HTTP_READY" or not site.enabled or site.mode != "http":
             return Result("REVIEW_REQUIRED", reason="Project is not enabled HTTP_READY")
+        if site.recognition and (
+            site.recognition.state != "HTTP_VERIFIED" or not site.recognition.http_verified
+        ):
+            return Result(
+                "REVIEW_REQUIRED", reason="Recognized HTTP candidate has not been independently verified"
+            )
         context = dict(variables)
         steps = self.project.workflow.recovery if recovery else self.project.workflow.steps
         if recovery and not steps:

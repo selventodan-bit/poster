@@ -31,7 +31,10 @@ class Registry:
                 if p.site.id != folder.name or p.site.id in seen_ids:
                     raise ValueError("Folder name must equal unique project id")
                 seen_ids.add(p.site.id)
-                if p.site.enabled and p.site.status == "HTTP_READY" and p.site.mode == "http":
+                verified = not p.site.recognition or (
+                    p.site.recognition.state == "HTTP_VERIFIED" and p.site.recognition.http_verified
+                )
+                if p.site.enabled and p.site.status == "HTTP_READY" and p.site.mode == "http" and verified:
                     found[p.site.id] = p
                     if p.site.id not in self.projects or self.projects[p.site.id].revision != p.revision:
                         changed.append(p)

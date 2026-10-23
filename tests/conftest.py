@@ -72,3 +72,11 @@ def project_for(base, *, csrf=False, steps=None, recovery=None, **site_options):
 @pytest.fixture
 def make_project():
     return project_for
+
+
+def pytest_runtest_logreport(report):
+    # CI annotations contain only a test identifier; never request bodies/secrets.
+    if report.failed:
+        crash = getattr(report.longrepr, "reprcrash", None)
+        where = f" at line {crash.lineno}" if crash else ""
+        print("\n::error::pytest failed " + report.nodeid.replace("\n", " ") + where, flush=True)

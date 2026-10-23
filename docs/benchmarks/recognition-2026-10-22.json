@@ -1,0 +1,865 @@
+{
+  "corpus_sha256": "dfd060a864a8e94ea28765f65cfa7f86d2c90276cb8cd726a93851c56a3a45d0",
+  "scope": "controlled synthetic held-out variants; no public CMS support claim",
+  "rows": [
+    {
+      "id": "holdout-00",
+      "stratum": "new-variant",
+      "form": true,
+      "fields": true,
+      "browser": true,
+      "http": true,
+      "manual": false,
+      "false_confirmation": false,
+      "state": "HTTP_VERIFIED",
+      "http_reason": "",
+      "diagnostics": [
+        "READ_ONLY"
+      ]
+    },
+    {
+      "id": "holdout-01",
+      "stratum": "new-variant",
+      "form": true,
+      "fields": true,
+      "browser": true,
+      "http": true,
+      "manual": false,
+      "false_confirmation": false,
+      "state": "HTTP_VERIFIED",
+      "http_reason": "",
+      "diagnostics": [
+        "READ_ONLY"
+      ]
+    },
+    {
+      "id": "holdout-02",
+      "stratum": "new-variant",
+      "form": true,
+      "fields": true,
+      "browser": true,
+      "http": true,
+      "manual": false,
+      "false_confirmation": false,
+      "state": "HTTP_VERIFIED",
+      "http_reason": "",
+      "diagnostics": [
+        "READ_ONLY"
+      ]
+    },
+    {
+      "id": "holdout-03",
+      "stratum": "new-variant",
+      "form": true,
+      "fields": true,
+      "browser": true,
+      "http": true,
+      "manual": false,
+      "false_confirmation": false,
+      "state": "HTTP_VERIFIED",
+      "http_reason": "",
+      "diagnostics": [
+        "READ_ONLY"
+      ]
+    },
+    {
+      "id": "holdout-04",
+      "stratum": "new-variant",
+      "form": true,
+      "fields": true,
+      "browser": true,
+      "http": true,
+      "manual": false,
+      "false_confirmation": false,
+      "state": "HTTP_VERIFIED",
+      "http_reason": "",
+      "diagnostics": [
+        "READ_ONLY"
+      ]
+    },
+    {
+      "id": "holdout-05",
+      "stratum": "new-variant",
+      "form": true,
+      "fields": true,
+      "browser": true,
+      "http": true,
+      "manual": false,
+      "false_confirmation": false,
+      "state": "HTTP_VERIFIED",
+      "http_reason": "",
+      "diagnostics": [
+        "READ_ONLY"
+      ]
+    },
+    {
+      "id": "holdout-06",
+      "stratum": "new-variant",
+      "form": true,
+      "fields": true,
+      "browser": true,
+      "http": true,
+      "manual": false,
+      "false_confirmation": false,
+      "state": "HTTP_VERIFIED",
+      "http_reason": "",
+      "diagnostics": [
+        "READ_ONLY"
+      ]
+    },
+    {
+      "id": "holdout-07",
+      "stratum": "new-variant",
+      "form": true,
+      "fields": true,
+      "browser": true,
+      "http": true,
+      "manual": false,
+      "false_confirmation": false,
+      "state": "HTTP_VERIFIED",
+      "http_reason": "",
+      "diagnostics": [
+        "READ_ONLY"
+      ]
+    },
+    {
+      "id": "holdout-08",
+      "stratum": "new-variant",
+      "form": true,
+      "fields": true,
+      "browser": true,
+      "http": true,
+      "manual": false,
+      "false_confirmation": false,
+      "state": "HTTP_VERIFIED",
+      "http_reason": "",
+      "diagnostics": [
+        "READ_ONLY"
+      ]
+    },
+    {
+      "id": "holdout-09",
+      "stratum": "new-variant",
+      "form": true,
+      "fields": true,
+      "browser": true,
+      "http": true,
+      "manual": false,
+      "false_confirmation": false,
+      "state": "HTTP_VERIFIED",
+      "http_reason": "",
+      "diagnostics": [
+        "READ_ONLY"
+      ]
+    },
+    {
+      "id": "holdout-10",
+      "stratum": "new-variant",
+      "form": true,
+      "fields": true,
+      "browser": true,
+      "http": true,
+      "manual": false,
+      "false_confirmation": false,
+      "state": "HTTP_VERIFIED",
+      "http_reason": "",
+      "diagnostics": [
+        "READ_ONLY"
+      ]
+    },
+    {
+      "id": "holdout-11",
+      "stratum": "new-variant",
+      "form": true,
+      "fields": true,
+      "browser": true,
+      "http": true,
+      "manual": false,
+      "false_confirmation": false,
+      "state": "HTTP_VERIFIED",
+      "http_reason": "",
+      "diagnostics": [
+        "READ_ONLY"
+      ]
+    },
+    {
+      "id": "holdout-12",
+      "stratum": "new-variant",
+      "form": true,
+      "fields": true,
+      "browser": true,
+      "http": true,
+      "manual": false,
+      "false_confirmation": false,
+      "state": "HTTP_VERIFIED",
+      "http_reason": "",
+      "diagnostics": [
+        "READ_ONLY"
+      ]
+    },
+    {
+      "id": "holdout-13",
+      "stratum": "new-variant",
+      "form": true,
+      "fields": true,
+      "browser": true,
+      "http": true,
+      "manual": false,
+      "false_confirmation": false,
+      "state": "HTTP_VERIFIED",
+      "http_reason": "",
+      "diagnostics": [
+        "READ_ONLY"
+      ]
+    },
+    {
+      "id": "holdout-14",
+      "stratum": "new-variant",
+      "form": true,
+      "fields": true,
+      "browser": true,
+      "http": true,
+      "manual": false,
+      "false_confirmation": false,
+      "state": "HTTP_VERIFIED",
+      "http_reason": "",
+      "diagnostics": [
+        "READ_ONLY"
+      ]
+    },
+    {
+      "id": "holdout-15",
+      "stratum": "new-variant",
+      "form": true,
+      "fields": true,
+      "browser": true,
+      "http": true,
+      "manual": false,
+      "false_confirmation": false,
+      "state": "HTTP_VERIFIED",
+      "http_reason": "",
+      "diagnostics": [
+        "READ_ONLY"
+      ]
+    },
+    {
+      "id": "holdout-16",
+      "stratum": "new-variant",
+      "form": true,
+      "fields": true,
+      "browser": true,
+      "http": true,
+      "manual": false,
+      "false_confirmation": false,
+      "state": "HTTP_VERIFIED",
+      "http_reason": "",
+      "diagnostics": [
+        "READ_ONLY"
+      ]
+    },
+    {
+      "id": "holdout-17",
+      "stratum": "new-variant",
+      "form": true,
+      "fields": true,
+      "browser": true,
+      "http": true,
+      "manual": false,
+      "false_confirmation": false,
+      "state": "HTTP_VERIFIED",
+      "http_reason": "",
+      "diagnostics": [
+        "READ_ONLY"
+      ]
+    },
+    {
+      "id": "holdout-18",
+      "stratum": "unknown-structure",
+      "form": true,
+      "fields": true,
+      "browser": true,
+      "http": true,
+      "manual": false,
+      "false_confirmation": false,
+      "state": "HTTP_VERIFIED",
+      "http_reason": "",
+      "diagnostics": [
+        "READ_ONLY"
+      ]
+    },
+    {
+      "id": "holdout-19",
+      "stratum": "unknown-structure",
+      "form": true,
+      "fields": true,
+      "browser": true,
+      "http": true,
+      "manual": false,
+      "false_confirmation": false,
+      "state": "HTTP_VERIFIED",
+      "http_reason": "",
+      "diagnostics": [
+        "READ_ONLY"
+      ]
+    },
+    {
+      "id": "holdout-20",
+      "stratum": "unknown-structure",
+      "form": true,
+      "fields": true,
+      "browser": true,
+      "http": true,
+      "manual": false,
+      "false_confirmation": false,
+      "state": "HTTP_VERIFIED",
+      "http_reason": "",
+      "diagnostics": [
+        "READ_ONLY"
+      ]
+    },
+    {
+      "id": "holdout-21",
+      "stratum": "unknown-structure",
+      "form": true,
+      "fields": true,
+      "browser": true,
+      "http": true,
+      "manual": false,
+      "false_confirmation": false,
+      "state": "HTTP_VERIFIED",
+      "http_reason": "",
+      "diagnostics": [
+        "READ_ONLY"
+      ]
+    },
+    {
+      "id": "holdout-22",
+      "stratum": "unknown-structure",
+      "form": true,
+      "fields": true,
+      "browser": true,
+      "http": true,
+      "manual": false,
+      "false_confirmation": false,
+      "state": "HTTP_VERIFIED",
+      "http_reason": "",
+      "diagnostics": [
+        "READ_ONLY"
+      ]
+    },
+    {
+      "id": "holdout-23",
+      "stratum": "unknown-structure",
+      "form": true,
+      "fields": true,
+      "browser": true,
+      "http": true,
+      "manual": false,
+      "false_confirmation": false,
+      "state": "HTTP_VERIFIED",
+      "http_reason": "",
+      "diagnostics": [
+        "READ_ONLY"
+      ]
+    },
+    {
+      "id": "holdout-24",
+      "stratum": "unknown-structure",
+      "form": true,
+      "fields": true,
+      "browser": true,
+      "http": true,
+      "manual": false,
+      "false_confirmation": false,
+      "state": "HTTP_VERIFIED",
+      "http_reason": "",
+      "diagnostics": [
+        "READ_ONLY"
+      ]
+    },
+    {
+      "id": "holdout-25",
+      "stratum": "unknown-structure",
+      "form": true,
+      "fields": true,
+      "browser": true,
+      "http": true,
+      "manual": false,
+      "false_confirmation": false,
+      "state": "HTTP_VERIFIED",
+      "http_reason": "",
+      "diagnostics": [
+        "READ_ONLY"
+      ]
+    },
+    {
+      "id": "holdout-26",
+      "stratum": "unknown-structure",
+      "form": true,
+      "fields": true,
+      "browser": true,
+      "http": true,
+      "manual": false,
+      "false_confirmation": false,
+      "state": "HTTP_VERIFIED",
+      "http_reason": "",
+      "diagnostics": [
+        "READ_ONLY"
+      ]
+    },
+    {
+      "id": "holdout-27",
+      "stratum": "unknown-structure",
+      "form": true,
+      "fields": true,
+      "browser": true,
+      "http": true,
+      "manual": false,
+      "false_confirmation": false,
+      "state": "HTTP_VERIFIED",
+      "http_reason": "",
+      "diagnostics": [
+        "READ_ONLY"
+      ]
+    },
+    {
+      "id": "holdout-28",
+      "stratum": "unknown-structure",
+      "form": true,
+      "fields": true,
+      "browser": true,
+      "http": true,
+      "manual": false,
+      "false_confirmation": false,
+      "state": "HTTP_VERIFIED",
+      "http_reason": "",
+      "diagnostics": [
+        "READ_ONLY"
+      ]
+    },
+    {
+      "id": "holdout-29",
+      "stratum": "unknown-structure",
+      "form": true,
+      "fields": true,
+      "browser": true,
+      "http": true,
+      "manual": false,
+      "false_confirmation": false,
+      "state": "HTTP_VERIFIED",
+      "http_reason": "",
+      "diagnostics": [
+        "READ_ONLY"
+      ]
+    },
+    {
+      "id": "holdout-30",
+      "stratum": "unknown-structure",
+      "form": true,
+      "fields": true,
+      "browser": true,
+      "http": true,
+      "manual": false,
+      "false_confirmation": false,
+      "state": "HTTP_VERIFIED",
+      "http_reason": "",
+      "diagnostics": [
+        "READ_ONLY"
+      ]
+    },
+    {
+      "id": "holdout-31",
+      "stratum": "unknown-structure",
+      "form": true,
+      "fields": true,
+      "browser": true,
+      "http": true,
+      "manual": false,
+      "false_confirmation": false,
+      "state": "HTTP_VERIFIED",
+      "http_reason": "",
+      "diagnostics": [
+        "READ_ONLY"
+      ]
+    },
+    {
+      "id": "holdout-32",
+      "stratum": "unknown-structure",
+      "form": true,
+      "fields": true,
+      "browser": true,
+      "http": true,
+      "manual": false,
+      "false_confirmation": false,
+      "state": "HTTP_VERIFIED",
+      "http_reason": "",
+      "diagnostics": [
+        "READ_ONLY"
+      ]
+    },
+    {
+      "id": "holdout-33",
+      "stratum": "unknown-structure",
+      "form": true,
+      "fields": true,
+      "browser": true,
+      "http": true,
+      "manual": false,
+      "false_confirmation": false,
+      "state": "HTTP_VERIFIED",
+      "http_reason": "",
+      "diagnostics": [
+        "READ_ONLY"
+      ]
+    },
+    {
+      "id": "holdout-34",
+      "stratum": "unknown-structure",
+      "form": true,
+      "fields": true,
+      "browser": true,
+      "http": true,
+      "manual": false,
+      "false_confirmation": false,
+      "state": "HTTP_VERIFIED",
+      "http_reason": "",
+      "diagnostics": [
+        "READ_ONLY"
+      ]
+    },
+    {
+      "id": "holdout-35",
+      "stratum": "unknown-structure",
+      "form": true,
+      "fields": true,
+      "browser": true,
+      "http": true,
+      "manual": false,
+      "false_confirmation": false,
+      "state": "HTTP_VERIFIED",
+      "http_reason": "",
+      "diagnostics": [
+        "READ_ONLY"
+      ]
+    },
+    {
+      "id": "negative-rejected",
+      "stratum": "negative",
+      "form": true,
+      "fields": true,
+      "browser": false,
+      "http": false,
+      "manual": false,
+      "false_confirmation": false,
+      "state": "FAILED",
+      "diagnostics": [
+        "READ_ONLY",
+        "PUBLICATION_REJECTED"
+      ]
+    },
+    {
+      "id": "negative-silent",
+      "stratum": "negative",
+      "form": true,
+      "fields": true,
+      "browser": false,
+      "http": false,
+      "manual": false,
+      "false_confirmation": false,
+      "state": "UNKNOWN",
+      "diagnostics": [
+        "READ_ONLY",
+        "NO_PERMALINK"
+      ]
+    },
+    {
+      "id": "negative-hidden",
+      "stratum": "negative",
+      "form": true,
+      "fields": true,
+      "browser": false,
+      "http": false,
+      "manual": false,
+      "false_confirmation": false,
+      "state": "UNKNOWN",
+      "diagnostics": [
+        "READ_ONLY",
+        "NO_PERMALINK"
+      ]
+    },
+    {
+      "id": "negative-login",
+      "stratum": "negative",
+      "form": true,
+      "fields": true,
+      "browser": false,
+      "http": false,
+      "manual": false,
+      "false_confirmation": false,
+      "state": "UNKNOWN",
+      "diagnostics": [
+        "READ_ONLY",
+        "NO_PERMALINK"
+      ]
+    },
+    {
+      "id": "negative-opaque",
+      "stratum": "negative",
+      "form": true,
+      "fields": true,
+      "browser": true,
+      "http": false,
+      "manual": false,
+      "false_confirmation": false,
+      "state": "LEARNING_REQUIRED",
+      "diagnostics": [
+        "READ_ONLY",
+        "UNKNOWN_DYNAMIC"
+      ]
+    },
+    {
+      "id": "negative-background",
+      "stratum": "negative",
+      "form": true,
+      "fields": true,
+      "browser": true,
+      "http": true,
+      "manual": false,
+      "false_confirmation": false,
+      "state": "HTTP_VERIFIED",
+      "http_reason": "",
+      "diagnostics": [
+        "READ_ONLY",
+        "WRITE_SCOPE"
+      ]
+    },
+    {
+      "id": "negative-slow",
+      "stratum": "negative",
+      "form": true,
+      "fields": true,
+      "browser": true,
+      "http": true,
+      "manual": false,
+      "false_confirmation": false,
+      "state": "HTTP_VERIFIED",
+      "http_reason": "",
+      "diagnostics": [
+        "READ_ONLY"
+      ]
+    },
+    {
+      "id": "holdout-staged",
+      "stratum": "unknown-structure",
+      "form": true,
+      "fields": true,
+      "browser": true,
+      "http": true,
+      "manual": false,
+      "false_confirmation": false,
+      "state": "HTTP_VERIFIED",
+      "http_reason": "",
+      "diagnostics": [
+        "READ_ONLY"
+      ]
+    }
+  ],
+  "strata": {
+    "negative": {
+      "form": {
+        "passed": 7,
+        "total": 7,
+        "rate": 1.0
+      },
+      "fields": {
+        "passed": 7,
+        "total": 7,
+        "rate": 1.0
+      },
+      "browser": {
+        "passed": 3,
+        "total": 7,
+        "rate": 0.4286
+      },
+      "http": {
+        "passed": 2,
+        "total": 7,
+        "rate": 0.2857
+      },
+      "manual": {
+        "passed": 0,
+        "total": 7,
+        "rate": 0.0
+      },
+      "false_confirmation": {
+        "passed": 0,
+        "total": 7,
+        "rate": 0.0
+      }
+    },
+    "new-variant": {
+      "form": {
+        "passed": 18,
+        "total": 18,
+        "rate": 1.0
+      },
+      "fields": {
+        "passed": 18,
+        "total": 18,
+        "rate": 1.0
+      },
+      "browser": {
+        "passed": 18,
+        "total": 18,
+        "rate": 1.0
+      },
+      "http": {
+        "passed": 18,
+        "total": 18,
+        "rate": 1.0
+      },
+      "manual": {
+        "passed": 0,
+        "total": 18,
+        "rate": 0.0
+      },
+      "false_confirmation": {
+        "passed": 0,
+        "total": 18,
+        "rate": 0.0
+      }
+    },
+    "unknown-structure": {
+      "form": {
+        "passed": 19,
+        "total": 19,
+        "rate": 1.0
+      },
+      "fields": {
+        "passed": 19,
+        "total": 19,
+        "rate": 1.0
+      },
+      "browser": {
+        "passed": 19,
+        "total": 19,
+        "rate": 1.0
+      },
+      "http": {
+        "passed": 19,
+        "total": 19,
+        "rate": 1.0
+      },
+      "manual": {
+        "passed": 0,
+        "total": 19,
+        "rate": 0.0
+      },
+      "false_confirmation": {
+        "passed": 0,
+        "total": 19,
+        "rate": 0.0
+      }
+    }
+  },
+  "unexpected_mutations": 0,
+  "publications": 82,
+  "known": {
+    "rows": [
+      {
+        "id": "classic",
+        "form": true,
+        "browser": true,
+        "http": true
+      },
+      {
+        "id": "ajax",
+        "form": true,
+        "browser": true,
+        "http": true
+      },
+      {
+        "id": "json",
+        "form": true,
+        "browser": true,
+        "http": true
+      },
+      {
+        "id": "multipart",
+        "form": true,
+        "browser": true,
+        "http": true
+      },
+      {
+        "id": "contenteditable",
+        "form": true,
+        "browser": true,
+        "http": true
+      },
+      {
+        "id": "iframe",
+        "form": true,
+        "browser": true,
+        "http": true
+      },
+      {
+        "id": "csrf",
+        "form": true,
+        "browser": true,
+        "http": true
+      }
+    ],
+    "form": {
+      "passed": 7,
+      "total": 7,
+      "rate": 1.0
+    },
+    "browser": {
+      "passed": 7,
+      "total": 7,
+      "rate": 1.0
+    },
+    "http": {
+      "passed": 7,
+      "total": 7,
+      "rate": 1.0
+    }
+  },
+  "transfer": {
+    "rows": [
+      {
+        "locale": "ar",
+        "untrained_detected": false,
+        "trained_detected": true,
+        "http": true
+      },
+      {
+        "locale": "uk",
+        "untrained_detected": false,
+        "trained_detected": true,
+        "http": true
+      },
+      {
+        "locale": "pl",
+        "untrained_detected": false,
+        "trained_detected": true,
+        "http": true
+      }
+    ],
+    "successes": 3,
+    "total": 3,
+    "regressions": 0,
+    "regression_trials": 1
+  },
+  "false_positive_rate": {
+    "false_positives": 0,
+    "total": 5,
+    "rate": 0.0,
+    "writes": 0
+  },
+  "engine_signature_corpus": {
+    "scope": "curated synthetic markup; identification only",
+    "passed": 17,
+    "total": 17
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "compose": ["new topic", "new thread", "create discussion", "new discussion", "nuevo debate", "nueva discusión", "nuevo tema", "nouveau sujet", "nouvelle discussion", "neues thema", "nuovo argomento", "criar tópico", "nova discussão", "новая тема", "создать тему", "створити тему", "nowy temat", "موضوع جديد", "דיון חדש"],
+  "publish": ["publish", "post", "submit", "enviar", "publicar", "envoyer", "invia", "veröffentlichen", "отправить", "опубликовать", "надіслати", "opublikuj", "نشر", "פרסם"],
+  "title": ["title", "subject", "asunto", "sujet", "titre", "titolo", "título", "betreff", "thema", "заголовок", "тема", "tytuł", "عنوان", "כותרת"],
+  "body": ["body", "message", "content", "texto", "mensaje", "mensagem", "texte", "messaggio", "nachricht", "сообщение", "текст", "повідомлення", "treść", "محتوى", "תוכן", "editor"],
+  "search": ["search", "buscar", "recherche", "suche", "поиск", "пошук", "szukaj", "بحث"],
+  "danger": ["delete", "remove", "logout", "log out", "sign out", "settings", "unsubscribe", "vote", "like", "report", "удалить", "выйти", "настройки", "eliminar", "borrar", "supprimer", "löschen"]
+}

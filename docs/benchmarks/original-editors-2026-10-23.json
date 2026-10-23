@@ -1,0 +1,42 @@
+[
+  {
+    "editor": "tinymce",
+    "version": "7.9.1",
+    "server_text_matches": true,
+    "literal_markup_preserved": true,
+    "line_breaks_preserved": true,
+    "submissions": 1
+  },
+  {
+    "editor": "ckeditor",
+    "version": "4.22.1",
+    "server_text_matches": true,
+    "literal_markup_preserved": true,
+    "line_breaks_preserved": true,
+    "submissions": 1
+  },
+  {
+    "editor": "quill",
+    "version": "2.0.3",
+    "server_text_matches": true,
+    "literal_markup_preserved": true,
+    "line_breaks_preserved": true,
+    "submissions": 1
+  },
+  {
+    "editor": "prosemirror",
+    "version": "Tiptap 2.27.2",
+    "server_text_matches": true,
+    "literal_markup_preserved": true,
+    "line_breaks_preserved": true,
+    "submissions": 1
+  },
+  {
+    "editor": "summernote",
+    "version": "0.9.1",
+    "server_text_matches": true,
+    "literal_markup_preserved": true,
+    "line_breaks_preserved": true,
+    "submissions": 1
+  }
+]

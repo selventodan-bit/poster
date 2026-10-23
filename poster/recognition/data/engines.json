@@ -1,0 +1,19 @@
+[
+ {"expected":["xenforo"],"html":"<meta name='generator' content='XenForo 2.3'><html data-app='public'><script src='/js/xf/core.js'></script>"},
+ {"expected":["phpbb"],"html":"<div id='phpbb'><link href='/styles/prosilver/theme/common.css'><a href='posting.php?mode=post'>Compose</a></div>"},
+ {"expected":["vbulletin"],"html":"<meta name='generator' content='vBulletin 5.7'><div class='b-post'><script src='/clientscript/vbulletin.js'></script></div>"},
+ {"expected":["mybb"],"html":"<div id='mybb'><script src='/jscripts/mybb.js'></script><a href='newthread.php'>Compose</a></div>"},
+ {"expected":["discourse"],"html":"<div id='discourse-application'><script src='/assets/discourse-application.js'></script><a href='/t/welcome/4'>Topic</a></div>"},
+ {"expected":["smf"],"html":"<meta name='generator' content='Simple Machines 2.1'><script src='/Themes/default/scripts/script.js'></script><a href='index.php?action=post'>Compose</a>"},
+ {"expected":["invision"],"html":"<div data-ipsApp='forums'><script src='/applications/core/main.js'></script><a href='/topic/4-test'>Topic</a></div>"},
+ {"expected":["flarum"],"html":"<div class='App-content'><script src='/assets/forum-abc.js'></script><a href='/d/3-welcome'>Topic</a></div>"},
+ {"expected":["wordpress"],"html":"<meta name='generator' content='WordPress 6.8'><script src='/wp-includes/main.js'></script>"},
+ {"expected":["wpforo"],"html":"<div id='wpforo'><script src='/wp-content/plugins/wpforo/forum.js'></script></div>"},
+ {"expected":["wordpress","wpforo"],"html":"<meta name='generator' content='WordPress 6.8'><div id='wpforo-wrap'><script src='/wp-content/plugins/wpforo/forum.js'></script></div>"},
+ {"expected":[],"html":"<article>WordPress XenForo phpBB posting.php /js/xf/core.js</article>"},
+ {"expected":[],"html":"<script src='/js/xf/core.js'></script><script src='/js/xf/other.js'></script>"},
+ {"expected":[],"html":"<meta name='generator' content='phpBB 3.3'>"},
+ {"expected":[],"html":"<a href='/community/'>Community</a><a href='/wp-login.php'>Login</a>"},
+ {"expected":[],"html":"<div id='discourse-application'></div>"},
+ {"expected":[],"html":"<form><textarea></textarea><button>Send</button></form>"}
+]

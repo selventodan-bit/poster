@@ -1,5 +1,72 @@
 {
   "$defs": {
+    "RecognitionInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "enum": [
+            "DETECTED",
+            "BROWSER_VERIFIED",
+            "HTTP_CANDIDATE",
+            "HTTP_VERIFIED",
+            "LEARNING_REQUIRED",
+            "UNKNOWN",
+            "FAILED"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "publication_kind": {
+          "default": "topic",
+          "enum": [
+            "topic",
+            "reply",
+            "comment"
+          ],
+          "title": "Publication Kind",
+          "type": "string"
+        },
+        "recognizer": {
+          "default": "semantic-2.0",
+          "title": "Recognizer",
+          "type": "string"
+        },
+        "rule_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rule Id"
+        },
+        "browser_verified": {
+          "default": false,
+          "title": "Browser Verified",
+          "type": "boolean"
+        },
+        "http_verified": {
+          "default": false,
+          "title": "Http Verified",
+          "type": "boolean"
+        },
+        "diagnostics": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Diagnostics",
+          "type": "array"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "title": "RecognitionInfo",
+      "type": "object"
+    },
     "Schedule": {
       "additionalProperties": false,
       "properties": {
@@ -136,6 +203,17 @@
       },
       "title": "Headers",
       "type": "object"
+    },
+    "recognition": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RecognitionInfo"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     }
   },
   "required": [

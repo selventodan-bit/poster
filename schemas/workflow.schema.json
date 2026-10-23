@@ -115,6 +115,8 @@
                 "css_text",
                 "css_attribute",
                 "json_path",
+                "header",
+                "cookie",
                 "regex",
                 "contains",
                 "status"
@@ -204,6 +206,15 @@
           "default": false,
           "title": "Result Url",
           "type": "boolean"
+        },
+        "normalize": {
+          "default": "none",
+          "enum": [
+            "none",
+            "whitespace"
+          ],
+          "title": "Normalize",
+          "type": "string"
         }
       },
       "required": [
