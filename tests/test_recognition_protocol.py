@@ -119,6 +119,7 @@ def test_ui_ignores_errors_from_previous_operation():
 
     app = object.__new__(App)
     app.messages, app.generation = queue.Queue(), 2
+    app.closing = False
     app.messages.put((1, "error", "STALE ERROR"))
     app.messages.put((2, "error", "Current error"))
     values = []
