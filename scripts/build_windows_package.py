@@ -19,7 +19,15 @@ def build(output):
         .split("\0")
     )
     allowed = {"poster", "scripts", "docs", "examples", "schemas", "tests"}
-    top = {"README.md", "LICENSE", "pyproject.toml", "uv.lock", "start_recorder.cmd", "WINDOWS_README.txt"}
+    top = {
+        "README.md",
+        "LICENSE",
+        "pyproject.toml",
+        "uv.lock",
+        "requirements-recorder.txt",
+        "start_recorder.cmd",
+        "WINDOWS_README.txt",
+    }
     files = sorted({n for n in names if n and (Path(n).parts[0] in allowed or n in top)})
     target = output / "poster-windows.zip"
     with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -35,7 +43,7 @@ def build(output):
             archive.writestr(info, path.read_bytes())
     checksum = hashlib.sha256(target.read_bytes()).hexdigest()
     (output / "poster-windows.sha256").write_text(checksum + "  " + target.name + "\n", encoding="ascii")
-    print(checksum)
+    print("::notice title=Windows ZIP SHA256::" + checksum)
     return target, checksum
 
 

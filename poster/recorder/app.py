@@ -171,6 +171,8 @@ class App(ClipboardMixin):
             except asyncio.CancelledError:
                 self.messages.put((generation, "error", "Операция остановлена."))
             except Exception as exc:
+                if generation != self.generation:
+                    return
                 code = str(exc) if isinstance(exc, (PermissionError, ValueError)) else ""
                 if code not in MESSAGES:
                     if self.session:
@@ -263,6 +265,16 @@ class App(ClipboardMixin):
         self.status.set("Исследую страницу без отправки публикаций…")
 
         async def work():
+            if (
+                self.session
+                and not self.session.closed
+                and not self.session.browser_attempted
+                and self.session.url == url
+                and self.session.publication_kind == kind
+                and not cdns
+            ):
+                await self.session.recognize()
+                return
             if self.session:
                 await self.session.close()
             if not self.knowledge:
@@ -434,6 +446,9 @@ class App(ClipboardMixin):
         self.run(work)
 
     def close(self):
+        self.busy = True
+        for button in self.buttons.values():
+            button.configure(state="disabled")
         self.generation += 1
         if self.future:
             self.future.cancel()

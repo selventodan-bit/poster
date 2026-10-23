@@ -37,7 +37,11 @@ def bootstrap(check_only=False):
         print("Creating Python environment...", flush=True)
         run([sys.executable, "-m", "venv", str(env)])
     stamp = env / "poster-install.sha256"
-    fingerprint = hashlib.sha256((ROOT / "pyproject.toml").read_bytes() + str(ROOT).encode()).hexdigest()
+    fingerprint = hashlib.sha256(
+        (ROOT / "pyproject.toml").read_bytes()
+        + (ROOT / "requirements-recorder.txt").read_bytes()
+        + str(ROOT).encode()
+    ).hexdigest()
     healthy = (
         subprocess.run(
             [
@@ -54,7 +58,7 @@ def bootstrap(check_only=False):
     )
     if not healthy or not stamp.exists() or stamp.read_text() != fingerprint:
         print("Installing current Poster and Recorder dependencies...", flush=True)
-        run([str(python), "-m", "pip", "install", "-e", ".[recorder]"])
+        run([str(python), "-m", "pip", "install", "-e", ".[recorder]", "-c", "requirements-recorder.txt"])
         run([str(python), "-m", "pip", "check"])
         stamp.write_text(fingerprint)
     browser_probe = """from playwright.sync_api import sync_playwright

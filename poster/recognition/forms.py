@@ -268,9 +268,11 @@ class UniversalFormDetector:
         if candidate.publication_kind in {"reply", "comment"}:
             candidate.fields.pop("title", None)
             candidate.confidence = 0.95 if {"body", "submit"} <= fields.keys() else self.confidence(fields)
+        candidate.required_fields = [
+            f["selector"] for f in visible if f.get("required") and not f.get("has_value")
+        ]
         mapped = {f.selector for role, f in candidate.fields.items() if role in {"title", "body"}}
         if any(f.get("required") and not f.get("has_value") and f["selector"] not in mapped for f in visible):
-            candidate.fields.pop("submit", None)
             candidate.evidence.append("unresolved-required-control")
         candidate.text_inputs = [
             next(

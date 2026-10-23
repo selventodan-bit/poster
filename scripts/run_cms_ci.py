@@ -14,6 +14,7 @@ import secrets
 import shutil
 import subprocess
 import time
+import traceback
 import uuid
 from pathlib import Path
 from urllib.parse import urljoin
@@ -502,4 +503,12 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exc:
+        locations = " > ".join(
+            f"{Path(f.filename).name}:{f.lineno}:{f.name}"
+            for f in traceback.extract_tb(exc.__traceback__)[-4:]
+        )
+        print(f"::error::Original CMS {type(exc).__name__} at {locations}", flush=True)
+        raise

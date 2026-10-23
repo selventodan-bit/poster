@@ -29,6 +29,7 @@ def test_release_is_reproducible_and_excludes_private_state(tmp_path):
             "scripts/windows_bootstrap.py",
             "poster/recorder/app.py",
             "WINDOWS_README.txt",
+            "requirements-recorder.txt",
         } <= set(names)
         assert not any(
             any(p in {"node_modules", ".poster", ".venv", "__pycache__"} for p in Path(n).parts)
@@ -41,6 +42,7 @@ def test_release_is_reproducible_and_excludes_private_state(tmp_path):
 def test_launcher_repairs_old_environment_and_preserves_user_data(tmp_path, monkeypatch):
     launcher = module("windows_bootstrap")
     monkeypatch.setattr(launcher, "ROOT", tmp_path)
+    (tmp_path / "requirements-recorder.txt").write_text("")
     (tmp_path / "pyproject.toml").write_text('[project]\nname="test"')
     python = tmp_path / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     python.parent.mkdir(parents=True)
@@ -70,6 +72,7 @@ def test_launcher_repairs_old_environment_and_preserves_user_data(tmp_path, monk
 def test_launcher_install_failure_does_not_mark_environment_healthy(tmp_path, monkeypatch):
     launcher = module("windows_bootstrap")
     monkeypatch.setattr(launcher, "ROOT", tmp_path)
+    (tmp_path / "requirements-recorder.txt").write_text("")
     (tmp_path / "pyproject.toml").write_text("[project]")
 
     def denied(*args, **kwargs):

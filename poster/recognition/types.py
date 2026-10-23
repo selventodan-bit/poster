@@ -89,6 +89,7 @@ class FormCandidate:
     alternatives: dict[str, list[FieldRef]] = field(default_factory=dict)
     structure: list[str] = field(default_factory=list)
     publication_kind: str = "topic"
+    required_fields: list[str] = field(default_factory=list)
 
     @property
     def required_roles(self):
@@ -97,7 +98,11 @@ class FormCandidate:
     @property
     def complete(self):
         return (
-            self.publication_kind in {"topic", "reply", "comment"}
+            all(
+                selector in {f.selector for role, f in self.fields.items() if role in {"title", "body"}}
+                for selector in self.required_fields
+            )
+            and self.publication_kind in {"topic", "reply", "comment"}
             and self.required_roles <= self.fields.keys()
         )
 
