@@ -48,6 +48,8 @@ def check(executable, output):
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             value = snapshot()
+            if value.get("last_error") and not value.get("busy"):
+                raise AssertionError("Application reported an operation error")
             if predicate(value):
                 return value
             time.sleep(0.15)

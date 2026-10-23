@@ -172,6 +172,7 @@ class App(DesktopMixin, ClipboardMixin):
         if self.busy:
             return
         self.busy = True
+        self.last_error = None
         generation = self.generation
         self.update_buttons()
 

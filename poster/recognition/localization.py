@@ -7,7 +7,7 @@ from pathlib import Path
 
 class Localizations:
     def __init__(self, extra: Path | None = None):
-        self.words = json.loads((Path(__file__).parent / "data/locales.json").read_text())
+        self.words = json.loads((Path(__file__).parent / "data/locales.json").read_text(encoding="utf-8"))
         if extra:
             additional = json.loads(extra.read_text(encoding="utf-8"))
             if set(additional) - set(self.words):

@@ -47,6 +47,8 @@ def main(output):
         "--clean",
         "--onedir",
         "--windowed",
+        "--python-option",
+        "X utf8",
         "--noupx",
         "--name",
         "Poster",

@@ -4,6 +4,8 @@ from dataclasses import replace
 import socket
 import os
 import subprocess
+import sys
+from pathlib import Path
 import time
 
 import pytest
@@ -116,10 +118,37 @@ def pump_until(root, predicate, timeout=30):
     reason="Native desktop required",
 )
 def test_gui_local_button_and_cancel_own_and_stop_server(tmp_path, monkeypatch):
+    # Tk has process-global native state. Each complete desktop scenario owns
+    # its interpreter, just as reopening the portable application does.
+    code = """import os,sys
+from pathlib import Path
+sys.path.insert(0,sys.argv[1])
+from test_desktop import local_gui_scenario
+os.chdir(sys.argv[2])
+local_gui_scenario(Path(sys.argv[2]))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code, str(Path(__file__).parent), str(tmp_path)],
+        capture_output=True,
+        text=True,
+        timeout=150,
+    )
+    if result.returncode:
+        print(result.stdout, flush=True)
+        # A failure before App construction cannot contain website/session data.
+        if "_tkinter.TclError" in result.stderr:
+            print(
+                "\n::error::Fresh Tk startup "
+                + result.stderr.split("_tkinter.TclError:")[-1].strip().replace("\n", " ")[:500],
+                flush=True,
+            )
+    assert result.returncode == 0, result.stderr
+
+
+def local_gui_scenario(tmp_path):
     import tkinter as tk
     from poster.recorder.app import App
 
-    monkeypatch.chdir(tmp_path)
     root = tk.Tk()
     app = App(root)
     try:
@@ -127,7 +156,10 @@ def test_gui_local_button_and_cancel_own_and_stop_server(tmp_path, monkeypatch):
         app.desktop_widgets["local_test"].invoke()
         pump_until(root, lambda: bool(app.workspace.test_ports))
         ports = set(app.workspace.test_ports)
-        pump_until(root, lambda: app.local_report is not None and not app.busy)
+        pump_until(
+            root, lambda: (app.local_report is not None or app.last_error is not None) and not app.busy
+        )
+        assert app.last_error is None and app.local_report is not None
         assert app.local_report["publications"] == 3 and app.local_report["server_stopped"]
         assert not app.workspace.test_ports and not app.workspace.active
         for port in ports:
@@ -168,3 +200,12 @@ def test_gui_local_button_and_cancel_own_and_stop_server(tmp_path, monkeypatch):
                 break
             time.sleep(0.02)
     assert not app.thread.is_alive()
+
+
+def test_localization_resources_are_independent_of_windows_ansi(monkeypatch):
+    import io
+    from poster.recognition.localization import Localizations
+
+    monkeypatch.setattr(io, "text_encoding", lambda encoding, stacklevel=2: encoding or "cp1252")
+    words = Localizations()
+    assert words.has("publish", "Опубликовать")
