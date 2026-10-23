@@ -28,7 +28,9 @@ class Capture:
     body_format: str = "text"
 
 
-FORM_JS = """form => ({url: location.href, action: form.action, method: form.method,
+FORM_JS = """form => ({url: location.href,
+  action: new URL(form.getAttribute('action')||location.href,form.baseURI).href,
+  method: form.getAttribute('method')||'get',
   fields: [...form.elements].filter(e=>e.name).map(e=>({name:e.name, type:e.type,
     value: e.type === 'password' ? '' : e.value, selector: '[name='+JSON.stringify(e.name)+']'}))})"""
 INIT_JS = """document.addEventListener('submit', e => {
@@ -69,6 +71,7 @@ class Recorder:
         self.profile = profile
         self.pending = set()
         self.request_records = {}
+        self.response_event = asyncio.Event()
 
     def task(self, coro):
         task = asyncio.create_task(coro)
@@ -92,7 +95,7 @@ class Recorder:
                     mime = Message()
                     mime["content-type"] = content_type
                     body = raw.decode(mime.get_content_charset() or "utf-8")
-                except (UnicodeError, ValueError):
+                except (UnicodeError, ValueError, LookupError):
                     body, content_type = "", "application/octet-stream"
                 self.capture.requests.append(
                     {
@@ -150,6 +153,7 @@ class Recorder:
                         "headers": response_headers,
                     }
                 )
+                self.response_event.set()
             except Exception:
                 # Redirects and downloads need not have a readable body.
                 pass

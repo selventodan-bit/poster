@@ -26,12 +26,13 @@ def dangerous_url(url):
 
 
 class SubmissionScope:
-    def __init__(self, url, capture, *, max_writes=6):
+    def __init__(self, url, capture, *, max_writes=6, templates=()):
         self.origin = origin(url)
         self.capture = capture
         self.max_writes = max_writes
         self.sent = set()
         self.allowed_ids = set()
+        self.templates = templates
 
     def allows(self, request):
         if (
@@ -70,6 +71,10 @@ class SubmissionScope:
                 for _, _, used in request_values(item)
             ):
                 dependency = True
+        if self.sent and not dependency and self.templates:
+            from .transfer import transition_allowed
+
+            dependency = transition_allowed(self.templates, self.capture, request, self.allowed_ids)
         if (not self.sent and not content) or (self.sent and not dependency):
             return False
         self.sent.add(identity)
@@ -81,6 +86,7 @@ class ResourcePolicy:
     DEFAULT_STATIC = (
         "https://cdn.jsdelivr.net",
         "https://cdnjs.cloudflare.com",
+        "https://ajax.googleapis.com",
         "https://fonts.googleapis.com",
         "https://fonts.gstatic.com",
     )

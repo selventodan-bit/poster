@@ -4,6 +4,7 @@ import asyncio
 import json
 import uuid
 import time
+import os
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
 
@@ -25,6 +26,7 @@ from .learner import HTTPWorkflowLearner
 from .network import NetworkAnalyzer, rejected
 from .network import leaves
 from .types import FieldRef, FormCandidate, LearningState, Recognition
+from .transfer import preflight
 
 
 def css_path(node):
@@ -44,7 +46,8 @@ class RecognitionSession:
         *,
         knowledge=None,
         headless=False,
-        confirmation_timeout=4,
+        confirmation_timeout=None,
+        permalink_timeout=20,
         static_origins=None,
         locales=None,
     ):
@@ -59,7 +62,14 @@ class RecognitionSession:
         self.url, self.profile = url, profile
         self.hosts = [parsed.hostname]
         self.knowledge, self.headless = knowledge, headless
-        self.confirmation_timeout = confirmation_timeout
+        self.confirmation_timeout = float(
+            confirmation_timeout
+            if confirmation_timeout is not None
+            else os.environ.get("POSTER_CONFIRMATION_TIMEOUT", "45")
+        )
+        self.permalink_timeout = float(permalink_timeout)
+        if not 0 < self.confirmation_timeout <= 600 or not 0 < self.permalink_timeout <= 600:
+            raise ValueError("Confirmation deadlines must be between 0 and 600 seconds")
         self.result = Recognition()
         self.recorder = Recorder(url, profile)
         self.context = self.page = self.playwright = None
@@ -76,6 +86,7 @@ class RecognitionSession:
         self.navigation = NavigationDiscovery(locales=locales, knowledge=knowledge)
         self.locales = locales
         self.login_scope = None
+        self.transfer_rule = None
 
     def state(self, value):
         self.result.state = value
@@ -152,7 +163,20 @@ class RecognitionSession:
         passwords = self.page.locator('input[type="password"]:visible')
         if await passwords.count() != 1:
             raise ValueError("AUTH_REQUIRED")
-        action = await passwords.evaluate("e=>e.form?.action")
+        action = await passwords.evaluate(
+            "e=>e.form?new URL(e.form.getAttribute('action')||location.href,e.baseURI).href:null"
+        )
+        explicit_action = await passwords.evaluate("e=>e.form?.getAttribute('action')")
+        if not explicit_action:
+            technologies = EngineDetector().report(
+                await self.page.content(),
+                url=self.page.url,
+                requests=self.recorder.capture.requests,
+                responses=self.recorder.capture.responses,
+            )
+            if any(t["family"] == "flarum" for t in technologies):
+                base = await self.page.evaluate("window.app?.forum?.attribute('baseUrl') || location.origin")
+                action = urljoin(base.rstrip("/") + "/", "login")
         if not action or origin(action) != origin(self.url):
             raise ValueError("BLOCKED_HOST")
         self.login_scope = {"url": action, "deadline": time.monotonic() + 120, "used": False}
@@ -164,6 +188,13 @@ class RecognitionSession:
         self.result = Recognition(diagnostics=["READ_ONLY"])
         detector = UniversalFormDetector(self.locales)
         forms = await self.navigation.discover(self.page, lambda: detector.inspect(self.page, self.hosts))
+        # Editors may replace the textarea with an iframe after DOMContentLoaded.
+        # Resnapshot during that transition; never retain stale field selectors.
+        for _ in range(5):
+            if any({"title", "body", "submit"} <= f.fields.keys() for f in forms):
+                break
+            await asyncio.sleep(0.15)
+            forms = await detector.inspect(self.page, self.hosts)
         self.result.navigation = self.navigation.trace
         html = await self.page.content()
         technologies = EngineDetector().report(
@@ -203,6 +234,10 @@ class RecognitionSession:
             self.state(LearningState.LEARNING_REQUIRED)
         else:
             self.select(complete[0].key)
+            if self.transfer_rule:
+                self.result.transfer = await preflight(
+                    self.page, complete[0], self.transfer_rule.http_templates[0]
+                )
             await self.highlight()
         return self.result
 
@@ -227,6 +262,8 @@ class RecognitionSession:
             f.confidence for r, f in form.fields.items() if r in {"title", "body"}
         )
         if self.knowledge:
+            reusable = self.knowledge.http_candidates(form, engine=self.result.engine)
+            self.transfer_rule = reusable[0] if reusable else None
             rule = self.knowledge.match(form)
             if rule:
                 self.result.rule_id = rule.id
@@ -270,7 +307,11 @@ class RecognitionSession:
         form = await self.fill(title, body)
         self.browser_attempted = True
         self.recorder.capture.action_id = uuid.uuid4().hex
-        self.scope = SubmissionScope(self.url, self.recorder.capture)
+        self.scope = SubmissionScope(
+            self.url,
+            self.recorder.capture,
+            templates=self.transfer_rule.http_templates if self.transfer_rule else (),
+        )
         self.read_only = False
         try:
             ref = form.fields["submit"]
@@ -314,15 +355,40 @@ class RecognitionSession:
     async def confirm_and_learn(self, project_id, *, existing_site=None):
         deadline = asyncio.get_running_loop().time() + self.confirmation_timeout
         capture = self.recorder.capture
+        publication_received = None
+        poll_interval = 0.1
         while asyncio.get_running_loop().time() < deadline:
             await self.session_state()
+            writes = [
+                r
+                for r in capture.responses
+                if r.get("action_id") == capture.action_id and r["method"] in {"POST", "PUT", "PATCH"}
+            ]
+            if writes and publication_received is None:
+                publication_received = asyncio.get_running_loop().time()
             explicitly_rejected = any(
                 r.get("action_id") == capture.action_id
                 and r["method"] in {"POST", "PUT", "PATCH"}
                 and rejected(r)
                 for r in capture.responses
             )
-            candidate = None if explicitly_rejected else await self.find_confirmation()
+            candidate = None
+            # The overall deadline includes slow POST responses. Once an actual
+            # response arrives, a separate bounded read-only permalink window starts.
+            remaining = deadline - asyncio.get_running_loop().time()
+            if publication_received is not None:
+                remaining = min(
+                    remaining,
+                    publication_received + self.permalink_timeout - asyncio.get_running_loop().time(),
+                )
+            if remaining <= 0:
+                break
+            if writes and not explicitly_rejected:
+                try:
+                    async with asyncio.timeout(remaining):
+                        candidate = await self.find_confirmation()
+                except TimeoutError:
+                    break
             if candidate:
                 capture.result_url, capture.confirmation = candidate
                 capture.browser_verified = True
@@ -342,17 +408,18 @@ class RecognitionSession:
                         capture=capture,
                     )
                 try:
-                    self.build = HTTPWorkflowLearner().learn(
+                    learner = HTTPWorkflowLearner()
+                    self.build = learner.learn(
                         capture,
                         project_id,
                         rule_id=self.result.rule_id,
                         existing_site=existing_site,
-                        knowledge_rule=next(
-                            (r for r in self.knowledge.rules() if r.id == self.result.rule_id), None
-                        )
+                        knowledge_rule=self.transfer_rule
+                        or next((r for r in self.knowledge.rules() if r.id == self.result.rule_id), None)
                         if self.knowledge
                         else None,
                     )
+                    self.result.transfer.update(learner.transfer_report)
                 except (ValueError, TypeError, KeyError):
                     self.result.diagnostics.append("UNKNOWN_DYNAMIC")
                     self.state(LearningState.LEARNING_REQUIRED)
@@ -370,7 +437,7 @@ class RecognitionSession:
                 else:
                     self.result.outcome = "workflow_not_built"
                 return
-            failed = any(rejected(r) for r in capture.responses if r.get("action_id") == capture.action_id)
+            failed = any(rejected(r) for r in writes)
             if failed:
                 self.state(LearningState.FAILED)
                 self.result.diagnostics.append("PUBLICATION_REJECTED")
@@ -384,12 +451,21 @@ class RecognitionSession:
                 if self.knowledge and self.result.rule_id:
                     self.knowledge.result(self.result.rule_id, False)
                 return
-            await asyncio.sleep(0.1)
+            self.recorder.response_event.clear()
+            try:
+                await asyncio.wait_for(
+                    self.recorder.response_event.wait(),
+                    timeout=min(poll_interval, max(0.001, deadline - asyncio.get_running_loop().time())),
+                )
+            except TimeoutError:
+                pass
+            poll_interval = min(1, poll_interval * 1.5)
         self.result.diagnostics.append("NO_PERMALINK")
+        self.result.diagnostics.append("CONFIRMATION_PENDING")
         self.result.diagnostics.extend(NetworkAnalyzer().analyze(capture).diagnostics)
         self.state(LearningState.UNKNOWN)
         self.result.outcome = (
-            "auth_expired" if "AUTH_EXPIRED" in self.result.diagnostics else "permalink_missing"
+            "auth_expired" if "AUTH_EXPIRED" in self.result.diagnostics else "confirmation_timeout"
         )
 
     def learn_manual_fields(self):
@@ -437,6 +513,46 @@ class RecognitionSession:
             try:
                 confirmation = await self.read_confirmation(url)
                 if confirmation:
+                    if not extra:
+                        # Some native CMSes return a 200 interstitial and only
+                        # then navigate via meta-refresh/JS. Bind its actual
+                        # permalink anchor instead of verifying the interstitial.
+                        target = urlsplit(url)._replace(fragment="").geturl()
+                        for response in reversed(capture.responses):
+                            if response.get("action_id") != capture.action_id or response["method"] not in {
+                                "POST",
+                                "PUT",
+                                "PATCH",
+                            }:
+                                continue
+                            soup = BeautifulSoup(response.get("body", ""), "html.parser")
+                            links = [
+                                n
+                                for n in soup.select("a[href]")
+                                if urlsplit(urljoin(response["url"], n["href"]))
+                                ._replace(fragment="")
+                                .geturl()
+                                == target
+                            ]
+                            if links:
+                                extra = {"link_selector": css_path(links[0])}
+                                break
+                            if self.result.engine == "flarum":
+                                try:
+                                    resource = json.loads(response["body"])["data"]
+                                    identity = str(resource["id"])
+                                    prefix = urlsplit(url).path.rsplit("/", 1)[0] + "/"
+                                    tail = urlsplit(url).path.rsplit("/", 1)[-1]
+                                    if (
+                                        resource["type"] == "discussions"
+                                        and identity.isdigit()
+                                        and (tail == identity or tail.startswith(identity + "-"))
+                                        and prefix.endswith("/d/")
+                                    ):
+                                        extra = {"identity_path": "data.id", "result_prefix": prefix}
+                                        break
+                                except (ValueError, KeyError, TypeError):
+                                    pass
                     return url, {**extra, **confirmation}
             except AuthenticationExpired:
                 self.result.diagnostics.append("AUTH_EXPIRED")
@@ -497,7 +613,7 @@ class RecognitionSession:
                     for p in [n, *n.parents]
                     if getattr(p, "attrs", None)
                 )
-                and " ".join(n.get_text(strip=True).split()) == norm
+                and " ".join(n.get_text(" ", strip=True).split()) == norm
             ]
             if not nodes:
                 return None
@@ -552,6 +668,10 @@ class RecognitionSession:
             self.knowledge.result(
                 self.result.rule_id, result.status == "SUCCEEDED", origin=str(origin(self.url))
             )
+            if result.status == "SUCCEEDED":
+                self.knowledge.record_template(
+                    self.result.rule_id, self.recorder.capture, self.build.workflow
+                )
         return result
 
     async def begin_manual(self, title, body, *, confirmed=False):

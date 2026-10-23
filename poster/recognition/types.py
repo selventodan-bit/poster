@@ -13,6 +13,7 @@ class LearningState(StrEnum):
 
 
 MESSAGES = {
+    "CONFIRMATION_PENDING": "Время ожидания истекло; результат пока неизвестен. Проверьте сайт перед новой отправкой. Повтор не выполнялся.",
     "CONTENT_REQUIRED": "Для обучения укажите непустые заголовок и текст, отличающиеся друг от друга.",
     "SESSION_KEY_INVALID": "Ключ сессии недоступен или имеет неверный формат. Исправьте POSTER_SESSION_KEY; отправка не выполнялась.",
     "NO_FORM": "Не найдена однозначная форма публикации. Покажите её в режиме обучения.",
@@ -90,6 +91,7 @@ class Recognition:
     technologies: list[dict] = field(default_factory=list)
     navigation: list[dict] = field(default_factory=list)
     outcome: str = "not_attempted"
+    transfer: dict = field(default_factory=dict)
 
     def summary(self):
         """User-facing diagnostics contain semantic roles/codes, never page values or raw requests."""
@@ -103,6 +105,7 @@ class Recognition:
             "technologies": self.technologies,
             "navigation": self.navigation,
             "outcome": self.outcome,
+            "transfer": self.transfer,
             "forms": [
                 {
                     "id": f.key,

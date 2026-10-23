@@ -16,7 +16,7 @@ from .auth import decrypt_bytes
 from .models import Step
 from .project import Project
 
-TOKEN = re.compile(r"{{\s*([a-zA-Z_][\w.]*)(?:\|(html|url))?\s*}}")
+TOKEN = re.compile(r"{{\s*([a-zA-Z_][\w.]*)(?:\|(html|html_lines|url))?\s*}}")
 
 
 class WorkflowError(Exception):
@@ -44,6 +44,8 @@ def render(value, context):
                 raise WorkflowError("Variable must be a scalar")
             if m[2] == "html":
                 return html.escape(str(data), quote=False)
+            if m[2] == "html_lines":
+                return html.escape(str(data), quote=False).replace("\r\n", "\n").replace("\n", "<br>")
             if m[2] == "url":
                 return quote(str(data), safe="")
             return data
@@ -65,6 +67,21 @@ def render(value, context):
 def safe_url(url: str) -> str:
     u = urlsplit(str(url))
     return urlunsplit((u.scheme, u.netloc.rsplit("@", 1)[-1], u.path, "", ""))
+
+
+def result_permalink(url: str) -> str:
+    """Keep numeric forum identities needed for a useful permalink, drop secrets."""
+    from urllib.parse import parse_qsl, urlencode
+
+    parsed = urlsplit(str(url))
+    pairs = parse_qsl(re.sub(r";(?=[A-Za-z_][A-Za-z0-9_]*=)", "&", parsed.query))
+    pairs = [
+        (k, v.split(".", 1)[0] + ".0" if k == "topic" and re.fullmatch(r"\d+\.msg\d+", v) else v)
+        for k, v in pairs
+    ]
+    permitted = {"t", "p", "f", "tid", "pid", "fid", "topic", "board"}
+    query = urlencode([(k, v) for k, v in pairs if k in permitted and re.fullmatch(r"\d+(?:\.\d+)?", v)])
+    return urlunsplit((parsed.scheme, parsed.netloc.rsplit("@", 1)[-1], parsed.path, query, ""))
 
 
 def extract(step: Step, response: httpx.Response):
@@ -301,7 +318,7 @@ class Runtime:
                     if step.op == "verify":
                         self.verified = True
                         if step.result_url:
-                            self.result_url = safe_url(str(response.url))
+                            self.result_url = result_permalink(str(response.url))
 
     async def run(self, variables: dict, *, dry_run=False, recovery=False) -> Result:
         site = self.project.site

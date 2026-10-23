@@ -3,19 +3,33 @@
 import html
 import json
 import re
-from urllib.parse import parse_qsl, quote, urlsplit, urlunsplit
+from urllib.parse import quote, urlsplit, urlunsplit
 
 from bs4 import BeautifulSoup
 
 from ..models import Site, Workflow
 from ..recorder.builder import Build, SENSITIVE
-from .network import NetworkAnalyzer, leaves, text
+from .network import NetworkAnalyzer, leaves, text, query_pairs
 from .policy import origin as url_origin
+from .transfer import instantiate
+from .javascript import token_slots
 
 
 class HTTPWorkflowLearner:
     def learn(self, capture, project_id, *, rule_id=None, existing_site=None, knowledge_rule=None):
         analysis = NetworkAnalyzer().analyze(capture)
+        transfer = None
+        if knowledge_rule:
+            matches = [instantiate(t, capture) for t in knowledge_rule.http_templates]
+            matches = [m for m in matches if not m.diagnostics and m.analysis.linked]
+            if matches:
+                transfer = max(matches, key=lambda m: m.reused_dependencies)
+                analysis = transfer.analysis
+        self.transfer_report = {
+            "applied": transfer is not None,
+            "operations": transfer.reused_operations if transfer else 0,
+            "bindings": transfer.reused_dependencies if transfer else 0,
+        }
         diagnostics = list(analysis.diagnostics)
         if not capture.browser_verified or not capture.confirmation:
             diagnostics.append("NO_PERMALINK")
@@ -54,7 +68,12 @@ class HTTPWorkflowLearner:
                 kind = "html-hidden"
             if response.get("headers", {}).get("x-csrf-token"):
                 kind = "header"
-            return kind not in preferred_sources
+            return (
+                urlsplit(response["url"])._replace(fragment="").geturl()
+                != urlsplit(capture.start_url)._replace(fragment="").geturl(),
+                kind not in preferred_sources,
+                -response.get("time", 0),
+            )
 
         evidence_responses = sorted(capture.responses, key=source_rank)
 
@@ -74,7 +93,7 @@ class HTTPWorkflowLearner:
                 diagnostics.append("BLOCKED_HOST")
                 return "{{operator_review_required}}"
             query = []
-            for k, v in parse_qsl(parsed.query, keep_blank_values=True):
+            for k, v in query_pairs(parsed.query):
                 edge = next(
                     (
                         e
@@ -113,7 +132,13 @@ class HTTPWorkflowLearner:
             return urlunsplit((parsed.scheme, parsed.netloc, "/".join(segments), "&".join(query), ""))
 
         initial = next(
-            (r for r in capture.responses if r["method"] == "GET" and r["url"] == capture.start_url), None
+            (
+                r
+                for r in reversed(capture.responses)
+                if r["method"] == "GET"
+                and r["url"] == urlsplit(capture.start_url)._replace(fragment="").geturl()
+            ),
+            None,
         )
         steps.append(
             {"id": "open_form", "op": "request", "url": endpoint(capture.start_url), "save_as": "page"}
@@ -121,7 +146,32 @@ class HTTPWorkflowLearner:
         if initial:
             sources[initial.get("request_id")] = "page"
 
-        def bind(value, key, request):
+        def bind(value, key, request, full_path=None):
+            if value == "":
+                return value
+            # Template paths are resolved against current local payload names;
+            # a prior installation never supplies values, names, URLs or tokens.
+            local = [
+                (path, binding)
+                for (request_id, path), binding in (transfer.bindings.items() if transfer else [])
+                if request_id == request.get("id")
+                and (path == full_path if full_path is not None else path.rsplit(".", 1)[-1] == key)
+            ]
+            if len(local) == 1:
+                response, kind, path = local[0][1]
+                source = ensure_source(response)
+                if source:
+                    if kind == "css_attribute":
+                        node = BeautifulSoup(response["body"], "html.parser").select_one(path)
+                        return extraction(
+                            source,
+                            kind,
+                            selector=path,
+                            attribute="value" if node.name == "input" else "content",
+                        )
+                    return extraction(
+                        source, kind, **({"path": path} if kind == "json_path" else {"attribute": path})
+                    )
             edge = next(
                 (
                     e
@@ -165,6 +215,9 @@ class HTTPWorkflowLearner:
             if escaped_title != capture.title_marker and escaped_title in value:
                 return value.replace(escaped_title, "{{title|html}}")
             escaped_body = html.escape(body, quote=False)
+            escaped_lines = escaped_body.replace("\r\n", "\n").replace("\n", "<br>")
+            if escaped_lines != escaped_body and escaped_lines in value:
+                return value.replace(escaped_lines, "{{body|html_lines}}")
             if (
                 escaped_body
                 and escaped_body in value
@@ -225,10 +278,30 @@ class HTTPWorkflowLearner:
                             sources[source_key] = source_name
                         source_name = sources[source_key]
                         selector = f"{node.name}[name={json.dumps(node['name'])}]"
+                        if len(soup.select(selector)) > 1:
+                            # Header search/login forms can share hidden names
+                            # with the composer (notably MyBB's "action").
+                            # A structural CSS path stays local to this project.
+                            parts, current = [], node
+                            while current and current.name not in {"html", "[document]"}:
+                                siblings = current.parent.find_all(current.name, recursive=False)
+                                parts.append(current.name + f":nth-of-type({siblings.index(current) + 1})")
+                                current = current.parent
+                            selector = " > ".join(reversed(parts))
                         attribute = "value" if node.name == "input" else "content"
                         return extraction(
                             source_name, "css_attribute", selector=selector, attribute=attribute
                         )
+                if response["method"] == "GET" and sensitive:
+                    matches = [
+                        (pattern, candidate)
+                        for pattern, candidate in token_slots(response["body"])
+                        if candidate == value
+                    ]
+                    if len(matches) == 1:
+                        source = ensure_source(response)
+                        if source:
+                            return extraction(source, "regex", pattern=matches[0][0])
                 try:
                     payload = json.loads(response["body"])
                 except ValueError:
@@ -304,12 +377,12 @@ class HTTPWorkflowLearner:
             )
             return extraction(source, edge.source_kind, **kwargs)
 
-        def mapping(payload, request, key=""):
+        def mapping(payload, request, key="", path=""):
             if isinstance(payload, dict):
-                return {k: mapping(v, request, k) for k, v in payload.items()}
+                return {k: mapping(v, request, k, f"{path}.{k}".strip(".")) for k, v in payload.items()}
             if isinstance(payload, list):
-                return [mapping(v, request, key) for v in payload]
-            return bind(payload, key, request)
+                return [mapping(v, request, key, f"{path}.{i}".strip(".")) for i, v in enumerate(payload)]
+            return bind(payload, key, request, path)
 
         if analysis.linked:
             if initial and BeautifulSoup(initial["body"], "html.parser").select_one(
@@ -339,7 +412,31 @@ class HTTPWorkflowLearner:
             confirmation = capture.confirmation
             if confirmation:
                 source = f"write_{len(analysis.writes) - 1}"
-                if confirmation.get("url_path"):
+                if confirmation.get("identity_path") and confirmation.get("result_prefix"):
+                    prefix = confirmation["result_prefix"]
+                    if not prefix.startswith("/") or prefix.startswith("//") or "?" in prefix:
+                        diagnostics.append("BLOCKED_HOST")
+                    else:
+                        steps.extend(
+                            [
+                                {
+                                    "id": "result_identity",
+                                    "op": "extract",
+                                    "source": source,
+                                    "kind": "json_path",
+                                    "path": confirmation["identity_path"],
+                                    "save_as": "result_id",
+                                },
+                                {
+                                    "id": "read_result",
+                                    "op": "request",
+                                    "url": prefix + "{{result_id|url}}",
+                                    "save_as": "publication",
+                                },
+                            ]
+                        )
+                        source = "publication"
+                elif confirmation.get("url_path"):
                     steps.append(
                         {
                             "id": "result_link",

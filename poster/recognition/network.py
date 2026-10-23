@@ -12,6 +12,12 @@ from urllib.parse import parse_qsl, unquote, urlsplit
 from bs4 import BeautifulSoup
 
 
+def query_pairs(query):
+    # SMF's native routes use literal semicolons between named parameters.
+    # Encoded semicolons inside values remain data.
+    return parse_qsl(re.sub(r";(?=[A-Za-z_][A-Za-z0-9_]*=)", "&", query), keep_blank_values=True)
+
+
 def text(value):
     return " ".join(BeautifulSoup(html.unescape(str(value)), "html.parser").get_text(" ", strip=True).split())
 
@@ -52,9 +58,19 @@ def decode(request):
         data = {}
         for part in message.iter_parts():
             name = part.get_param("name", header="content-disposition")
-            if not name or part.get_filename() or name in data:
+            decoded = part.get_payload(decode=True)
+            if part.get_filename() == "" and not decoded:
+                # Native browsers include empty, unselected file inputs. No file
+                # was chosen and no upload is required to reproduce this form.
+                continue
+            if not name or part.get_filename() is not None:
                 raise ValueError("File or repeated multipart field")
-            data[name] = part.get_payload(decode=True).decode(part.get_content_charset() or charset)
+            value = decoded.decode(part.get_content_charset() or charset)
+            if name in data:
+                if name.endswith("[]") or data[name] != value:
+                    raise ValueError("Repeated multipart field")
+                continue  # Identical scalar duplicates have the same PHP value.
+            data[name] = value
         return "multipart", data
     raise ValueError("Unsupported payload")
 
@@ -98,7 +114,7 @@ def request_values(request):
         if identity_key(path.rsplit(".", 1)[-1]):
             yield "payload", path, value
     parsed = urlsplit(request["url"])
-    for key, value in parse_qsl(parsed.query, keep_blank_values=True):
+    for key, value in query_pairs(parsed.query):
         if identity_key(key):
             yield "query", key, value
     for i, segment in enumerate(parsed.path.split("/")):
@@ -193,6 +209,11 @@ class NetworkAnalyzer:
                 break
             connected = expanded
         result.writes = [w for w in decoded if w["id"] in connected]
+        if capture.action_id and any(w["id"] not in connected for w in decoded):
+            # An admitted final commit without content must not disappear merely
+            # because its opaque identity was not understood. Replaying only the
+            # draft would be an incomplete transaction.
+            result.diagnostics.append("UNLINKED_REQUESTS")
         if not result.writes:
             result.diagnostics.append("NO_WRITE")
         if roles != {"title", "body"}:

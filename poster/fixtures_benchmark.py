@@ -229,7 +229,7 @@ class BenchmarkHandler(Handler):
             self.reply(200, '{"success":false}')
             return
         if case.get("negative") == "slow":
-            time.sleep(0.25)
+            time.sleep(float(case.get("response_delay", 0.25)))
         identifier = secrets.token_hex(8)
         self.server.posts[identifier] = {
             "title": data["subject"],

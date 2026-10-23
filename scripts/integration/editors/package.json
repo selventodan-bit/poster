@@ -1,0 +1,12 @@
+{
+  "dependencies": {
+    "@tiptap/core": "2.27.2",
+    "@tiptap/starter-kit": "2.27.2",
+    "ckeditor4": "4.22.1",
+    "esbuild": "0.25.12",
+    "jquery": "3.7.1",
+    "quill": "2.0.3",
+    "summernote": "0.9.1",
+    "tinymce": "7.9.1"
+  }
+}

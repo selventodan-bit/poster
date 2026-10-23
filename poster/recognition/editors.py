@@ -17,10 +17,10 @@ class EditorAdapter:
         accepted = False
         if self.name != "native":
             accepted = await locator.evaluate(
-                r"""(e,arg) => {
+                r"""async (e,arg) => {
               const [name,text,markup]=arg, w=e.ownerDocument.defaultView;
               if(name==='tinymce') {
-                const host=w.frameElement, tm=w.tinymce||w.parent?.tinymce;
+                const host=w.frameElement, tm=typeof w.tinymce?.get==='function'?w.tinymce:w.parent?.tinymce;
                 const editor=tm?.get(host?.id?.replace(/_ifr$/,'')||e.id);
                 if(editor){editor.setContent(markup);editor.save();return true;}
               }
@@ -29,7 +29,12 @@ class EditorAdapter:
                 if(instance?.setData){instance.setData(markup);return true;}
                 const ck=w.CKEDITOR||w.parent?.CKEDITOR;
                 for(const instance of Object.values(ck?.instances||{})) {
-                  if(instance.editable?.()?.$===e){instance.setData(markup);instance.updateElement();return true;}
+                  if(instance.editable?.()?.$===e){
+                    if(instance.status==='ready') await Promise.race([
+                      new Promise(resolve=>instance.setData(markup,{callback:resolve})),
+                      new Promise((_,reject)=>setTimeout(()=>reject(new Error('EDITOR_SYNC')),5000))]);
+                    else instance.setData(markup);
+                    instance.updateElement();return true;}
                 }
               }
               if(name==='quill') {
@@ -40,14 +45,16 @@ class EditorAdapter:
                 const view=e.pmViewDesc?.view;
                 if(view?.state && view.dispatch){view.dispatch(view.state.tr.insertText(text,0,view.state.doc.content.size));return true;}
               }
-              if(name==='summernote' && w.jQuery?.fn?.summernote){w.jQuery(e).summernote('code',markup);return true;}
+              if(name==='summernote' && w.jQuery?.fn?.summernote){
+                const host=e.closest('.note-editor')?.previousElementSibling||e;
+                w.jQuery(host).summernote('code',markup);return true;}
               if(name==='froala') {
                 const instance=e['data-froala.editor']||w.jQuery?.(e)?.data?.('froala.editor');
                 if(instance?.html?.set){instance.html.set(markup);instance.events.trigger('contentChanged');return true;}
               }
               return false;
             }""",
-                [self.name, value, html.escape(value, quote=False)],
+                [self.name, value, html.escape(value, quote=False).replace("\n", "<br>")],
             )
         if not accepted:
             if staged and not await locator.is_visible():
@@ -62,7 +69,7 @@ class EditorAdapter:
           e.dispatchEvent(new Event('change',{bubbles:true}));
           e.dispatchEvent(new FocusEvent('blur',{bubbles:true}));
         }""")
-        actual = await locator.evaluate("e=>e.isContentEditable?e.textContent:e.value")
+        actual = await locator.evaluate("e=>e.isContentEditable?e.innerText:e.value")
         if " ".join(str(actual).split()) != " ".join(value.split()):
             raise ValueError("EDITOR_SYNC")
 

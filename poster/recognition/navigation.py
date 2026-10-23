@@ -76,11 +76,13 @@ class NavigationDiscovery:
         ):
             evidence.append("compose-route")
             score += 0.55
-        if re.search(
-            r"(?:compose|create-topic|new-topic|new-thread|pencil|edit_square)", node.get("attrs", ""), re.I
-        ):
+        attrs = re.sub(r"([a-z])([A-Z])", r"\1-\2", node.get("attrs", ""))
+        technical_compose = bool(
+            re.search(r"(?:new|create)[-_](?:topic|thread|discussion)|compose", attrs, re.I)
+        )
+        if technical_compose or re.search(r"pencil|edit_square", attrs, re.I):
             evidence.append("compose-affordance")
-            score += 0.3
+            score += 0.55 if technical_compose else 0.3
         if node.get("target_editor"):
             evidence.append("controlled-editor")
             score += 0.65
@@ -106,6 +108,7 @@ class NavigationDiscovery:
             e in evidence
             for e in ("accessible-compose-intent", "compose-route", "controlled-editor", "controlled-menu")
         )
+        intent = intent or (technical_compose and node.get("type") == "button")
         safe = intent and len(evidence) >= 2 and score >= 0.6
         return NavigationCandidate(
             node["selector"], min(0.99, score), "menu" if menu else "compose", evidence, safe
@@ -155,6 +158,7 @@ class NavigationDiscovery:
                 {"purpose": candidate.purpose, "evidence": candidate.evidence, "score": candidate.score}
             )
             await page.locator(candidate.selector).click(timeout=2500)
+            await page.wait_for_load_state("domcontentloaded", timeout=30000)
             for _ in range(6):
                 await asyncio.sleep(0.1)
                 forms = await inspect()

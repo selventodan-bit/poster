@@ -1,5 +1,73 @@
 {
   "$defs": {
+    "Binding": {
+      "additionalProperties": false,
+      "properties": {
+        "operation": {
+          "maximum": 19,
+          "minimum": 0,
+          "title": "Operation",
+          "type": "integer"
+        },
+        "target": {
+          "maximum": 299,
+          "minimum": 0,
+          "title": "Target",
+          "type": "integer"
+        },
+        "target_kind": {
+          "default": "payload",
+          "enum": [
+            "payload",
+            "path",
+            "query",
+            "header"
+          ],
+          "title": "Target Kind",
+          "type": "string"
+        },
+        "parent": {
+          "maximum": 19,
+          "minimum": -1,
+          "title": "Parent",
+          "type": "integer"
+        },
+        "kind": {
+          "enum": [
+            "json_path",
+            "css_attribute",
+            "header",
+            "cookie"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "slot": {
+          "maximum": 299,
+          "minimum": 0,
+          "title": "Slot",
+          "type": "integer"
+        },
+        "role": {
+          "default": "fresh",
+          "enum": [
+            "identity",
+            "fresh"
+          ],
+          "title": "Role",
+          "type": "string"
+        }
+      },
+      "required": [
+        "operation",
+        "target",
+        "parent",
+        "kind",
+        "slot"
+      ],
+      "title": "Binding",
+      "type": "object"
+    },
     "EngineKnowledge": {
       "additionalProperties": false,
       "properties": {
@@ -124,6 +192,44 @@
       "title": "FormKnowledge",
       "type": "object"
     },
+    "HTTPTemplate": {
+      "additionalProperties": false,
+      "properties": {
+        "revision": {
+          "const": 1,
+          "default": 1,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "operations": {
+          "items": {
+            "$ref": "#/$defs/Operation"
+          },
+          "maxItems": 20,
+          "title": "Operations",
+          "type": "array"
+        },
+        "bindings": {
+          "items": {
+            "$ref": "#/$defs/Binding"
+          },
+          "maxItems": 100,
+          "title": "Bindings",
+          "type": "array"
+        },
+        "independent_content_verification": {
+          "const": true,
+          "default": true,
+          "title": "Independent Content Verification",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "operations"
+      ],
+      "title": "HTTPTemplate",
+      "type": "object"
+    },
     "NavigationKnowledge": {
       "additionalProperties": false,
       "properties": {
@@ -181,6 +287,75 @@
         "score"
       ],
       "title": "NavigationStep",
+      "type": "object"
+    },
+    "Operation": {
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "enum": [
+            "POST",
+            "PUT",
+            "PATCH"
+          ],
+          "title": "Method",
+          "type": "string"
+        },
+        "encoding": {
+          "enum": [
+            "form",
+            "multipart",
+            "json"
+          ],
+          "title": "Encoding",
+          "type": "string"
+        },
+        "roles": {
+          "items": {
+            "enum": [
+              "title",
+              "body"
+            ],
+            "type": "string"
+          },
+          "maxItems": 2,
+          "title": "Roles",
+          "type": "array"
+        },
+        "shape": {
+          "items": {
+            "enum": [
+              "object",
+              "array",
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ],
+            "type": "string"
+          },
+          "maxItems": 300,
+          "title": "Shape",
+          "type": "array"
+        },
+        "route": {
+          "default": "other",
+          "enum": [
+            "draft",
+            "publish",
+            "other"
+          ],
+          "title": "Route",
+          "type": "string"
+        }
+      },
+      "required": [
+        "method",
+        "encoding",
+        "roles",
+        "shape"
+      ],
+      "title": "Operation",
       "type": "object"
     },
     "SubmissionDependency": {
@@ -634,6 +809,14 @@
     },
     "verification": {
       "$ref": "#/$defs/VerificationKnowledge"
+    },
+    "http_templates": {
+      "items": {
+        "$ref": "#/$defs/HTTPTemplate"
+      },
+      "maxItems": 8,
+      "title": "Http Templates",
+      "type": "array"
     }
   },
   "required": [

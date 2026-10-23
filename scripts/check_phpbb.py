@@ -14,7 +14,9 @@ from urllib.parse import urlsplit
 import yaml
 
 from poster.auth import ensure_local_key
+from poster.project import load_project
 from poster.recognition.service import RecognitionSession
+from poster.runtime import Runtime
 
 
 async def check(base, install_config, output):
@@ -71,6 +73,16 @@ async def check(base, install_config, output):
                 report.update(http_status=trial.status, http_reason=trial.reason)
                 if trial.status == "SUCCEEDED":
                     session.save(output / "project")
+                    replay = await Runtime(load_project(output / "project")).run(
+                        {
+                            "title": "Poster replay " + unique,
+                            "body": "Reloaded phpBB project Unicode & body " + unique,
+                            "target_url": base,
+                        }
+                    )
+                    report["reloaded_project"] = replay.status
+                    report["result_url"] = replay.result_url
+                    assert replay.status == "SUCCEEDED", replay.reason
         (output / "report.json").write_text(json.dumps(report, indent=2))
         print(json.dumps(report, indent=2))
         return report

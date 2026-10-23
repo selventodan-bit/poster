@@ -14,7 +14,11 @@ SNAPSHOT_JS = r"""() => {
  const roots=elements.filter(e=>e.matches('form,[role="form"]'));
  for(const e of elements.filter(e=>e.matches('textarea,[contenteditable="true"],[role="textbox"]'))) {
    if(!roots.some(r=>r.contains(e))) {
-     const root=e.closest('section,article,dialog,[role="dialog"],fieldset')||e.parentElement;
+     let root=e.closest('section,article,dialog,[role="dialog"],fieldset');
+     if(!root) for(let p=e.parentElement,depth=0;p&&p!==document.body&&depth<6;p=p.parentElement,depth++) {
+       if(p.querySelector('input[type="text"],input:not([type])')&&p.querySelector('button,[role="button"]')) {root=p;break;}
+     }
+     root=root||e.parentElement;
      if(root&&!roots.includes(root)) roots.push(root);
    }
  }
@@ -31,7 +35,7 @@ SNAPSHOT_JS = r"""() => {
    let adapter=/mce-content-body/.test(classes)?'tinymce':/ck-editor|cke_editable/.test(classes)?'ckeditor':
     /ql-editor/.test(classes)?'quill':/ProseMirror|tiptap/.test(classes)?'prosemirror':
     /note-editable/.test(classes)?'summernote':/fr-element/.test(classes)?'froala':'native';
-   return {selector:'[data-poster-field="'+id+'"]',label:[e.name,e.id,accessibility].filter(Boolean).join(' ').slice(0,500),
+   return {selector:e.tagName==='BODY'&&e.isContentEditable?'body[contenteditable="true"]':'[data-poster-field="'+id+'"]',label:[e.name,e.id,accessibility].filter(Boolean).join(' ').slice(0,500),
     accessibility:accessibility.slice(0,400),name:e.name||'',tag:e.tagName.toLowerCase(),type:e.type||'',
     editable:e.isContentEditable,visible:visible(e),adapter,
     before_editor:!!editor && e!==editor && !!(e.compareDocumentPosition(editor)&Node.DOCUMENT_POSITION_FOLLOWING),
@@ -40,9 +44,10 @@ SNAPSHOT_JS = r"""() => {
   const buttons=descendants.filter(e=>e.matches('button,input[type="submit"],[role="button"]')).filter(visible).map((e,j)=>{
    const id=key+'-submit-'+j;e.setAttribute('data-poster-submit',id);
    return {selector:'[data-poster-submit="'+id+'"]',text:[e.innerText,e.value,e.getAttribute('aria-label'),e.title].filter(Boolean).join(' ').slice(0,300),
-    type:e.type||'',tag:e.tagName.toLowerCase(),form_owned:e.form===root};
+    type:e.type||'',tag:e.tagName.toLowerCase(),form_owned:e.form===root,
+    action:[e.name,e.getAttribute('data-action'),e.getAttribute('formaction')].filter(Boolean).join(' ')};
   });
-  return {key,tag:root.tagName.toLowerCase(),action:root.action||location.href,method:root.method||'',fields,buttons,
+  return {key,tag:root.tagName.toLowerCase(),action:new URL(root.getAttribute('action')||location.href,root.baseURI).href,method:root.getAttribute('method')||'',fields,buttons,
    purpose:[root.getAttribute('aria-label'),root.querySelector('legend,h1,h2,h3')?.textContent].filter(Boolean).join(' ').slice(0,500),
    structure:[root.getRootNode() instanceof ShadowRoot?'shadow':'light',root.matches('dialog,[role="dialog"]')?'dialog':'inline']};
  });
@@ -67,7 +72,16 @@ class UniversalFormDetector:
                     )
                 except Exception:
                     continue
-            if urlsplit(frame.url).hostname not in allowed_hosts and frame.url != "about:blank":
+            if index:
+                try:
+                    # about:srcdoc (TinyMCE) and about:blank inherit their
+                    # embedding origin; the URL alone cannot establish trust.
+                    inherited = await frame.evaluate("window.origin")
+                    if inherited != await page.main_frame.evaluate("window.origin"):
+                        continue
+                except Exception:
+                    continue
+            elif urlsplit(frame.url).hostname not in allowed_hosts:
                 continue
             try:
                 snapshots = await frame.evaluate(SNAPSHOT_JS)
@@ -184,6 +198,10 @@ class UniversalFormDetector:
                 evidence.append("relational-" + role)
         buttons = []
         for b in snapshot["buttons"]:
+            # Native forms often have several submit controls: preview, draft and
+            # attachment uploads must never compete with actual publication.
+            if re.search(r"preview|draft|attachment|upload|cancel", b.get("action", ""), re.I):
+                continue
             score = 0.65 if b["type"] == "submit" else 0
             features = ["form-submit-control"] if score else []
             if self.locales.has("publish", b["text"]):

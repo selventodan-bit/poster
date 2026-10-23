@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+from .transfer import HTTPTemplate, compile_template
 
 Family = Literal[
     "unknown",
@@ -164,6 +165,7 @@ class Rule(Closed):
     submission: SubmissionKnowledge = Field(default_factory=SubmissionKnowledge)
     tokens: TokenKnowledge = Field(default_factory=TokenKnowledge)
     verification: VerificationKnowledge = Field(default_factory=VerificationKnowledge)
+    http_templates: list[HTTPTemplate] = Field(default_factory=list, max_length=8)
 
     @property
     def maturity(self):
@@ -250,6 +252,7 @@ class KnowledgeBase:
         index = candidate.fields["title"].position
         title_features = candidate.fields["title"].features
         identity = [
+            engine,
             editor,
             roles,
             index,
@@ -401,6 +404,16 @@ class KnowledgeBase:
             channels=technology["evidence"],
         )
         self.save(rule)
+
+    def record_template(self, rule_id, capture, workflow):
+        rule = next(r for r in self.rules() if r.id == rule_id)
+        template = compile_template(capture, workflow, rule.http_templates)
+        if template and template not in rule.http_templates:
+            rule.http_templates = [*rule.http_templates, template][-8:]
+            self.save(rule)
+
+    def http_candidates(self, candidate, *, engine="unknown"):
+        return [m.rule for m in self.candidates(candidate, engine=engine) if m.rule.http_templates]
 
     def candidates(self, candidate, *, engine="unknown"):
         if "body" not in candidate.fields:
