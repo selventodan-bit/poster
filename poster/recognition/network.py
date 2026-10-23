@@ -162,7 +162,7 @@ class NetworkAnalyzer:
             for _, value in leaves(payload):
                 if not isinstance(value, str):
                     continue
-                if capture.title_marker in html.unescape(value):
+                if "title" in capture.content_roles and capture.title_marker in html.unescape(value):
                     matched.add("title")
                 if capture.body_marker in html.unescape(value) or (
                     text(value) == text(capture.body_marker) and text(value)
@@ -216,10 +216,10 @@ class NetworkAnalyzer:
             result.diagnostics.append("UNLINKED_REQUESTS")
         if not result.writes:
             result.diagnostics.append("NO_WRITE")
-        if roles != {"title", "body"}:
+        if roles != capture.content_roles:
             result.diagnostics.append("CONTENT_NOT_MAPPED")
         if len(result.writes) == 1:
-            result.linked = roles == {"title", "body"}
+            result.linked = roles == capture.content_roles
         elif result.writes:
             # All content-bearing writes must belong to one connected causal component.
             reachable = {result.writes[0]["id"]}
@@ -232,7 +232,7 @@ class NetworkAnalyzer:
                 if reachable == expanded:
                     break
                 reachable = expanded
-            result.linked = connected <= reachable and roles == {"title", "body"}
+            result.linked = connected <= reachable and roles == capture.content_roles
             if not result.linked:
                 result.diagnostics.append("UNLINKED_REQUESTS")
         result.diagnostics = list(dict.fromkeys(result.diagnostics))

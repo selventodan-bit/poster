@@ -28,6 +28,7 @@ class RecognitionInfo(StrictModel):
         "UNKNOWN",
         "FAILED",
     ]
+    publication_kind: Literal["topic", "reply", "comment"] = "topic"
     recognizer: str = "semantic-2.0"
     rule_id: str | None = None
     browser_verified: bool = False

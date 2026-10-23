@@ -38,6 +38,7 @@ Feature = Literal[
     "unique-title-near-editor",
     "form-submit-control",
     "accessible-publication-intent",
+    "editor-controller",
 ]
 NavFeature = Literal[
     "accessible-compose-intent",
@@ -141,6 +142,7 @@ class VerificationKnowledge(Closed):
 class Rule(Closed):
     id: str = Field(pattern=r"^form-[a-f0-9]{16}$")
     version: int = Field(default=2, ge=1, le=2)
+    publication_kind: Literal["topic", "reply", "comment"] = "topic"
     scope: Literal["form-structure"] = "form-structure"
     algorithm: Literal["semantic-editor-pair-v1", "relational-workflow-v2"] = "relational-workflow-v2"
     editor: Literal["input", "textarea", "contenteditable", "iframe:contenteditable", "iframe:textarea"]
@@ -249,9 +251,10 @@ class KnowledgeBase:
     def propose(self, candidate, *, manual=False, origin="", engine="unknown", navigation=(), capture=None):
         editor = candidate.fields["body"].kind
         roles = sorted(candidate.fields)
-        index = candidate.fields["title"].position
-        title_features = candidate.fields["title"].features
+        index = candidate.fields["title"].position if "title" in candidate.fields else 0
+        title_features = candidate.fields["title"].features if "title" in candidate.fields else []
         identity = [
+            candidate.publication_kind,
             engine,
             editor,
             roles,
@@ -263,6 +266,7 @@ class KnowledgeBase:
         rule_id = "form-" + digest(identity)
         rule = next((r for r in self.rules() if r.id == rule_id), None) or Rule(
             id=rule_id,
+            publication_kind=candidate.publication_kind,
             editor=editor,
             roles=roles,
             source="manual-observation" if manual else "browser-observation",
@@ -308,7 +312,9 @@ class KnowledgeBase:
                 return ["array", *[part for v in value for part in structure(v)]]
             return [
                 "title"
-                if isinstance(value, str) and capture.title_marker in value
+                if isinstance(value, str)
+                and "title" in capture.content_roles
+                and capture.title_marker in value
                 else "body"
                 if isinstance(value, str) and capture.body_marker in value
                 else "scalar"
@@ -351,11 +357,12 @@ class KnowledgeBase:
         )
         confirmation = capture.confirmation
         rule.verification = VerificationKnowledge(
+            content=sorted(capture.content_roles),
             permalink="json"
             if confirmation.get("url_path")
             else "bookmark"
             if confirmation.get("link_selector")
-            else "redirect"
+            else "redirect",
         )
 
     def observe_workflow(self, rule_id, workflow):
@@ -425,7 +432,8 @@ class KnowledgeBase:
         matches = []
         for r in self.rules():
             if (
-                not r.enabled
+                (candidate.publication_kind not in {"unknown", r.publication_kind})
+                or not r.enabled
                 or r.failures >= max(2, r.http_successes + 1)
                 or r.editor != candidate.fields["body"].kind
             ):
@@ -461,7 +469,11 @@ class KnowledgeBase:
         return ranked[0].rule if ranked else None
 
     def suggest(self, candidate):
-        if "title" in candidate.fields or "body" not in candidate.fields:
+        if (
+            candidate.publication_kind in {"reply", "comment"}
+            or "title" in candidate.fields
+            or "body" not in candidate.fields
+        ):
             return None
         ranked = self.candidates(candidate)
         proposals = []

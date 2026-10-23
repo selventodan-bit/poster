@@ -45,6 +45,7 @@ class NavigationDiscovery:
         self.trace = []
         self.knowledge = knowledge
         self.staged_fields = {}
+        self.stop_reason = None
 
     def classify(self, node, origin):
         evidence, score = [], 0
@@ -118,7 +119,7 @@ class NavigationDiscovery:
         forms = await inspect()
         visited = set()
         for _ in range(self.max_actions):
-            if any({"title", "body", "submit"} <= f.fields.keys() for f in forms):
+            if any(f.complete for f in forms):
                 return forms
             nodes = await page.evaluate(NAV_JS)
             ranked = []
@@ -148,6 +149,7 @@ class NavigationDiscovery:
                     ranked.append((candidate, signature))
             ranked.sort(key=lambda c: c[0].score, reverse=True)
             if not ranked or (len(ranked) > 1 and ranked[0][0].score - ranked[1][0].score < 0.1):
+                self.stop_reason = "NAVIGATION_AMBIGUOUS" if len(ranked) > 1 else "NO_FORM"
                 break
             candidate, signature = ranked[0]
             for f in forms:

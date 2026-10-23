@@ -364,6 +364,11 @@ async def test_static_fetch_does_not_forward_secrets_or_accept_redirect_escape(m
 
     route = Route()
     route.request = request
+
+    async def addresses(*args):
+        return ["93.184.216.34"]
+
+    monkeypatch.setattr(ResourcePolicy, "public_addresses", addresses)
     policy = ResourcePolicy(["https://assets.test"])
     assert await policy.fulfill_static(route)
     assert all(k not in seen[0].headers for k in ("cookie", "authorization", "referer"))
@@ -372,7 +377,9 @@ async def test_static_fetch_does_not_forward_secrets_or_accept_redirect_escape(m
     assert not await policy.fulfill_static(route)
     request.url = "https://assets.test/redirect"
     assert not await policy.fulfill_static(route)
-    assert len(seen) == 2 and all(r.url.host == "assets.test" for r in seen)
+    assert len(seen) == 2 and all(
+        r.headers["host"] == "assets.test" and r.url.host == "93.184.216.34" for r in seen
+    )
 
 
 def test_scope_blocks_background_duplicate_foreign_and_unlinked_mutations():

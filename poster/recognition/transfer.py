@@ -263,7 +263,7 @@ def instantiate(template, capture):
             if isinstance(value, str):
                 import html
 
-                if capture.title_marker in html.unescape(value):
+                if "title" in capture.content_roles and capture.title_marker in html.unescape(value):
                     roles.add("title")
                 if capture.body_marker in html.unescape(value):
                     roles.add("body")
@@ -332,10 +332,9 @@ def instantiate(template, capture):
     for _ in writes:
         reached |= {e.child for e in dependencies if e.parent in reached}
         reached |= {e.parent for e in dependencies if e.child in reached}
-    result.analysis.linked = len(reached) == len(writes) and set().union(*(w["roles"] for w in writes)) == {
-        "title",
-        "body",
-    }
+    result.analysis.linked = (
+        len(reached) == len(writes) and set().union(*(w["roles"] for w in writes)) == capture.content_roles
+    )
     if not result.analysis.linked:
         result.diagnostics.append("TRANSFER_AMBIGUOUS")
     else:

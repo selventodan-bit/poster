@@ -16,6 +16,16 @@
           "title": "State",
           "type": "string"
         },
+        "publication_kind": {
+          "default": "topic",
+          "enum": [
+            "topic",
+            "reply",
+            "comment"
+          ],
+          "title": "Publication Kind",
+          "type": "string"
+        },
         "recognizer": {
           "default": "semantic-2.0",
           "title": "Recognizer",

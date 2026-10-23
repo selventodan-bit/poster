@@ -221,6 +221,8 @@ class HTTPWorkflowLearner:
                 return value
             # Rich text is templated without losing escaping of the next task's body.
             body = capture.body_marker
+            if capture.body_format == "text" and value.replace("\r\n", "\n") == body.replace("\r\n", "\n"):
+                return "{{body}}"
             escaped_title = html.escape(capture.title_marker, quote=False)
             if escaped_title != capture.title_marker and escaped_title in value:
                 return value.replace(escaped_title, "{{title|html}}")
@@ -239,8 +241,12 @@ class HTTPWorkflowLearner:
             ):
                 return value.replace(escaped_body, "{{body|html}}")
             if body in value:
-                return value.replace(body, "{{body}}").replace(capture.title_marker, "{{title}}")
-            if capture.title_marker in value:
+                return (
+                    value.replace(body, "{{body}}").replace(capture.title_marker, "{{title}}")
+                    if "title" in capture.content_roles
+                    else value.replace(body, "{{body}}")
+                )
+            if "title" in capture.content_roles and capture.title_marker in value:
                 return value.replace(capture.title_marker, "{{title}}")
             if text(value) == text(body) and text(body):
                 diagnostics.append("CONTENT_NOT_MAPPED")
@@ -487,7 +493,7 @@ class HTTPWorkflowLearner:
                         }
                     )
                     source = "publication"
-                for role in ("title", "body"):
+                for role in sorted(capture.content_roles):
                     steps.append(
                         {
                             "id": "verify_" + role,
@@ -503,7 +509,8 @@ class HTTPWorkflowLearner:
         state = "HTTP_CANDIDATE" if not diagnostics and analysis.linked else "LEARNING_REQUIRED"
         site["recognition"] = {
             "state": state,
-            "recognizer": "relational-2.1",
+            "recognizer": "relational-2.2",
+            "publication_kind": capture.publication_kind,
             "rule_id": rule_id,
             "browser_verified": capture.browser_verified,
             "http_verified": False,

@@ -3,7 +3,10 @@
 import hashlib
 import json
 import re
-from urllib.parse import urlsplit
+import asyncio
+import ipaddress
+import socket
+from urllib.parse import urlsplit, parse_qsl, unquote
 
 import httpx
 
@@ -26,7 +29,9 @@ def dangerous_url(url):
 
 
 class SubmissionScope:
-    def __init__(self, url, capture, *, max_writes=6, templates=(), submitter=None, action_url=None):
+    def __init__(
+        self, url, capture, *, max_writes=6, templates=(), submitter=None, action_url=None, interaction=None
+    ):
         self.origin = origin(url)
         self.capture = capture
         self.max_writes = max_writes
@@ -34,8 +39,9 @@ class SubmissionScope:
         self.allowed_ids = set()
         self.templates = templates
         self.submitter, self.action_url = submitter, action_url
+        self.interaction = interaction
 
-    def allows(self, request):
+    def allows(self, request, *, native_authorized=False):
         if (
             origin(request.url) != self.origin
             or request.method not in {"POST", "PUT", "PATCH"}
@@ -50,11 +56,43 @@ class SubmissionScope:
         except (ValueError, UnicodeError, LookupError):
             return False
         if not self.sent:
+            signed = self.interaction and request.headers.get("x-poster-interaction") == self.interaction
+            # A selected click may GET a fresh token before its first POST. That
+            # read and consumed high-entropy value establish causality only for
+            # the current explicit form endpoint; timing/content alone do not.
+            fresh_read = False
+            if self.interaction and self.action_url == urlsplit(request.url)._replace(fragment="").geturl():
+                reads = {
+                    r["id"]
+                    for r in self.capture.requests
+                    if r.get("interaction") == self.interaction and r["method"] == "GET"
+                }
+                for response in self.capture.responses:
+                    if response.get("request_id") not in reads or response.get("status", 500) >= 400:
+                        continue
+                    fresh_read |= any(
+                        isinstance(value, str) and len(value) >= 16 and str(value) == str(used)
+                        for _, _, value in response_values(response)
+                        for _, _, used in request_values(
+                            {"payload": payload, "url": request.url, "headers": request.headers}
+                        )
+                    )
+            if (
+                self.interaction
+                and not signed
+                and not fresh_read
+                and not (native_authorized and getattr(request, "resource_type", None) == "document")
+            ):
+                return False
             if self.submitter and (
                 not isinstance(payload, dict) or payload.get(self.submitter[0]) != self.submitter[1]
             ):
                 return False
-            if self.action_url and urlsplit(request.url)._replace(fragment="").geturl() != self.action_url:
+            if (
+                self.action_url
+                and not signed
+                and urlsplit(request.url)._replace(fragment="").geturl() != self.action_url
+            ):
                 return False
         identity = hashlib.sha256(
             (request.method + request.url + "\0" + json.dumps(payload, sort_keys=True)).encode()
@@ -66,7 +104,10 @@ class SubmissionScope:
 
         content = any(
             isinstance(v, str)
-            and (self.capture.title_marker in v or text(self.capture.body_marker) == text(v))
+            and (
+                ("title" in self.capture.content_roles and self.capture.title_marker in v)
+                or text(self.capture.body_marker) == text(v)
+            )
             for _, v in leaves(payload)
         )
         dependency = False
@@ -101,9 +142,40 @@ class ResourcePolicy:
     TYPES = {"script", "stylesheet", "image", "font", "media"}
 
     def __init__(self, static_origins=None):
-        self.static_origins = {
-            origin(u) for u in (self.DEFAULT_STATIC if static_origins is None else static_origins)
-        }
+        urls = self.DEFAULT_STATIC if static_origins is None else static_origins
+        for url in urls:
+            parsed = urlsplit(url)
+            if (
+                parsed.scheme != "https"
+                or parsed.username
+                or parsed.password
+                or parsed.path not in {"", "/"}
+                or parsed.query
+                or parsed.fragment
+            ):
+                raise ValueError("Static resources require exact HTTPS origins")
+        self.static_origins = {origin(u) for u in urls}
+
+    async def public_addresses(self, hostname, port):
+        records = await asyncio.get_running_loop().getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
+        addresses = list(dict.fromkeys(r[4][0] for r in records))
+        if not addresses or any(not ipaddress.ip_address(a).is_global for a in addresses):
+            raise ValueError("Static origin resolves to a private or reserved address")
+        return addresses
+
+    def safe_url(self, url):
+        parsed = urlsplit(url)
+        return (
+            origin(url) in self.static_origins
+            and not parsed.username
+            and not parsed.password
+            and not any(
+                re.search(
+                    r"token|auth|nonce|session|key|password|secret|credential|signature", unquote(k), re.I
+                )
+                for k, _ in parse_qsl(parsed.query)
+            )
+        )
 
     async def fulfill_static(self, route):
         request = route.request
@@ -115,19 +187,25 @@ class ResourcePolicy:
             return False
         # A new client is deliberately used: browser cookies, Authorization, Referer,
         # query secrets, redirect cookies and Set-Cookie cannot cross this boundary.
-        parsed = urlsplit(request.url)
-        if (
-            parsed.username
-            or parsed.password
-            or re.search(r"(?:token|auth|nonce|session|key|password)=", parsed.query, re.I)
-        ):
+        if not self.safe_url(request.url):
             return False
         url = request.url
         try:
             async with httpx.AsyncClient(timeout=10, follow_redirects=False, trust_env=False) as client:
                 for _ in range(4):
+                    if not self.safe_url(url):
+                        return False
+                    parsed = urlsplit(url)
+                    addresses = await self.public_addresses(parsed.hostname, parsed.port or 443)
+                    # Pin the validated address; re-resolving in httpx would permit DNS rebinding.
+                    pinned = httpx.URL(url).copy_with(host=addresses[0])
                     client.cookies.clear()
-                    async with client.stream("GET", url, headers={"Accept": "*/*"}) as response:
+                    async with client.stream(
+                        "GET",
+                        pinned,
+                        headers={"Accept": "*/*", "Host": parsed.netloc},
+                        extensions={"sni_hostname": parsed.hostname},
+                    ) as response:
                         if response.is_redirect:
                             from urllib.parse import urljoin
 
@@ -155,6 +233,6 @@ class ResourcePolicy:
                             },
                         )
                         return True
-        except httpx.HTTPError:
+        except (httpx.HTTPError, OSError, ValueError):
             pass
         return False

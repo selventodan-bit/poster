@@ -27,6 +27,7 @@ from .network import NetworkAnalyzer, rejected
 from .network import leaves
 from .types import FieldRef, FormCandidate, LearningState, Recognition
 from .transfer import preflight
+from .interaction import ACTION_HEADER, INTERACTION_JS
 
 
 def css_path(node):
@@ -50,6 +51,7 @@ class RecognitionSession:
         permalink_timeout=20,
         static_origins=None,
         locales=None,
+        publication_kind="auto",
     ):
         parsed = urlsplit(url)
         if (
@@ -59,6 +61,9 @@ class RecognitionSession:
             or parsed.password
         ):
             raise ValueError("Expected HTTP(S) URL without credentials")
+        if publication_kind not in {"auto", "topic", "reply", "comment"}:
+            raise ValueError("Invalid publication kind")
+        self.publication_kind = publication_kind
         self.url, self.profile = url, profile
         self.hosts = [parsed.hostname]
         self.knowledge, self.headless = knowledge, headless
@@ -87,6 +92,7 @@ class RecognitionSession:
         self.locales = locales
         self.login_scope = None
         self.transfer_rule = None
+        self.native_receipts = set()
 
     def state(self, value):
         self.result.state = value
@@ -103,6 +109,13 @@ class RecognitionSession:
                 service_workers="block",
                 **chromium_options(self.headless, self.playwright.chromium.executable_path),
             )
+            await self.context.expose_binding(
+                "__poster_native_submit",
+                lambda source, ticket, url: self.native_receipts.add(
+                    (ticket, urlsplit(url)._replace(fragment="").geturl())
+                ),
+            )
+            await self.context.add_init_script(INTERACTION_JS)
             await self.context.route("**/*", self.gate)
             await self.context.route_web_socket("**/*", lambda socket: socket.close())
             await self.recorder.attach(self.context)
@@ -115,6 +128,9 @@ class RecognitionSession:
 
     async def gate(self, route):
         request = route.request
+        recorded = self.recorder.request_records.get(request)
+        if recorded and request.method not in {"GET", "HEAD", "OPTIONS"}:
+            recorded["blocked"] = True
         parsed = urlsplit(request.url)
         allowed = origin(request.url) == origin(self.url)
         if urlsplit(self.url).scheme == "https" and parsed.scheme != "https":
@@ -122,6 +138,8 @@ class RecognitionSession:
         if not allowed:
             if await self.resources.fulfill_static(route):
                 return
+            if request.resource_type in self.resources.TYPES:
+                self.diagnose("STATIC_RESOURCE_BLOCKED")
             if "BLOCKED_HOST" not in self.result.diagnostics:
                 self.result.diagnostics.append("BLOCKED_HOST")
             await route.abort()
@@ -135,6 +153,8 @@ class RecognitionSession:
             and not self.login_scope["used"]
         ):
             self.login_scope["used"] = True
+            if recorded:
+                recorded["blocked"] = False
             await route.continue_()
         elif self.read_only and request.method not in {"GET", "HEAD", "OPTIONS"}:
             await route.abort()
@@ -142,7 +162,12 @@ class RecognitionSession:
             if request.method not in {"GET", "HEAD", "OPTIONS"}:
                 if self.recorder.pending:
                     await asyncio.wait(list(self.recorder.pending), timeout=0.25)
-                if not self.scope or not self.scope.allows(request):
+                native_authorized = False
+                if self.scope and request.resource_type == "document" and not self.scope.sent:
+                    receipt = (self.scope.interaction, request.url)
+                    native_authorized = receipt in self.native_receipts
+                    self.native_receipts.discard(receipt)
+                if not self.scope or not self.scope.allows(request, native_authorized=native_authorized):
                     recorded = self.recorder.request_records.get(request)
                     if recorded:
                         recorded["blocked"] = True
@@ -152,8 +177,12 @@ class RecognitionSession:
                 # Recorder's request event precedes routing; bind only the admitted request.
                 recorded = self.recorder.request_records.get(request)
                 if recorded:
+                    recorded["blocked"] = False
                     self.scope.allowed_ids.add(recorded["id"])
-            await route.continue_()
+            headers = dict(request.headers)
+            headers.pop(ACTION_HEADER, None)
+            headers.pop("x-poster-capture", None)
+            await route.continue_(headers=headers)
 
     async def authorize_login(self, *, confirmed=False):
         if not confirmed:
@@ -186,16 +215,18 @@ class RecognitionSession:
             raise ValueError("Session closed")
         self.read_only = True
         self.result = Recognition(diagnostics=["READ_ONLY"])
-        detector = UniversalFormDetector(self.locales)
+        detector = UniversalFormDetector(self.locales, self.publication_kind)
         forms = await self.navigation.discover(self.page, lambda: detector.inspect(self.page, self.hosts))
         # Editors may replace the textarea with an iframe after DOMContentLoaded.
         # Resnapshot during that transition; never retain stale field selectors.
         for _ in range(5):
-            if any({"title", "body", "submit"} <= f.fields.keys() for f in forms):
+            if any(f.complete for f in forms):
                 break
             await asyncio.sleep(0.15)
             forms = await detector.inspect(self.page, self.hosts)
         self.result.navigation = self.navigation.trace
+        if self.navigation.stop_reason == "NAVIGATION_AMBIGUOUS":
+            self.result.diagnostics.append("NAVIGATION_AMBIGUOUS")
         html = await self.page.content()
         technologies = EngineDetector().report(
             html,
@@ -212,6 +243,7 @@ class RecognitionSession:
         if self.knowledge:
             for form in forms:
                 if self.knowledge.suggest(form):
+                    form.publication_kind = "topic"
                     form.confidence = detector.confidence(form.fields)
                 if "knowledge-conflict" in form.evidence:
                     self.result.diagnostics.append("KNOWLEDGE_CONFLICT")
@@ -225,7 +257,7 @@ class RecognitionSession:
         )
         if self.result.auth_required:
             self.result.diagnostics.append("AUTH_REQUIRED")
-        complete = [f for f in forms if all(k in f.fields for k in ("title", "body", "submit"))]
+        complete = [f for f in forms if f.complete]
         if not complete:
             self.result.diagnostics.append("NO_FORM")
             self.state(LearningState.LEARNING_REQUIRED)
@@ -245,6 +277,8 @@ class RecognitionSession:
         form = next((f for f in self.result.forms if f.key == self.result.selected), None)
         if form:
             for role in ("title", "body", "submit"):
+                if role not in form.fields:
+                    continue
                 ref = form.fields[role]
                 await (
                     self.page.frames[ref.frame]
@@ -254,7 +288,7 @@ class RecognitionSession:
 
     def select(self, key):
         form = next(f for f in self.result.forms if f.key == key)
-        if not all(r in form.fields for r in ("title", "body", "submit")):
+        if not form.complete:
             raise ValueError("Incomplete form")
         self.result.selected = key
         self.result.confidence.form = form.confidence
@@ -277,16 +311,19 @@ class RecognitionSession:
 
     async def fill(self, title, body):
         form = next(f for f in self.result.forms if f.key == self.result.selected)
-        if not title.strip() or not body.strip() or title == body:
+        if not body.strip() or ("title" in form.required_roles and (not title.strip() or title == body)):
             raise ValueError("CONTENT_REQUIRED")
         for role, value in (("title", title), ("body", body)):
+            if role not in form.required_roles:
+                continue
             ref = form.fields[role]
             await adapter_for(ref).fill(
                 self.page.frames[ref.frame].locator(ref.selector),
                 value,
                 staged="previous-stage" in ref.features,
             )
-        self.recorder.capture.title_marker = title
+        self.recorder.capture.publication_kind = form.publication_kind
+        self.recorder.capture.title_marker = title if "title" in form.required_roles else ""
         self.recorder.capture.body_marker = body
         self.recorder.capture.body_format = (
             "html"
@@ -304,7 +341,12 @@ class RecognitionSession:
         if self.result.state != LearningState.DETECTED:
             raise ValueError("NO_FORM")
         self.check_key()
-        form = await self.fill(title, body)
+        try:
+            form = await self.fill(title, body)
+        except Exception as exc:
+            self.diagnose("FIELD_FILL_FAILED", exc)
+            self.state(LearningState.FAILED)
+            return self.result
         self.browser_attempted = True
         self.recorder.capture.action_id = uuid.uuid4().hex
         ref = form.fields["submit"]
@@ -312,7 +354,7 @@ class RecognitionSession:
             await self.page.frames[ref.frame]
             .locator(ref.selector)
             .evaluate(
-                """e=>({name:e.name||'',value:e.value||'',action:e.form?
+                """e=>({name:e.name||'',value:e.value||'',native:e.type==='submit',action:e.form?
             new URL(e.getAttribute('formaction')||e.form.getAttribute('action')||location.href,e.baseURI).href:null})"""
             )
         )
@@ -321,21 +363,55 @@ class RecognitionSession:
             self.recorder.capture,
             templates=self.transfer_rule.http_templates if self.transfer_rule else (),
             submitter=(control["name"], control["value"]) if control["name"] else None,
-            action_url=urlsplit(control["action"])._replace(fragment="").geturl()
-            if control["action"] and control["name"]
+            interaction=self.recorder.capture.action_id,
+            action_url=urlsplit(control["action"] or form.action)._replace(fragment="").geturl()
+            if (control["action"] and control["native"]) or form.method.upper() == "POST"
             else None,
         )
+        await self.page.frames[ref.frame].evaluate(
+            "([selector,ticket])=>window.__posterArm(selector,ticket)",
+            [ref.selector, self.recorder.capture.action_id],
+        )
         self.read_only = False
+        stage = "CLICK_FAILED"
         try:
             ref = form.fields["submit"]
+            if await self.page.frames[ref.frame].locator(ref.selector).count() != 1:
+                raise ValueError("BUTTON_DISAPPEARED")
             await self.page.frames[ref.frame].locator(ref.selector).click(timeout=5000, no_wait_after=True)
+            stage = "RESULT_READ_FAILED"
             await self.confirm_and_learn(project_id, existing_site=existing_site)
-        except Exception:
-            self.result.diagnostics.append("NO_PERMALINK")
-            self.state(LearningState.UNKNOWN)
+        except asyncio.CancelledError:
+            self.diagnose("PUBLICATION_UNCERTAIN" if self.scope.sent else "OPERATION_CANCELLED")
+            self.state(LearningState.UNKNOWN if self.scope.sent else LearningState.FAILED)
+            raise
+        except Exception as exc:
+            code = str(exc) if str(exc) == "BUTTON_DISAPPEARED" else stage
+            self.diagnose(code, exc)
+            if self.scope.sent:
+                self.diagnose("PUBLICATION_UNCERTAIN")
+            self.state(LearningState.UNKNOWN if self.scope.sent else LearningState.FAILED)
         finally:
             self.read_only = True
         return self.result
+
+    def diagnose(self, code, exc=None):
+        self.result.diagnostics.append(code)
+        # Never serialize exception messages: Playwright/httpx include URLs,
+        # payloads and page text. The class and stage suffice for local triage.
+        self.profile.parent.mkdir(parents=True, exist_ok=True)
+        path = self.profile.parent / "diagnostics.jsonl"
+        with path.open("a", encoding="utf-8") as stream:
+            stream.write(
+                json.dumps(
+                    {
+                        "code": code,
+                        "exception": type(exc).__name__ if exc else None,
+                        "write_admitted": bool(self.scope and self.scope.sent),
+                    }
+                )
+                + "\n"
+            )
 
     async def session_state(self):
         for _ in range(3):
@@ -433,7 +509,8 @@ class RecognitionSession:
                         else None,
                     )
                     self.result.transfer.update(learner.transfer_report)
-                except (ValueError, TypeError, KeyError):
+                except (ValueError, TypeError, KeyError) as exc:
+                    self.diagnose("WORKFLOW_BUILD_FAILED", exc)
                     self.result.diagnostics.append("UNKNOWN_DYNAMIC")
                     self.state(LearningState.LEARNING_REQUIRED)
                     return
@@ -538,6 +615,23 @@ class RecognitionSession:
                                 "PATCH",
                             }:
                                 continue
+                            try:
+                                payload = json.loads(response["body"])
+                                paths = [
+                                    path
+                                    for path, value in leaves(payload)
+                                    if path.rsplit(".", 1)[-1] in {"url", "permalink", "location"}
+                                    and isinstance(value, str)
+                                    and urlsplit(urljoin(response["url"], value))
+                                    ._replace(fragment="")
+                                    .geturl()
+                                    == target
+                                ]
+                                if len(paths) == 1:
+                                    extra = {"url_path": paths[0]}
+                                    break
+                            except ValueError:
+                                pass
                             soup = BeautifulSoup(response.get("body", ""), "html.parser")
                             links = [
                                 n
@@ -569,7 +663,10 @@ class RecognitionSession:
                     return url, {**extra, **confirmation}
             except AuthenticationExpired:
                 self.result.diagnostics.append("AUTH_EXPIRED")
-            except (ValueError, httpx.HTTPError, KeyError, WorkflowError):
+            except (ValueError, httpx.HTTPError, KeyError, WorkflowError) as exc:
+                self.diagnose(
+                    "NETWORK_FAILED" if isinstance(exc, httpx.HTTPError) else "RESULT_READ_FAILED", exc
+                )
                 continue
         return None
 
@@ -605,6 +702,8 @@ class RecognitionSession:
             ("title", self.recorder.capture.title_marker),
             ("body", self.recorder.capture.body_marker),
         ):
+            if role not in self.recorder.capture.content_roles:
+                continue
             norm = " ".join(expected.split())
             nodes = [
                 n
@@ -643,9 +742,11 @@ class RecognitionSession:
         if self.result.state != LearningState.HTTP_CANDIDATE or not self.build:
             raise ValueError("HTTP_UNVERIFIED")
         if (
-            not title.strip()
+            (
+                "title" in self.recorder.capture.content_roles
+                and (not title.strip() or title == self.recorder.capture.title_marker)
+            )
             or not body.strip()
-            or title == self.recorder.capture.title_marker
             or body == self.recorder.capture.body_marker
         ):
             raise ValueError("DISTINCT_CONTENT")

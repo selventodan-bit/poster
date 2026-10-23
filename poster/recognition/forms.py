@@ -45,9 +45,14 @@ SNAPSHOT_JS = r"""() => {
    const id=key+'-submit-'+j;e.setAttribute('data-poster-submit',id);
    return {selector:'[data-poster-submit="'+id+'"]',text:[e.innerText,e.value,e.getAttribute('aria-label'),e.title].filter(Boolean).join(' ').slice(0,300),
     type:e.type||'',tag:e.tagName.toLowerCase(),form_owned:e.form===root,
-    action:[e.name,e.getAttribute('data-action'),e.getAttribute('formaction')].filter(Boolean).join(' ')};
+    action:[e.name,e.getAttribute('data-action'),e.getAttribute('formaction')].filter(Boolean).join(' '),
+    editor_relation:!!editor && ((e.getAttribute('aria-controls')||'').split(' ').includes(editor.id) && !!editor.id),
+    js_submit:!!e.onclick && /fetch\s*\(|\.send\s*\(|requestSubmit\s*\(/.test(String(e.onclick)),
+    component:/composer|editor|submit|primary/i.test([root.className,e.className,e.getAttribute('data-action')].join(' ')),
+    endpoint:e.getAttribute('data-endpoint')||e.getAttribute('data-url')||''};
   });
   return {key,tag:root.tagName.toLowerCase(),action:new URL(root.getAttribute('action')||location.href,root.baseURI).href,method:root.getAttribute('method')||'',fields,buttons,
+   publication_kind:root.getAttribute('data-publication-type')||'',
    purpose:[root.getAttribute('aria-label'),root.querySelector('legend,h1,h2,h3')?.textContent].filter(Boolean).join(' ').slice(0,500),
    structure:[root.getRootNode() instanceof ShadowRoot?'shadow':'light',root.matches('dialog,[role="dialog"]')?'dialog':'inline']};
  });
@@ -57,7 +62,8 @@ SNAPSHOT_JS = r"""() => {
 class UniversalFormDetector:
     version = "relational-2.1"
 
-    def __init__(self, locales=None):
+    def __init__(self, locales=None, publication_kind="auto"):
+        self.publication_kind = publication_kind
         self.locales = locales or Localizations()
 
     async def inspect(self, page, allowed_hosts) -> list[FormCandidate]:
@@ -111,13 +117,13 @@ class UniversalFormDetector:
     def analyze(self, snapshot, frame=0):
         fields, evidence, alternatives = {}, [], {}
         if re.search(
-            r"\b(profile|settings|contact|newsletter|subscribe|login|register|search)\b",
+            r"\b(edit|delete|vote|profile|settings|contact|newsletter|subscribe|login|register|search)\b",
             snapshot.get("purpose", ""),
             re.I,
         ):
             return None
         if re.search(
-            r"/(profile|settings|contact|newsletter|subscribe|login|register|search)(?:[./?]|$)",
+            r"/(edit|delete|vote|profile|settings|contact|newsletter|subscribe|login|register|search)(?:[./?]|$)",
             urlsplit(snapshot.get("action", "")).path,
             re.I,
         ):
@@ -207,6 +213,18 @@ class UniversalFormDetector:
             if self.locales.has("publish", b["text"]):
                 score += 0.3
                 features.append("accessible-publication-intent")
+            if (
+                "body" in fields
+                and b["type"] != "submit"
+                and (
+                    b.get("editor_relation")
+                    and (b.get("js_submit") or b.get("component"))
+                    or b.get("js_submit")
+                    and b.get("component")
+                )
+            ):
+                score += 0.8
+                features.append("editor-controller")
             if score:
                 buttons.append(
                     FieldRef("submit", b["selector"], frame, "button", min(0.98, score), features=features)
@@ -228,6 +246,28 @@ class UniversalFormDetector:
             alternatives=alternatives,
             structure=snapshot.get("structure", []),
         )
+        kind = snapshot.get("publication_kind", "")
+        action = snapshot.get("action", "")
+        if re.search(r"(?:[/=?&;_-])(?:edit|delete|vote|settings|update)(?:[/=?&;_-]|$)", action, re.I):
+            return None
+        if kind not in {"topic", "reply", "comment"}:
+            kind = (
+                "comment"
+                if re.search(r"(?:[/=?&;_-])comments?(?:[/=?&;_-]|$)", action, re.I)
+                else (
+                    "reply"
+                    if re.search(r"(?:[/=?&;_-])(?:reply|postreply)(?:[/=?&;_-]|$)", action, re.I)
+                    else ""
+                )
+            )
+        candidate.publication_kind = (
+            self.publication_kind
+            if self.publication_kind != "auto"
+            else kind or ("topic" if "title" in fields else "unknown")
+        )
+        if candidate.publication_kind in {"reply", "comment"}:
+            candidate.fields.pop("title", None)
+            candidate.confidence = 0.95 if {"body", "submit"} <= fields.keys() else self.confidence(fields)
         candidate.text_inputs = [
             next(
                 (r for r in alternatives.get("title", []) if r.selector == f["selector"]),

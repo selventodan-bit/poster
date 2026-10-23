@@ -13,6 +13,16 @@ class LearningState(StrEnum):
 
 
 MESSAGES = {
+    "FIELD_FILL_FAILED": "Не удалось заполнить поле. Отправка не выполнялась; проверьте редактор.",
+    "BUTTON_DISAPPEARED": "Кнопка исчезла после обновления страницы. Распознайте форму заново.",
+    "CLICK_FAILED": "Не удалось нажать выбранную кнопку. Проверьте состояние страницы.",
+    "NETWORK_FAILED": "Ошибка сети при чтении результата. Повторная отправка не выполнялась.",
+    "RESULT_READ_FAILED": "Не удалось прочитать подтверждение публикации. Проверьте сайт вручную.",
+    "PUBLICATION_UNCERTAIN": "Запрос мог выполниться. Повтор запрещён; проверьте публикацию на сайте.",
+    "WORKFLOW_BUILD_FAILED": "Публикация подтверждена, но HTTP-сценарий построить не удалось. Требуется обучение.",
+    "OPERATION_CANCELLED": "Операция остановлена до отправки.",
+    "STATIC_RESOURCE_BLOCKED": "Редактор может быть недоступен: внешний ресурс заблокирован. Разрешите его точный HTTPS origin в настройках.",
+    "NAVIGATION_AMBIGUOUS": "Несколько безопасных путей к форме. Откройте нужную форму в браузере и повторите распознавание.",
     "CONFIRMATION_PENDING": "Время ожидания истекло; результат пока неизвестен. Проверьте сайт перед новой отправкой. Повтор не выполнялся.",
     "CONTENT_REQUIRED": "Для обучения укажите непустые заголовок и текст, отличающиеся друг от друга.",
     "SESSION_KEY_INVALID": "Ключ сессии недоступен или имеет неверный формат. Исправьте POSTER_SESSION_KEY; отправка не выполнялась.",
@@ -76,6 +86,18 @@ class FormCandidate:
     text_inputs: list[FieldRef] = field(default_factory=list)
     alternatives: dict[str, list[FieldRef]] = field(default_factory=dict)
     structure: list[str] = field(default_factory=list)
+    publication_kind: str = "topic"
+
+    @property
+    def required_roles(self):
+        return {"body", "submit"} | ({"title"} if self.publication_kind == "topic" else set())
+
+    @property
+    def complete(self):
+        return (
+            self.publication_kind in {"topic", "reply", "comment"}
+            and self.required_roles <= self.fields.keys()
+        )
 
 
 @dataclass
@@ -110,6 +132,7 @@ class Recognition:
                 {
                     "id": f.key,
                     "roles": sorted(f.fields),
+                    "publication_kind": f.publication_kind,
                     "confidence": f.confidence,
                     "editors": sorted({v.kind for v in f.fields.values() if v.role == "body"}),
                     "evidence": f.evidence,

@@ -160,7 +160,8 @@
               "after-editor",
               "unique-title-near-editor",
               "form-submit-control",
-              "accessible-publication-intent"
+              "accessible-publication-intent",
+              "editor-controller"
             ],
             "type": "string"
           },
@@ -648,6 +649,16 @@
       "minimum": 1,
       "title": "Version",
       "type": "integer"
+    },
+    "publication_kind": {
+      "default": "topic",
+      "enum": [
+        "topic",
+        "reply",
+        "comment"
+      ],
+      "title": "Publication Kind",
+      "type": "string"
     },
     "scope": {
       "const": "form-structure",

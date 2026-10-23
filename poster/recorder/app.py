@@ -16,6 +16,7 @@ from ..project import load_project
 from ..recognition.knowledge import KnowledgeBase
 from ..recognition.service import RecognitionSession
 from ..recognition.types import MESSAGES
+from ..recognition.policy import ResourcePolicy
 from .clipboard import ClipboardMixin
 from .preferences import Preferences
 
@@ -47,6 +48,8 @@ class App(ClipboardMixin):
         self.snapshot = {}
         self.url = tk.StringVar(value=saved.get("url", "http://127.0.0.1:8765/recognize/ajax"))
         self.project_id = tk.StringVar(value=saved.get("project_id", ""))
+        self.publication_kind = tk.StringVar(value="auto")
+        self.static_origins = tk.StringVar(value="")
         self.title = tk.StringVar(value="Проверка Poster")
         self.status = tk.StringVar(value="Введите адрес, заголовок и текст, затем нажмите «Распознать сайт».")
         self.advanced = tk.BooleanVar(value=False)
@@ -56,6 +59,18 @@ class App(ClipboardMixin):
             widget = ttk.Entry(root, textvariable=variable, width=95)
             widget.pack(fill="x", padx=12, pady=4)
             self._enable_clipboard(widget)
+        kind_row = ttk.Frame(root)
+        kind_row.pack(fill="x", padx=12)
+        ttk.Label(
+            kind_row, text="Тип: auto — автоматически; topic — тема; reply — ответ; comment — комментарий"
+        ).pack(side="left")
+        ttk.Combobox(
+            kind_row,
+            textvariable=self.publication_kind,
+            values=["auto", "topic", "reply", "comment"],
+            state="readonly",
+            width=12,
+        ).pack(side="right")
         ttk.Label(root, text="Текст публикации").pack(anchor="w", padx=12)
         self.body = tk.Text(root, width=90, height=6, wrap="word", undo=True)
         self.body.insert("1.0", "Тестовая публикация для проверки формы.")
@@ -101,6 +116,11 @@ class App(ClipboardMixin):
         entry = ttk.Entry(self.details, textvariable=self.project_id)
         entry.pack(fill="x")
         self._enable_clipboard(entry)
+        ttk.Label(
+            self.details,
+            text="Дополнительные доверенные CDN: точные HTTPS origin через пробел (без путей и токенов)",
+        ).pack(anchor="w")
+        ttk.Entry(self.details, textvariable=self.static_origins).pack(fill="x")
         self.form_choice = ttk.Combobox(self.details, state="readonly")
         self.form_choice.pack(fill="x", pady=4)
         ttk.Button(self.details, text="Выбрать эту форму", command=self.select_form).pack(side="left")
@@ -237,6 +257,7 @@ class App(ClipboardMixin):
         except ValueError:
             self.status.set("Проверьте URL и ID проекта в расширенных настройках.")
             return
+        kind, cdns = self.publication_kind.get(), self.static_origins.get().split()
         self.generation += 1
         self.snapshot = {}
         self.status.set("Исследую страницу без отправки публикаций…")
@@ -247,7 +268,11 @@ class App(ClipboardMixin):
             if not self.knowledge:
                 self.knowledge = KnowledgeBase(Path(".poster/knowledge.sqlite"))
             self.session = RecognitionSession(
-                url, Path(".poster/profiles") / project_id, knowledge=self.knowledge
+                url,
+                Path(".poster/profiles") / project_id,
+                knowledge=self.knowledge,
+                publication_kind=kind,
+                static_origins=None if not cdns else [*ResourcePolicy.DEFAULT_STATIC, *cdns],
             )
             await self.session.start()
             await self.session.recognize()

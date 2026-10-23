@@ -26,6 +26,11 @@ class Capture:
     confirmation: dict = field(default_factory=dict)
     browser_verified: bool = False
     body_format: str = "text"
+    publication_kind: str = "topic"
+
+    @property
+    def content_roles(self):
+        return {"title", "body"} if self.publication_kind == "topic" else {"body"}
 
 
 FORM_JS = """form => ({url: location.href,
@@ -72,6 +77,7 @@ class Recorder:
         self.pending = set()
         self.request_records = {}
         self.response_event = asyncio.Event()
+        self.browser_bodies = {}
 
     def task(self, coro):
         task = asyncio.create_task(coro)
@@ -81,6 +87,24 @@ class Recorder:
     async def attach(self, context):
         request_ids = {}
         request_actions = {}
+
+        async def browser_body(source, identity, body):
+            if (
+                not isinstance(identity, str)
+                or len(identity) > 80
+                or not isinstance(body, str)
+                or len(body) > 2_000_000
+            ):
+                return
+            self.browser_bodies[identity] = body
+            record = next((r for r in self.capture.requests if r.get("browser_id") == identity), None)
+            if record:
+                for response in self.capture.responses:
+                    if response.get("request_id") == record["id"] and not response.get("body"):
+                        response["body"] = body
+                self.response_event.set()
+
+        await context.expose_binding("__poster_response_body", browser_body)
 
         def request(req):
             if req.resource_type in {"document", "xhr", "fetch"}:
@@ -100,6 +124,8 @@ class Recorder:
                 self.capture.requests.append(
                     {
                         "id": request_id,
+                        "browser_id": req.headers.get("x-poster-capture"),
+                        "interaction": req.headers.get("x-poster-interaction"),
                         "action_id": request_actions[req],
                         "initiator": req.frame.url if req.frame else "",
                         "time": time.monotonic(),
@@ -137,6 +163,7 @@ class Recorder:
                     body = await res.text()
                 except Exception:
                     body = ""
+                body = body or self.browser_bodies.get(res.request.headers.get("x-poster-capture"), "")
                 if len(body) > 2_000_000:
                     return
                 self.capture.responses.append(
