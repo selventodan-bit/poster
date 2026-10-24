@@ -103,11 +103,14 @@ class MakerHandler(Handler):
         elif path == "/login":
             cookies = SimpleCookie(self.headers.get("Cookie", ""))
             sid = cookies["sid"].value if "sid" in cookies else ""
-            valid = (
-                values.get("user") == ["demo"]
-                and values.get("password") == [DEMO_PASSWORD]
-                and values.get("csrf") == [self.server.tokens.get(sid)]
-            )
+            checks = {
+                "user_matches": values.get("user") == ["demo"],
+                "password_matches": values.get("password") == [DEMO_PASSWORD],
+                "csrf_matches": values.get("csrf") == [self.server.tokens.get(sid)],
+                "session_known": sid in self.server.tokens,
+            }
+            self.server.login_attempts.append(checks)
+            valid = all(checks.values())
             if not valid:
                 self.reply(403, "Rejected")
                 return
@@ -123,6 +126,7 @@ def serve_maker(port=0):
     server = FixtureServer(("127.0.0.1", port), MakerHandler)
     server.authorized = set()
     server.login_count = 0
+    server.login_attempts = []
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
