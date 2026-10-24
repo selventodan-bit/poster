@@ -1,0 +1,296 @@
+"""Portable Maker: real OS input in both the editor and its separate Chrome window."""
+
+import argparse
+import json
+import os
+from pathlib import Path
+import time
+import traceback
+
+from poster.maker.fixtures import serve_maker
+
+
+def check(executable, output):
+    import win32api
+    import win32clipboard
+    import win32con
+    import win32event
+    import win32process
+    from pywinauto import Desktop, keyboard, mouse
+
+    output.mkdir(parents=True, exist_ok=False)
+    observer = output / "observer-private.json"
+    os.environ["POSTER_GUI_TEST_OUTPUT"] = str(observer)
+    info = json.loads((executable.parent / "BUILD_INFO.json").read_text(encoding="utf-8"))
+    expected = os.environ.get("EXPECTED_POSTER_COMMIT")
+    if expected:
+        assert info["commit"] == expected
+    window = process = None
+    phase = "startup"
+    completed = []
+
+    def snapshot():
+        try:
+            return json.loads(observer.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+
+    def wait(predicate, label, timeout=90):
+        nonlocal phase
+        phase = label
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            value = snapshot()
+            maker = value.get("maker", {})
+            if maker.get("error") and not maker.get("busy"):
+                raise AssertionError("Maker reported an error")
+            if predicate(value):
+                return value
+            time.sleep(0.12)
+        raise AssertionError("Maker GUI timeout: " + label)
+
+    def start():
+        nonlocal window, process
+        observer.unlink(missing_ok=True)
+        os.startfile(str(executable))
+        window = Desktop(backend="win32").window(title="Poster 3.0 — ProjectMaker")
+        window.wait("visible", timeout=40)
+        pid = win32process.GetWindowThreadProcessId(window.handle)[1]
+        process = win32api.OpenProcess(win32con.SYNCHRONIZE | win32con.PROCESS_QUERY_INFORMATION, False, pid)
+        initial = wait(
+            lambda s: "maker_record" in s.get("maker", {}).get("positions", {}), "Maker opens by default"
+        )
+        assert initial["frozen"] and initial["utf8_mode"] == 1
+
+    def point(name):
+        return wait(lambda s: name in s.get("maker", {}).get("positions", {}), "control " + name)["maker"][
+            "positions"
+        ][name]
+
+    def click(name):
+        window.set_focus()
+        time.sleep(0.15)
+        mouse.click(coords=tuple(point(name)))
+
+    def clipboard(value):
+        win32clipboard.OpenClipboard()
+        try:
+            win32clipboard.EmptyClipboard()
+            win32clipboard.SetClipboardText(value, win32con.CF_UNICODETEXT)
+        finally:
+            win32clipboard.CloseClipboard()
+        keyboard.send_keys("^a^v", pause=0.12)
+
+    def fill(name, value):
+        click(name)
+        clipboard(value)
+
+    def confirm():
+        dialog = Desktop(backend="win32").window(title="Выполнение графа")
+        dialog.wait("visible", timeout=10)
+        dialog.set_focus()
+        dialog.child_window(control_id=6).click_input()
+
+    def picture(name):
+        window.set_focus()
+        time.sleep(0.2)
+        window.capture_as_image().save(output / name)
+
+    def close():
+        nonlocal process
+        if process:
+            window.close()
+            assert win32event.WaitForSingleObject(process, 30000) == win32con.WAIT_OBJECT_0
+            assert win32process.GetExitCodeProcess(process) == 0
+            win32api.CloseHandle(process)
+            process = None
+
+    def browser_control(selector):
+        state = wait(
+            lambda s: any(
+                c["selector"] == selector for c in s.get("maker", {}).get("browser", {}).get("controls", [])
+            ),
+            "browser " + selector,
+        )
+        view = state["maker"]["browser"]
+        control = next(c for c in view["controls"] if c["selector"] == selector)
+        browsers = [
+            w
+            for w in Desktop(backend="win32").windows(class_name="Chrome_WidgetWin_1", visible_only=True)
+            if "ProjectMaker" in w.window_text()
+        ]
+        assert browsers, "Controlled Chrome window missing"
+        browser = browsers[-1]
+        browser.set_focus()
+        time.sleep(0.15)
+        renderers = [
+            w
+            for w in browser.descendants(class_name="Chrome_RenderWidgetHostHWND")
+            if w.rectangle().width() > 100 and w.rectangle().height() > 100
+        ]
+        assert renderers, "Chrome renderer HWND missing"
+        rectangle = max(renderers, key=lambda w: w.rectangle().width() * w.rectangle().height()).rectangle()
+        x = (
+            rectangle.left
+            + (control["x"] + control["width"] / 2) * rectangle.width() / view["viewport"]["width"]
+        )
+        y = (
+            rectangle.top
+            + (control["y"] + control["height"] / 2) * rectangle.height() / view["viewport"]["height"]
+        )
+        mouse.click(coords=(int(x), int(y)))
+
+    try:
+        with serve_maker() as (server, base):
+            start()
+            fill("maker_url", base + "/")
+            click("maker_record")
+            wait(lambda s: s.get("maker", {}).get("recording") and not s["maker"]["busy"], "recording ready")
+            browser_control("#show")
+            browser_control("#note")
+            clipboard("Записано через GUI Ж 日本語")
+            browser_control("#mode")
+            keyboard.send_keys("{DOWN}{ENTER}", pause=0.2)
+            browser_control("#continue")
+            wait(
+                lambda s: s.get("maker", {}).get("browser", {}).get("title") == "ProjectMaker result",
+                "recorded navigation",
+            )
+            assert len(server.posts) == 1
+            picture("01-recording.png")
+            click("maker_record_stop")
+            recorded = wait(
+                lambda s: not s.get("maker", {}).get("recording") and not s["maker"]["busy"],
+                "recording stopped",
+            )["maker"]
+            nodes = recorded["graph"]["nodes"]
+            count = len(nodes)
+            assert any(n["type"] == "Browser.Select" for n in nodes)
+            selected = next(
+                n for n in nodes if n["type"] == "Browser.Input" and n["params"]["selector"] == "#note"
+            )
+            assert len(recorded["graph"]["edges"]) >= count - 1
+            completed.append("real_browser_recording_to_connected_cubes")
+            click("maker_fit")
+            time.sleep(0.5)
+            position = wait(lambda s: selected["id"] in s["maker"]["nodes"], "input cube visible")["maker"][
+                "nodes"
+            ][selected["id"]]
+            window.set_focus()
+            mouse.click(coords=tuple(position))
+            time.sleep(0.4)
+            for _ in range(15):
+                if "maker_prop_value" in snapshot().get("maker", {}).get("positions", {}):
+                    break
+                mouse.scroll(coords=tuple(point("maker_properties")), wheel_dist=-3)
+                time.sleep(0.2)
+            fill("maker_prop_value", "Изменено в кубике GUI Ж 日本語")
+            click("maker_apply")
+            wait(
+                lambda s: (
+                    next(n for n in s["maker"]["graph"]["nodes"] if n["id"] == selected["id"])["params"][
+                        "value"
+                    ]
+                    == "Изменено в кубике GUI Ж 日本語"
+                ),
+                "edited parameter applied",
+            )
+            position = snapshot()["maker"]["nodes"][selected["id"]]
+            window.set_focus()
+            mouse.press(coords=tuple(position))
+            mouse.move(coords=(position[0] + 20, position[1] + 15))
+            mouse.release(coords=(position[0] + 20, position[1] + 15))
+            time.sleep(0.4)
+            click("maker_copy")
+            wait(lambda s: len(s["maker"]["graph"]["nodes"]) == count + 1, "copied cube")
+            click("maker_delete")
+            wait(lambda s: len(s["maker"]["graph"]["nodes"]) == count, "deleted copy")
+            picture("02-edited-graph.png")
+            completed.append("edit_parameter_drag_copy_delete")
+            click("maker_step")
+            confirm()
+            wait(
+                lambda s: (
+                    s["maker"]["run_state"] == "PAUSED"
+                    and len(s["maker"]["trace"]) == 1
+                    and not s["maker"]["busy"]
+                ),
+                "one cube step",
+            )
+            picture("03-debug-step.png")
+            click("maker_run")
+            played = wait(
+                lambda s: s["maker"]["run_state"] == "SUCCEEDED" and not s["maker"]["busy"], "graph replay"
+            )["maker"]
+            assert len(server.posts) == 2 and server.posts["2"]["note"] == "Изменено в кубике GUI Ж 日本語"
+            assert all(r["status"] == "SUCCEEDED" for r in played["trace"]) and len(played["trace"]) == count
+            picture("04-debug-success.png")
+            completed.append("step_debug_highlight_and_real_edited_replay")
+            click("maker_save")
+            saved = wait(lambda s: bool(s["maker"]["saved_file"]), "saved graph")["maker"]
+            saved_nodes = saved["graph"]["nodes"]
+            close()
+            start()
+            restored = wait(
+                lambda s: s["maker"]["graph"]["id"] == saved["graph"]["id"], "reopened saved graph"
+            )["maker"]
+            assert restored["graph"]["nodes"] == saved_nodes
+            click("maker_run")
+            confirm()
+            wait(
+                lambda s: s["maker"]["run_state"] == "SUCCEEDED" and not s["maker"]["busy"],
+                "replay after reopening",
+            )
+            assert len(server.posts) == 3 and server.posts["3"]["note"] == "Изменено в кубике GUI Ж 日本語"
+            picture("05-reopened-replay.png")
+            completed.append("save_close_reopen_same_graph_and_replay")
+            close()
+        report = {
+            "status": "PASSED",
+            "commit": info["commit"],
+            "packaged_executable": True,
+            "os_mouse_keyboard": True,
+            "browser_actions_via_os_input": True,
+            "dialogs_mocked": False,
+            "graph_nodes": count,
+            "writes": 3,
+            "scenarios": completed,
+            "browser_embedded": False,
+        }
+        (output / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+        print("::notice title=Maker Windows GUI E2E::" + json.dumps(report), flush=True)
+    except Exception as exc:
+        try:
+            picture("failure.png")
+        except Exception:
+            pass
+        locations = " > ".join(
+            f"{Path(f.filename).name}:{f.lineno}" for f in traceback.extract_tb(exc.__traceback__)[-4:]
+        )
+        maker = snapshot().get("maker", {})
+        print(
+            "::error::Maker GUI " + type(exc).__name__ + " at " + locations + "; phase=" + phase, flush=True
+        )
+        print(
+            "::error::Maker state "
+            + json.dumps(
+                {k: maker.get(k) for k in ["busy", "recording", "run_state", "error", "status"]},
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+        raise
+    finally:
+        if process:
+            try:
+                close()
+            except Exception:
+                win32api.TerminateProcess(process, 1)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--exe", type=Path, required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    args = parser.parse_args()
+    check(args.exe.resolve(), args.output.resolve())

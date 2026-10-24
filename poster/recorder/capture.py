@@ -82,6 +82,11 @@ class Recorder:
         self.pending.add(task)
         task.add_done_callback(self.pending.discard)
 
+    async def attach_actions(self, context, handler, *, script=INIT_JS, binding="__poster_action"):
+        """Reusable DOM event channel, independently of HTTP capture or recognition gates."""
+        await context.expose_binding(binding, handler)
+        await context.add_init_script(script)
+
     async def attach(self, context):
         request_ids = {}
         request_actions = {}
@@ -194,8 +199,7 @@ class Recorder:
             data["iframe"] = source["frame"] != source["page"].main_frame
             self.capture.actions.append(data)
 
-        await context.expose_binding("__poster_action", action)
-        await context.add_init_script(INIT_JS)
+        await self.attach_actions(context, action)
         self.record_request = request
         context.on("request", request)
         context.on("response", lambda res: self.task(response(res)))

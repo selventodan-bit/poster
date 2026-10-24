@@ -36,7 +36,7 @@ STATE_TEXT = {
 class App(DesktopMixin, ClipboardMixin):
     def __init__(self, root):
         self.root = root
-        root.title("Poster 2.0 — рабочее место")
+        root.title("Poster 3.0 — ProjectMaker")
         self.preferences = Preferences(Path(".poster/recorder-settings.json"))
         saved = self.preferences.load()
         ensure_local_key(Path(".poster/private"))
@@ -141,7 +141,7 @@ class App(DesktopMixin, ClipboardMixin):
         self._enable_clipboard(self.log)
         self.desktop_views()
         self.update_buttons()
-        self.pump_after = root.after(100, self.pump)
+        self.pump_after = self.root.after(100, self.pump)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
 
     def toggle_advanced(self):
@@ -472,6 +472,9 @@ class App(DesktopMixin, ClipboardMixin):
     def close(self):
         if self.closing:
             return
+        if not self.maker.can_close():
+            return
+        self.maker.prepare_close()
         self.closing = True
         for token in (self.pump_after, self.tick_after):
             self.root.after_cancel(token)
@@ -485,6 +488,7 @@ class App(DesktopMixin, ClipboardMixin):
         self.desktop_buttons()
 
         async def cleanup():
+            await self.maker.shutdown()
             tasks = [t for t in self.operation_tasks if not t.done()]
             for task in tasks:
                 if not task.cancelling():
@@ -510,6 +514,7 @@ class App(DesktopMixin, ClipboardMixin):
             if not self.thread.is_alive():
                 self.loop.close()
             self.root.destroy()
+            self.maker.dispose()
             # Future/coroutine cycles can be collected by a network thread.
             # Release Tcl references here, on their owning Tk thread.
             self.buttons.clear()
@@ -521,7 +526,9 @@ class App(DesktopMixin, ClipboardMixin):
         finish()
 
 
-def launch():
+def launch(initial_tab="maker"):
     root = tk.Tk()
-    App(root)
+    app = App(root)
+    if initial_tab == "maker":
+        app.notebook.select(app.maker.frame)
     root.mainloop()

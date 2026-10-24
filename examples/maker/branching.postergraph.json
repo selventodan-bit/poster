@@ -1,0 +1,95 @@
+{
+  "format": "poster.maker.graph",
+  "schema_version": 1,
+  "id": "maker-readonly-example",
+  "name": "Ветвление по заголовку",
+  "entry": "start",
+  "nodes": [
+    {
+      "id": "start",
+      "type": "Start",
+      "action_version": 1,
+      "title": "",
+      "x": 40.0,
+      "y": 60.0,
+      "params": {},
+      "extensions": {}
+    },
+    {
+      "id": "open",
+      "type": "Browser.OpenURL",
+      "action_version": 1,
+      "title": "",
+      "x": 280.0,
+      "y": 60.0,
+      "params": {
+        "url": "https://example.org"
+      },
+      "extensions": {}
+    },
+    {
+      "id": "condition",
+      "type": "Logic.If",
+      "action_version": 1,
+      "title": "",
+      "x": 520.0,
+      "y": 60.0,
+      "params": {
+        "selector": "h1",
+        "condition": "text_contains",
+        "expected": "Example Domain"
+      },
+      "extensions": {}
+    },
+    {
+      "id": "yes",
+      "type": "End",
+      "action_version": 1,
+      "title": "Заголовок найден",
+      "x": 760.0,
+      "y": 40.0,
+      "params": {},
+      "extensions": {}
+    },
+    {
+      "id": "no",
+      "type": "End",
+      "action_version": 1,
+      "title": "Проверка не прошла",
+      "x": 760.0,
+      "y": 190.0,
+      "params": {},
+      "extensions": {}
+    }
+  ],
+  "edges": [
+    {
+      "source": "start",
+      "port": "success",
+      "target": "open"
+    },
+    {
+      "source": "open",
+      "port": "success",
+      "target": "condition"
+    },
+    {
+      "source": "condition",
+      "port": "success",
+      "target": "yes"
+    },
+    {
+      "source": "condition",
+      "port": "error",
+      "target": "no"
+    }
+  ],
+  "view": {
+    "zoom": 1.0
+  },
+  "max_steps": 500,
+  "metadata": {},
+  "extensions": {},
+  "secret_file": null,
+  "secret_sha256": null
+}

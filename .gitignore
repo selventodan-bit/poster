@@ -13,6 +13,7 @@ poster-tiptap.js
 demo-output/
 *.sqlite*
 session.enc
+*.secrets.enc
 *.key
 .env
 credentials*.json

@@ -1,0 +1,206 @@
+{
+  "$defs": {
+    "Edge": {
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "port": {
+          "default": "success",
+          "enum": [
+            "success",
+            "error"
+          ],
+          "title": "Port",
+          "type": "string"
+        },
+        "target": {
+          "title": "Target",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "target"
+      ],
+      "title": "Edge",
+      "type": "object"
+    },
+    "Node": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z0-9_-]{1,80}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "type": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Type",
+          "type": "string"
+        },
+        "action_version": {
+          "default": 1,
+          "maximum": 1000,
+          "minimum": 1,
+          "title": "Action Version",
+          "type": "integer"
+        },
+        "title": {
+          "default": "",
+          "maxLength": 200,
+          "title": "Title",
+          "type": "string"
+        },
+        "x": {
+          "default": 60,
+          "maximum": 1000000,
+          "minimum": -1000000,
+          "title": "X",
+          "type": "number"
+        },
+        "y": {
+          "default": 60,
+          "maximum": 1000000,
+          "minimum": -1000000,
+          "title": "Y",
+          "type": "number"
+        },
+        "params": {
+          "additionalProperties": true,
+          "title": "Params",
+          "type": "object"
+        },
+        "extensions": {
+          "additionalProperties": true,
+          "title": "Extensions",
+          "type": "object"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "Node",
+      "type": "object"
+    },
+    "View": {
+      "additionalProperties": false,
+      "properties": {
+        "zoom": {
+          "default": 1,
+          "maximum": 3,
+          "minimum": 0.25,
+          "title": "Zoom",
+          "type": "number"
+        }
+      },
+      "title": "View",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "format": {
+      "const": "poster.maker.graph",
+      "default": "poster.maker.graph",
+      "title": "Format",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "id": {
+      "pattern": "^[A-Za-z0-9_-]{1,80}$",
+      "title": "Id",
+      "type": "string"
+    },
+    "name": {
+      "default": "Новый проект",
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    },
+    "entry": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Entry"
+    },
+    "nodes": {
+      "items": {
+        "$ref": "#/$defs/Node"
+      },
+      "maxItems": 2000,
+      "title": "Nodes",
+      "type": "array"
+    },
+    "edges": {
+      "items": {
+        "$ref": "#/$defs/Edge"
+      },
+      "maxItems": 4000,
+      "title": "Edges",
+      "type": "array"
+    },
+    "view": {
+      "$ref": "#/$defs/View"
+    },
+    "max_steps": {
+      "default": 500,
+      "maximum": 10000,
+      "minimum": 1,
+      "title": "Max Steps",
+      "type": "integer"
+    },
+    "metadata": {
+      "additionalProperties": true,
+      "title": "Metadata",
+      "type": "object"
+    },
+    "extensions": {
+      "additionalProperties": true,
+      "title": "Extensions",
+      "type": "object"
+    },
+    "secret_file": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Secret File"
+    },
+    "secret_sha256": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Secret Sha256"
+    }
+  },
+  "title": "Graph",
+  "type": "object",
+  "$id": "https://poster.local/schemas/maker-graph-v1"
+}

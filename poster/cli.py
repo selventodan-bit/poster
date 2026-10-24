@@ -20,6 +20,14 @@ def parser():
     sub = p.add_subparsers(dest="command", required=True)
     sub.add_parser("keygen", help="Generate a session encryption key; keep it outside project folders")
     sub.add_parser("recorder", help="Open the local Tk Recorder UI")
+    sub.add_parser("maker", help="Open the visual ProjectMaker")
+    maker_run = sub.add_parser("maker-run", help="Run a versioned Maker graph without the GUI")
+    maker_run.add_argument("project", type=Path)
+    maker_run.add_argument("--headed", action="store_true")
+    maker_run.add_argument("--output", type=Path)
+    maker_run.add_argument(
+        "--secret-env", action="append", default=[], help="Explicitly allow one environment secret name"
+    )
     f = sub.add_parser("fixtures", help="Run the two local test sites")
     f.add_argument("--port", type=int, default=8765)
     f2 = sub.add_parser("fixtures-v2", help="Run realistic JS/AJAX and rich-editor fixture sites")
@@ -138,10 +146,30 @@ def main(argv=None):
             from .fixtures import serve_forever
 
             serve_forever(port=a.port)
-        elif a.command == "recorder":
+        elif a.command in {"recorder", "maker"}:
             from .recorder.app import launch
 
-            launch()
+            launch(initial_tab="maker" if a.command == "maker" else "recorder")
+        elif a.command == "maker-run":
+            from .maker.storage import load_graph
+            from .maker.runtime import GraphRunner
+
+            async def execute_graph():
+                graph, vault = load_graph(a.project)
+                vault.env_allowed.update(a.secret_env)
+                runner = GraphRunner(graph, vault=vault, headless=not a.headed)
+                try:
+                    status = await runner.run()
+                    return {"status": status, "results": [asdict(r) for r in runner.results]}
+                finally:
+                    await runner.close()
+
+            report = asyncio.run(execute_graph())
+            if a.output:
+                a.output.parent.mkdir(parents=True, exist_ok=True)
+                a.output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+            print(json.dumps(report, ensure_ascii=False))
+            return 0 if report["status"] == "SUCCEEDED" else 1
         elif a.command == "fixtures-v2":
             from .fixtures_recognition import serve_forever
 

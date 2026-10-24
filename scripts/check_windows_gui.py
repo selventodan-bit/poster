@@ -60,13 +60,16 @@ def check(executable, output):
         observation.unlink(missing_ok=True)
         os.startfile(str(executable))  # ShellExecute: the same opening path as a double click.
         desktop = Desktop(backend="win32")
-        window = desktop.window(title="Poster 2.0 — рабочее место")
+        window = desktop.window(title="Poster 3.0 — ProjectMaker")
         window.wait("visible", timeout=40)
         handle = window.handle
         pid = win32process.GetWindowThreadProcessId(handle)[1]
         process = win32api.OpenProcess(win32con.SYNCHRONIZE | win32con.PROCESS_QUERY_INFORMATION, False, pid)
-        initial = wait(lambda s: bool(s.get("positions", {}).get("local_test")), "initial window")
+        initial = wait(lambda s: bool(s.get("positions", {}).get("tabs")), "initial window")
         assert initial["frozen"] and initial["utf8_mode"] == 1
+        window.set_focus()
+        mouse.click(coords=tuple(initial["positions"]["tabs"]["0"]))
+        wait(lambda s: bool(s.get("positions", {}).get("local_test")), "legacy Recorder tab")
 
     def focus():
         window.set_focus()

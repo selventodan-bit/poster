@@ -1,0 +1,100 @@
+"""Controlled browser recording site, including ordinary POST/CSRF authorization."""
+
+from contextlib import contextmanager
+import html
+from http.cookies import SimpleCookie
+import secrets
+import threading
+from urllib.parse import parse_qs, urlsplit
+
+from ..fixtures import FixtureServer, Handler
+
+DEMO_PASSWORD = "demo-password-Ж42"
+
+
+class MakerHandler(Handler):
+    def do_GET(self):
+        path = urlsplit(self.path).path
+        if path == "/":
+            self.reply(
+                200,
+                """<!doctype html><meta charset="utf-8"><title>ProjectMaker demo</title>
+            <h1>Демо ProjectMaker</h1><button id="show" onclick="document.getElementById('form').hidden=false">Показать форму</button>
+            <form id="form" hidden method="post" action="/save"><label>Текст <input id="note" name="note"></label>
+            <label>Режим <select id="mode" name="mode"><option value="one">Один</option><option value="two">Два</option></select></label>
+            <button id="continue" type="submit">Перейти дальше</button></form><p><a href="/login">Проверка входа</a></p>""",
+            )
+        elif path.startswith("/result/"):
+            item = self.server.posts.get(path.rsplit("/", 1)[-1])
+            self.reply(
+                200,
+                '<meta charset="utf-8"><title>ProjectMaker result</title><h1 id="done">Готово</h1><output id="result">'
+                + html.escape(item["note"])
+                + "</output>"
+                if item
+                else "Missing",
+            )
+        elif path == "/login":
+            sid = secrets.token_hex(12)
+            token = secrets.token_hex(16)
+            self.server.tokens[sid] = token
+            self.reply(
+                200,
+                f'''<meta charset="utf-8"><h1>Контролируемый вход</h1>
+            <form method="post" action="/login"><input type="hidden" name="csrf" value="{token}">
+            <input id="user" name="user" autocomplete="username"><input id="password" name="password" type="password" autocomplete="current-password">
+            <button id="login" type="submit">Войти</button></form>''',
+                {"Set-Cookie": f"sid={sid}; HttpOnly; SameSite=Lax; Path=/"},
+            )
+        elif path == "/account":
+            cookies = SimpleCookie(self.headers.get("Cookie", ""))
+            sid = cookies["sid"].value if "sid" in cookies else ""
+            if sid not in self.server.authorized:
+                self.reply(401, "Login required")
+                return
+            self.reply(200, '<meta charset="utf-8"><h1 id="account">Вход выполнен</h1>')
+        else:
+            self.reply(404, "Missing")
+
+    def do_POST(self):
+        raw = self.rfile.read(min(int(self.headers.get("Content-Length", "0")), 200000))
+        values = parse_qs(raw.decode("utf-8"), keep_blank_values=True)
+        path = urlsplit(self.path).path
+        if path == "/save":
+            identity = str(len(self.server.posts) + 1)
+            self.server.posts[identity] = {
+                "note": values.get("note", [""])[0],
+                "mode": values.get("mode", [""])[0],
+            }
+            self.reply(303, headers={"Location": "/result/" + identity})
+        elif path == "/login":
+            cookies = SimpleCookie(self.headers.get("Cookie", ""))
+            sid = cookies["sid"].value if "sid" in cookies else ""
+            valid = (
+                values.get("user") == ["demo"]
+                and values.get("password") == [DEMO_PASSWORD]
+                and values.get("csrf") == [self.server.tokens.get(sid)]
+            )
+            if not valid:
+                self.reply(403, "Rejected")
+                return
+            self.server.authorized.add(sid)
+            self.server.login_count += 1
+            self.reply(303, headers={"Location": "/account"})
+        else:
+            self.reply(404, "Missing")
+
+
+@contextmanager
+def serve_maker(port=0):
+    server = FixtureServer(("127.0.0.1", port), MakerHandler)
+    server.authorized = set()
+    server.login_count = 0
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield server, f"http://127.0.0.1:{server.server_port}"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()

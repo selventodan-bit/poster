@@ -69,9 +69,12 @@ class DesktopMixin:
         )
         self.result_text = tk.StringVar(value="Результатов пока нет.")
         self.result_detail = tk.StringVar(value="Выберите запись для пояснения результата.")
-        root.geometry("1000x700")
+        root.geometry(
+            f"{min(1220, root.winfo_screenwidth() - 40)}x{min(820, root.winfo_screenheight() - 80)}"
+        )
         root.minsize(940, 640)
         toolbar = ttk.Frame(root, padding=(10, 8))
+        self.legacy_toolbar = toolbar
         toolbar.pack(fill="x")
         for key, label, callback in (
             ("local_test", "Локальный тест", self.local_test),
@@ -99,9 +102,25 @@ class DesktopMixin:
             (self.system_page, "Система"),
         ):
             self.notebook.add(page, text=label)
-        self.notebook.bind("<<NotebookTabChanged>>", lambda _: self.refresh_desktop())
+        self.notebook.bind("<<NotebookTabChanged>>", self.tab_changed)
+
+    def tab_changed(self, _=None):
+        maker = getattr(self, "maker", None)
+        if maker and self.notebook.select() == str(maker.frame):
+            self.legacy_toolbar.pack_forget()
+            if hasattr(self, "legacy_footer"):
+                self.legacy_footer.pack_forget()
+        else:
+            self.legacy_toolbar.pack(fill="x", before=self.notebook)
+            if hasattr(self, "legacy_footer"):
+                self.legacy_footer.pack(fill="x", padx=12, pady=5)
+        self.refresh_desktop()
 
     def desktop_views(self):
+        from ..maker.gui import MakerPanel
+
+        self.maker = MakerPanel(self.notebook, self.loop, self.workspace)
+        self.notebook.add(self.maker.frame, text="ProjectMaker 3.0")
         ttk.Label(
             self.projects_page,
             text="Готовые проекты можно сразу выбрать для очереди. Кандидат требует HTTP-проверки.",
@@ -186,7 +205,8 @@ class DesktopMixin:
             text="Очистка сохраняет проекты, очередь, ключи, знания, браузеры и профили реальных сайтов.",
             wraplength=950,
         ).pack(anchor="w", pady=10)
-        ttk.Label(self.root, textvariable=self.status, wraplength=1000).pack(fill="x", padx=12, pady=5)
+        self.legacy_footer = ttk.Label(self.root, textvariable=self.status, wraplength=1000)
+        self.legacy_footer.pack(fill="x", padx=12, pady=5)
         self.refresh_desktop()
         self.check_system()
         self.tick_after = self.root.after(500, self.desktop_tick)
@@ -554,6 +574,8 @@ class DesktopMixin:
             "thread": threading.get_ident(),
             "observed_at": time.time(),
         }
+        if hasattr(self, "maker"):
+            data["maker"] = self.maker.observation()
         try:
             path = Path(output)
             temporary = path.with_suffix(".tmp")

@@ -1,0 +1,407 @@
+{
+  "format": "poster.maker.actions",
+  "schema_version": 1,
+  "actions": [
+    {
+      "type": "Start",
+      "action_version": 1,
+      "label": "Start — начало",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {},
+        "title": "Empty",
+        "type": "object"
+      }
+    },
+    {
+      "type": "End",
+      "action_version": 1,
+      "label": "End — завершение",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {},
+        "title": "Empty",
+        "type": "object"
+      }
+    },
+    {
+      "type": "Browser.OpenURL",
+      "action_version": 1,
+      "label": "Открыть URL",
+      "parameters": {
+        "$defs": {
+          "SecretRef": {
+            "additionalProperties": false,
+            "properties": {
+              "secret_ref": {
+                "maxLength": 200,
+                "minLength": 1,
+                "title": "Secret Ref",
+                "type": "string"
+              }
+            },
+            "required": [
+              "secret_ref"
+            ],
+            "title": "SecretRef",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/SecretRef"
+              }
+            ],
+            "default": "https://example.org",
+            "title": "Url"
+          }
+        },
+        "title": "OpenURL",
+        "type": "object"
+      }
+    },
+    {
+      "type": "Browser.Click",
+      "action_version": 1,
+      "label": "Клик",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "selector": {
+            "default": "body",
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Selector",
+            "type": "string"
+          },
+          "frame": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Frame",
+            "type": "array"
+          },
+          "timeout_ms": {
+            "default": 10000,
+            "maximum": 120000,
+            "minimum": 50,
+            "title": "Timeout Ms",
+            "type": "integer"
+          },
+          "button": {
+            "default": "left",
+            "enum": [
+              "left",
+              "right",
+              "middle"
+            ],
+            "title": "Button",
+            "type": "string"
+          }
+        },
+        "title": "Click",
+        "type": "object"
+      }
+    },
+    {
+      "type": "Browser.Input",
+      "action_version": 1,
+      "label": "Ввод текста",
+      "parameters": {
+        "$defs": {
+          "SecretRef": {
+            "additionalProperties": false,
+            "properties": {
+              "secret_ref": {
+                "maxLength": 200,
+                "minLength": 1,
+                "title": "Secret Ref",
+                "type": "string"
+              }
+            },
+            "required": [
+              "secret_ref"
+            ],
+            "title": "SecretRef",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "selector": {
+            "default": "body",
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Selector",
+            "type": "string"
+          },
+          "frame": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Frame",
+            "type": "array"
+          },
+          "timeout_ms": {
+            "default": 10000,
+            "maximum": 120000,
+            "minimum": 50,
+            "title": "Timeout Ms",
+            "type": "integer"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/SecretRef"
+              }
+            ],
+            "default": "",
+            "title": "Value"
+          },
+          "sensitive": {
+            "default": false,
+            "title": "Sensitive",
+            "type": "boolean"
+          }
+        },
+        "title": "Input",
+        "type": "object"
+      }
+    },
+    {
+      "type": "Browser.Select",
+      "action_version": 1,
+      "label": "Выбор из списка",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "selector": {
+            "default": "body",
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Selector",
+            "type": "string"
+          },
+          "frame": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Frame",
+            "type": "array"
+          },
+          "timeout_ms": {
+            "default": 10000,
+            "maximum": 120000,
+            "minimum": 50,
+            "title": "Timeout Ms",
+            "type": "integer"
+          },
+          "values": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Values",
+            "type": "array"
+          }
+        },
+        "title": "Select",
+        "type": "object"
+      }
+    },
+    {
+      "type": "Browser.WaitElement",
+      "action_version": 1,
+      "label": "Ждать элемент",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "selector": {
+            "default": "body",
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Selector",
+            "type": "string"
+          },
+          "frame": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Frame",
+            "type": "array"
+          },
+          "timeout_ms": {
+            "default": 10000,
+            "maximum": 120000,
+            "minimum": 50,
+            "title": "Timeout Ms",
+            "type": "integer"
+          },
+          "state": {
+            "default": "visible",
+            "enum": [
+              "visible",
+              "attached",
+              "hidden",
+              "detached"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "title": "WaitElement",
+        "type": "object"
+      }
+    },
+    {
+      "type": "Browser.WaitURL",
+      "action_version": 1,
+      "label": "Ждать переход",
+      "parameters": {
+        "$defs": {
+          "SecretRef": {
+            "additionalProperties": false,
+            "properties": {
+              "secret_ref": {
+                "maxLength": 200,
+                "minLength": 1,
+                "title": "Secret Ref",
+                "type": "string"
+              }
+            },
+            "required": [
+              "secret_ref"
+            ],
+            "title": "SecretRef",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/SecretRef"
+              }
+            ],
+            "default": "https://example.org/**",
+            "title": "Url"
+          },
+          "timeout_ms": {
+            "default": 10000,
+            "maximum": 120000,
+            "minimum": 50,
+            "title": "Timeout Ms",
+            "type": "integer"
+          }
+        },
+        "title": "WaitURL",
+        "type": "object"
+      }
+    },
+    {
+      "type": "Logic.If",
+      "action_version": 1,
+      "label": "Условие If",
+      "parameters": {
+        "$defs": {
+          "SecretRef": {
+            "additionalProperties": false,
+            "properties": {
+              "secret_ref": {
+                "maxLength": 200,
+                "minLength": 1,
+                "title": "Secret Ref",
+                "type": "string"
+              }
+            },
+            "required": [
+              "secret_ref"
+            ],
+            "title": "SecretRef",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "selector": {
+            "default": "body",
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Selector",
+            "type": "string"
+          },
+          "frame": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Frame",
+            "type": "array"
+          },
+          "timeout_ms": {
+            "default": 10000,
+            "maximum": 120000,
+            "minimum": 50,
+            "title": "Timeout Ms",
+            "type": "integer"
+          },
+          "condition": {
+            "default": "exists",
+            "enum": [
+              "exists",
+              "not_exists",
+              "text_contains",
+              "url_contains",
+              "equals"
+            ],
+            "title": "Condition",
+            "type": "string"
+          },
+          "expected": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/SecretRef"
+              }
+            ],
+            "default": "",
+            "title": "Expected"
+          },
+          "left": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/SecretRef"
+              }
+            ],
+            "default": "",
+            "title": "Left"
+          }
+        },
+        "title": "If",
+        "type": "object"
+      }
+    }
+  ]
+}
