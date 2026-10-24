@@ -9,7 +9,7 @@ import zipfile
 from pydantic import Field, model_validator
 from .actions import Action
 from .action_fields import properties
-from .data_actions import bounded, key
+from .data_actions import bounded, key, load_json
 from .model import DataModel, GraphError
 from .resources import MAX_DATA
 
@@ -192,7 +192,7 @@ async def csv_action(ctx, p, operation):
                 for row in value["rows"]:
                     for i, cell in enumerate(row):
                         try:
-                            row[i] = bounded(json.loads(cell))
+                            row[i] = load_json(cell)
                         except (ValueError, GraphError):
                             pass
         else:
@@ -291,11 +291,11 @@ async def excel_action(ctx, p, operation):
                 if name not in book.sheetnames:
                     raise GraphError("XLSX_INVALID")
                 sheet = book[name]
-                if sheet.max_row > 10001 or sheet.max_column > 256:
+                if (sheet.max_row or 0) > 10001 or (sheet.max_column or 0) > 256:
                     raise GraphError("DATA_LIMIT")
                 rows = []
                 for row in sheet.iter_rows(values_only=True):
-                    if len(rows) >= 10001:
+                    if len(rows) >= 10001 or len(row) > 256:
                         raise GraphError("DATA_LIMIT")
                     # Excel dates are explicit ISO strings; JSON has no datetime type.
                     rows.append([v.isoformat() if hasattr(v, "isoformat") else v for v in row])

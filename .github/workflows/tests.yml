@@ -211,12 +211,15 @@ jobs:
         run: uv run --no-sync python scripts/check_maker.py --output .poster/maker-headless
       - name: Stage2 variables loops breakpoints inspector and fresh-process replay
         run: uv run --no-sync python scripts/check_maker_stage2.py --output .poster/maker-stage2
+      - name: Stage3B2 four committed examples without GUI or browser imports
+        run: uv run --no-sync python scripts/check_maker_stage3b2.py --output .poster/maker-stage3b2
       - uses: actions/upload-artifact@v4
         with:
           name: maker-headless-report
           path: |
             .poster/maker-headless/report.json
             .poster/maker-stage2/report.json
+            .poster/maker-stage3b2/report.json
           include-hidden-files: true
           if-no-files-found: error
   embedded-prototype:
@@ -337,6 +340,17 @@ jobs:
         env:
           EXPECTED_POSTER_COMMIT: '${{ github.sha }}'
           PYTHONUTF8: '1'
+      - name: Stage3B2 data HTTP files and nested projects through native Windows input
+        run: python scripts/check_data_windows_gui.py --exe 'Maker Проверка с пробелами/Poster.exe' --output .poster/maker-data-gui
+        env:
+          EXPECTED_POSTER_COMMIT: '${{ github.sha }}'
+          PYTHONUTF8: '1'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: maker-windows-data-graph
+          path: .poster/maker-data-gui/windows-data.postergraph.json
+          include-hidden-files: true
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
           name: maker-windows-graph
@@ -350,6 +364,8 @@ jobs:
           path: |
             .poster/maker-qt-gui/report.json
             .poster/maker-qt-gui/*.png
+            .poster/maker-data-gui/report.json
+            .poster/maker-data-gui/*.png
           include-hidden-files: true
           if-no-files-found: error
 
@@ -370,9 +386,17 @@ jobs:
           path: windows-graph
       - name: Execute the exact graph saved by frozen Windows Maker without Qt or Tk
         run: uv run --no-sync python scripts/check_windows_graph_linux.py windows-graph/windows-maker-demo.postergraph.json --output .poster/windows-graph-linux
+      - uses: actions/download-artifact@v4
+        with:
+          name: maker-windows-data-graph
+          path: windows-data
+      - name: Execute exact Windows data graph without GUI or browser imports
+        run: uv run --no-sync python scripts/check_maker_stage3b2.py --windows-graph windows-data/windows-data.postergraph.json --output .poster/windows-data-linux
       - uses: actions/upload-artifact@v4
         with:
           name: windows-graph-linux-report
-          path: .poster/windows-graph-linux/report.json
+          path: |
+            .poster/windows-graph-linux/report.json
+            .poster/windows-data-linux/report.json
           include-hidden-files: true
           if-no-files-found: error

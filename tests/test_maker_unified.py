@@ -74,7 +74,7 @@ def scenario(root):
 
     from PySide6.QtCore import Qt
     from PySide6.QtTest import QTest
-    from PySide6.QtWidgets import QApplication, QLineEdit, QMessageBox
+    from PySide6.QtWidgets import QApplication, QLineEdit, QMessageBox, QInputDialog
 
     from poster.maker.qt_app import MakerWindow
     from poster.maker.qt_browser import configure_browser
@@ -260,6 +260,31 @@ raise SystemExit(main(sys.argv[1:]))
         )
         assert process.returncode == 0, process.stderr + process.stdout
         assert json.loads(process.stdout)["status"] == "SUCCEEDED"
+        from poster.maker.example_projects import EXAMPLES
+
+        QInputDialog.getText = lambda *args, **kwargs: (kwargs.get("text", ""), True)
+        for label, filename in EXAMPLES:
+            old = window.controller.runner
+            QInputDialog.getItem = lambda *args, label=label, **kwargs: (label, True)
+            action("data_examples")
+            wait(
+                lambda filename=filename: window.path and window.path.name == filename and not window.busy,
+                "load " + label,
+            )
+            if old and old.context.http:
+                assert old.context.http.client.is_closed
+            action("run")
+            wait(lambda: window.run_state == "SUCCEEDED" and not window.busy, "run " + label)
+            assert window.controller.runner.context.session.page is None
+            if filename.startswith("02"):
+                window.canvas.choose(["n4"])
+                assert window.result_table.rowCount() == 3
+            elif filename.startswith("03"):
+                window.canvas.choose(["n3"])
+                assert window.result_table.rowCount() == 2 and window.result_table.columnCount() == 2
+            elif filename.startswith("04"):
+                assert window.live_values["result"] == "POSTER Ж"
+            action("save")
         print("UNIFIED_NATIVE_SCENARIO_PASSED", flush=True)
     finally:
         window.document.dirty = False

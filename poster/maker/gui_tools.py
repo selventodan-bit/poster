@@ -2,7 +2,7 @@
 
 import json
 import tkinter as tk
-from tkinter import messagebox, simpledialog, ttk
+from tkinter import messagebox, simpledialog, ttk, filedialog
 from urllib.parse import urlsplit
 
 from .inspector import Inspector
@@ -150,6 +150,22 @@ class ToolsMixin:
                 bind_scroll(child)
 
         bind_scroll(self.browser_canvas)
+        project = ttk.Frame(notebook, padding=3)
+        notebook.add(project, text="Проект")
+        self.workdir = tk.StringVar()
+        ttk.Label(
+            project, text="Рабочий каталог файлов (пусто = отдельный каталог проекта)", wraplength=250
+        ).pack(anchor="w")
+        workdir = ttk.Entry(project, textvariable=self.workdir)
+        workdir.pack(fill="x")
+        self._enable_clipboard(workdir)
+
+        def choose():
+            path = filedialog.askdirectory(parent=self.root, title="Рабочий каталог")
+            if path:
+                self.workdir.set(path)
+
+        self.button(project, "workdir", "Выбрать каталог…", choose)
 
     def add_output_properties(self, node):
         ttk.Label(self.prop_frame, text="Результат → переменная (необязательно)").pack(anchor="w")
@@ -321,6 +337,8 @@ class ToolsMixin:
         graph = self.document.graph.model_copy(deep=True)
         session = self.browser_session() or self.new_browser_session()
         messages, epoch = self.messages, self.epoch
+        workdir = self.workdir.get() or str(self.workspace.root / "maker-data" / self.document.graph.id)
+        project_path = self.path
 
         async def work():
             nonlocal runner
@@ -332,6 +350,8 @@ class ToolsMixin:
                     vault=self.vault,
                     headless=False,
                     inputs=inputs,
+                    workdir=workdir,
+                    project_path=project_path,
                     on_event=lambda event: messages.put((epoch, "event", event)),
                 )
                 if session:

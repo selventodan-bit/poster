@@ -15,6 +15,8 @@ from .actions import Action, Empty
 from .action_fields import properties
 from .model import DataModel, GraphError, secret_refs
 from .resources import MAX_DATA, MAX_FILE
+from .navigation import sensitive_url
+from .data_actions import load_json
 
 SENSITIVE = re.compile(r"authorization|cookie|pass|secret|token|api.?key|session", re.I)
 
@@ -51,13 +53,13 @@ class Request(DataModel):
 
 
 class Header(DataModel):
-    name: str = "User-Agent"
-    value: str = "Poster/3"
+    name: str = Field(default="User-Agent", min_length=1, max_length=200)
+    value: str = Field(default="Poster/3", max_length=8192)
 
 
 class Cookie(DataModel):
-    name: str = "session"
-    value: str = ""
+    name: str = Field(default="session", min_length=1, max_length=256)
+    value: str = Field(default="", max_length=4096)
     url: str = "https://example.org/"
     path: str = "/"
     secure: bool = True
@@ -96,9 +98,13 @@ def session(ctx):
 
 
 def protect_values(vault, value):
+    if isinstance(value, str) and value.startswith(("http://", "https://")) and sensitive_url(value):
+        return vault.put_value(value)
     if isinstance(value, dict):
         return {
-            k: vault.put_value(v) if SENSITIVE.search(k) else protect_values(vault, v)
+            k: vault.put_value(v)
+            if SENSITIVE.search(k) and v not in (None, "", {}, [])
+            else protect_values(vault, v)
             for k, v in value.items()
         }
     if isinstance(value, list):
@@ -121,12 +127,19 @@ def protect_graph(graph, vault):
     from .variables import has_reference
 
     def fields(value):
+        if isinstance(value, str) and value.startswith(("http://", "https://")) and not has_reference(value):
+            parsed = urlsplit(value)
+            if sensitive_url(value) or parsed.username or parsed.password:
+                return vault.put_value(value)
         if isinstance(value, dict):
             if set(value) == {"secret_ref"}:
                 return value
             return {
                 k: vault.put_value(v)
-                if SENSITIVE.search(k) and not secret_refs(v) and not has_reference(v)
+                if SENSITIVE.search(k)
+                and v not in (None, "", {}, [])
+                and not secret_refs(v)
+                and not has_reference(v)
                 else fields(v)
                 for k, v in value.items()
             }
@@ -153,12 +166,17 @@ async def request(ctx, p, method=None, download=False):
     if download and not p.download_path:
         raise GraphError("FILE_PATH_INVALID")
     headers = {**state.headers, **p.headers}
+    if len(headers) > 100 or sum(len(k) + len(v) for k, v in headers.items()) > 65536:
+        raise GraphError("HTTP_RESPONSE_LIMIT")
     sensitive = (
         ctx.sensitive_action
         or state.tainted
         or any(SENSITIVE.search(k) for k in headers)
         or bool(p.cookies)
+        or bool(state.client.cookies.jar)
         or has_sensitive(p.body)
+        or has_sensitive(p.query)
+        or sensitive_url(p.url)
     )
     kwargs = {"params": p.query}
     if p.cookies:
@@ -200,6 +218,12 @@ async def request(ctx, p, method=None, download=False):
                 ) as r:
                     raw = await bounded_body(r, p.max_response_bytes)
                     status, response_headers = r.status_code, dict(r.headers)
+                    if (
+                        sum(len(k) + len(v) for k, v in response_headers.items()) > 65536
+                        or len(state.client.cookies.jar) > 1000
+                    ):
+                        state.client.cookies.clear()
+                        raise GraphError("HTTP_RESPONSE_LIMIT")
                     encoding = r.encoding or "utf-8"
                     cookies = {c.name: ctx.vault.put_value(c.value) for c in r.cookies.jar}
                 if 300 <= status < 400 and "location" in response_headers and p.follow_redirects:
@@ -251,8 +275,13 @@ async def request(ctx, p, method=None, download=False):
                 p.response_type == "auto" and "json" in response_headers.get("content-type", "")
             )
             if is_json and raw and method != "HEAD":
-                result["json"] = protect(ctx, json.loads(result["text"]))
-        except (ValueError, LookupError, UnicodeError) as exc:
+                result["json"] = protect(ctx, load_json(result["text"]))
+            elif raw and "json" in response_headers.get("content-type", "") and method != "HEAD":
+                try:
+                    ctx.sensitive_action |= has_sensitive(json.loads(result["text"]))
+                except ValueError:
+                    pass  # text mode does not require valid JSON
+        except (ValueError, LookupError, UnicodeError, RecursionError) as exc:
             raise GraphError("HTTP_DECODE") from exc
     ctx.sensitive_action |= bool(secret_refs(result))
     return "success", result
@@ -263,6 +292,9 @@ async def set_header(ctx, p):
         raise GraphError("PARAMETERS_INVALID")
     state = session(ctx)
     state.headers[p.name] = p.value
+    if len(state.headers) > 100 or sum(len(k) + len(v) for k, v in state.headers.items()) > 65536:
+        state.headers.pop(p.name, None)
+        raise GraphError("DATA_LIMIT")
     state.tainted |= ctx.sensitive_action or bool(SENSITIVE.search(p.name))
     return "success", {"updated": True}
 
@@ -294,6 +326,9 @@ async def set_cookie(ctx, p):
         )
     )
     state.tainted = True
+    if len(state.client.cookies.jar) > 1000:
+        state.client.cookies.clear()
+        raise GraphError("DATA_LIMIT")
     return "success", {"updated": True}
 
 
@@ -320,7 +355,11 @@ def register_http_actions(registry):
                 "HTTP · " + label,
                 model,
                 execute,
-                properties(model, paths=("download_path",), secrets=("headers", "cookies", "body", "value")),
+                properties(
+                    model,
+                    paths=("download_path",),
+                    secrets=("url", "query", "headers", "cookies", "body", "value"),
+                ),
                 reveal_parameters=True,
             )
         )

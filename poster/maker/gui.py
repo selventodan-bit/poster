@@ -84,7 +84,9 @@ class MakerPanel(BrowserToolsMixin, ToolsMixin, ClipboardMixin):
         self.project_name.trace_add("write", self.name_changed)
         self.refresh_saved()
         try:
-            previous = json.loads(self.settings.read_text(encoding="utf-8")).get("last_project")
+            settings = json.loads(self.settings.read_text(encoding="utf-8"))
+            self.workdir.set(settings.get("workdir", ""))
+            previous = settings.get("last_project")
             if isinstance(previous, str) and Path(previous).is_file():
                 self.load(Path(previous))
         except (OSError, ValueError):
@@ -287,7 +289,9 @@ class MakerPanel(BrowserToolsMixin, ToolsMixin, ClipboardMixin):
             value = node.params.get(prop.name, defaults.get(prop.name, ""))
             protected = isinstance(value, dict) and set(value) == {"secret_ref"}
             shown = (
-                show_value(value)
+                "@secret:" + value["secret_ref"]
+                if protected
+                else show_value(value)
                 if prop.kind in {"json", "value"}
                 else (
                     "@secret:" + value["secret_ref"]
@@ -351,7 +355,9 @@ class MakerPanel(BrowserToolsMixin, ToolsMixin, ClipboardMixin):
                     if text.startswith("@secret:"):
                         values[name] = {"secret_ref": text.removeprefix("@secret:")}
                     else:
-                        values[name] = self.vault.put(text)
+                        values[name] = self.vault.put_value(
+                            parse_value(text) if prop.kind in {"value", "json"} else text
+                        )
                 elif text.startswith("@secret:"):
                     raise GraphError("PASSWORD_REF_REQUIRED")
                 elif prop.kind in {"integer", "optional_integer"}:
@@ -785,7 +791,7 @@ class MakerPanel(BrowserToolsMixin, ToolsMixin, ClipboardMixin):
                 return
             if not messagebox.askyesno(
                 "Выполнение графа",
-                "Выполнить действия графа в браузере? Клики могут отправлять формы и изменять данные на сайте.",
+                "Выполнить граф? Кубики могут обращаться к сети, отправлять формы и изменять файлы.",
                 parent=self.frame.winfo_toplevel(),
             ):
                 return
@@ -801,6 +807,8 @@ class MakerPanel(BrowserToolsMixin, ToolsMixin, ClipboardMixin):
         epoch = self.epoch
 
         session = self.new_browser_session() if fresh else None
+        workdir = self.workdir.get() or str(self.workspace.root / "maker-data" / self.document.graph.id)
+        project_path = self.path
 
         async def work():
             if fresh:
@@ -819,6 +827,8 @@ class MakerPanel(BrowserToolsMixin, ToolsMixin, ClipboardMixin):
                     headless=False,
                     on_event=lambda event: messages.put((epoch, "event", event)),
                     inputs=inputs,
+                    workdir=workdir,
+                    project_path=project_path,
                 )
                 self.runner.context.session = session
             if step:
@@ -881,7 +891,9 @@ class MakerPanel(BrowserToolsMixin, ToolsMixin, ClipboardMixin):
             self.document.graph = saved
             self.document.dirty = False
             self.path = path
-            self.settings.write_text(json.dumps({"last_project": str(path)}), encoding="utf-8")
+            self.settings.write_text(
+                json.dumps({"last_project": str(path), "workdir": self.workdir.get()}), encoding="utf-8"
+            )
             self.refresh_saved()
             self.status.set(
                 "Граф сохранён. Зашифрованные секреты храните рядом с JSON; ключ остаётся в .poster/private."

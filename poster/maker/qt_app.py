@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QToolBar,
     QVBoxLayout,
     QWidget,
+    QComboBox,
 )
 
 from ..auth import ensure_local_key
@@ -66,6 +67,7 @@ class MakerWindow(QMainWindow, ToolsMixin):
         self.registry = default_registry()
         self.document, self.vault = Document(), Vault()
         self.path = None
+        self.workdirs = {}
         self.busy = self.recording = self.closing = False
         self.close_ready = False
         self.run_state = self.current_node = self.pause_reason = None
@@ -106,6 +108,26 @@ class MakerWindow(QMainWindow, ToolsMixin):
         self.build_toolbar()
         library = QWidget()
         form = QVBoxLayout(library)
+        self.action_category = QComboBox()
+        self.action_category.setObjectName("action_category")
+        for title, prefixes in [
+            ("Все", ""),
+            ("HTTP", "HTTP."),
+            ("JSON", "JSON."),
+            ("Списки", "Lists."),
+            ("Таблицы", ("Tables.", "CSV.", "Excel.")),
+            ("Файлы", "Files."),
+            ("Проекты", "Project."),
+            ("Браузер", "Browser."),
+            ("Переменные", "Variables."),
+            ("Логика", ("Logic.", "Start", "End")),
+            ("Строки", "Strings."),
+        ]:
+            self.action_category.addItem(title, prefixes)
+        self.action_category.currentIndexChanged.connect(
+            lambda: self.filter_actions(self.action_search.text())
+        )
+        form.addWidget(self.action_category)
         self.action_search = QLineEdit()
         self.action_search.setObjectName("action_search")
         self.action_search.setPlaceholderText("Быстро добавить действие…")
@@ -212,6 +234,7 @@ class MakerWindow(QMainWindow, ToolsMixin):
                 ("save_as", "Сохранить как…", lambda: self.save(True), "Ctrl+Shift+S"),
                 ("demo", "Демо-сайт", self.demo, ""),
                 ("example", "Пример с циклом", self.example, ""),
+                ("data_examples", "Примеры 3B.2…", self.data_examples, ""),
             ],
         )
         self.addToolBarBreak()
@@ -263,6 +286,11 @@ class MakerWindow(QMainWindow, ToolsMixin):
     def update_controls(self):
         if not hasattr(self, "controls"):
             return
+        if hasattr(self, "execution_workdir"):
+            self.execution_workdir.setReadOnly(not self.editable())
+            self.project_outputs.setReadOnly(not self.editable())
+            self.controls["choose_workdir"].setEnabled(self.editable())
+            self.controls["data_examples"].setEnabled(self.editable())
         for key in (
             "new",
             "open",
@@ -311,6 +339,7 @@ class MakerWindow(QMainWindow, ToolsMixin):
     def replace(self, graph, *, vault=None, dirty=False):
         if graph.id != self.document.graph.id:
             self.live_values = {}
+            self.trace = []
         self.document = Document(graph)
         self.document.dirty = dirty
         if vault is not None:
@@ -320,6 +349,10 @@ class MakerWindow(QMainWindow, ToolsMixin):
         self.selected_id = None
         self.show_properties(None)
         self.project_name.setText(graph.name)
+        self.execution_workdir.setText(
+            self.workdirs.get(graph.id) or str(self.workspace.root / "maker-data" / graph.id)
+        )
+        self.project_outputs.setText(", ".join(graph.extensions.get("outputs", [])))
         self.refresh_variables()
         self.refresh_profiles()
         self.update_controls()
@@ -332,11 +365,12 @@ class MakerWindow(QMainWindow, ToolsMixin):
             item = self.action_list.item(row)
             item.setHidden(
                 text.casefold() not in (item.text() + " " + item.data(Qt.ItemDataRole.UserRole)).casefold()
+                or not item.data(Qt.ItemDataRole.UserRole).startswith(self.action_category.currentData())
             )
 
     def add_selected_action(self):
         item = self.action_list.currentItem()
-        if item:
+        if item and not item.isHidden():
             self.add_action(item.data(Qt.ItemDataRole.UserRole))
         else:
             for row in range(self.action_list.count()):
@@ -475,16 +509,19 @@ class MakerWindow(QMainWindow, ToolsMixin):
             and QMessageBox.question(
                 self,
                 "Выполнение графа",
-                "Выполнить проект? Действия могут отправлять формы на открытом сайте.",
+                "Выполнить проект? Кубики могут обращаться к сети, отправлять формы и изменять файлы.",
             )
             != QMessageBox.StandardButton.Yes
         ):
             return
         graph, vault, profile = self.document.graph.model_copy(deep=True), self.vault, self.profile()
+        workdir, project_path = self.execution_workdir.text(), self.path
 
         async def work():
             await self.ensure_demo(graph)
-            await self.controller.execute(graph, vault, profile, step=step, inputs=inputs)
+            await self.controller.execute(
+                graph, vault, profile, step=step, inputs=inputs, workdir=workdir, project_path=project_path
+            )
 
         self.run_state = "RUNNING"
         self.submit(work(), "step" if step else "run")
@@ -507,6 +544,8 @@ class MakerWindow(QMainWindow, ToolsMixin):
                 self.vault,
                 self.profile(),
                 selected=self.selected_id,
+                workdir=self.execution_workdir.text(),
+                project_path=self.path,
             ),
             "selected",
         )
@@ -564,6 +603,7 @@ class MakerWindow(QMainWindow, ToolsMixin):
         self.canvas.document = self.document
         self.path = path
         self.document.dirty = False
+        self.show_properties(self.selected_id)
         self.status_label.setText("Проект сохранён: " + str(path.name))
         self.save_settings()
 
@@ -598,7 +638,12 @@ class MakerWindow(QMainWindow, ToolsMixin):
 
     def handle(self, packet):
         kind, data = packet
-        if kind == "graph":
+        if kind == "data_example":
+            graph, vault, path = data
+            self.replace(graph, vault=vault, dirty=True)
+            self.path = path
+            self.canvas.fit()
+        elif kind == "graph":
             self.replace(Graph.model_validate(data), dirty=True)
         elif kind == "recording":
             self.recording = data
@@ -626,6 +671,7 @@ class MakerWindow(QMainWindow, ToolsMixin):
             elif event == "result":
                 result = data["result"]
                 self.trace.append(result)
+                self.preview_value(result["value"])
                 self.canvas.follow(result["node_id"], result["status"])
                 self.log.appendPlainText(
                     result["action"]
@@ -700,6 +746,7 @@ class MakerWindow(QMainWindow, ToolsMixin):
 
     def save_settings(self):
         data = {
+            "workdirs": {**self.workdirs, self.document.graph.id: self.execution_workdir.text()},
             "geometry": bytes(self.saveGeometry()).hex(),
             "layout": bytes(self.saveState()).hex(),
             "splitter": bytes(self.splitter.saveState()).hex(),
@@ -710,6 +757,7 @@ class MakerWindow(QMainWindow, ToolsMixin):
     def restore_settings(self):
         try:
             data = json.loads(self.settings.read_text())
+            self.workdirs = data.get("workdirs", {})
             if data.get("last_project"):
                 graph, vault = load_graph(data["last_project"])
                 self.replace(graph, vault=vault)
@@ -761,7 +809,16 @@ class MakerWindow(QMainWindow, ToolsMixin):
                     point = button.mapToGlobal(button.rect().center())
                     role = widget.buttonRole(button).name if isinstance(widget, QMessageBox) else None
                     buttons.append({"text": button.text(), "role": role, "point": point.toTuple()})
-            result.append({"title": widget.windowTitle(), "buttons": buttons})
+            combos = []
+            for combo in widget.findChildren(QComboBox):
+                if combo.isVisible():
+                    combos.append(
+                        {
+                            "point": combo.mapToGlobal(combo.rect().center()).toTuple(),
+                            "items": [combo.itemText(i) for i in range(combo.count())],
+                        }
+                    )
+            result.append({"title": widget.windowTitle(), "buttons": buttons, "combos": combos})
         return result
 
     def observe(self):
@@ -825,6 +882,12 @@ class MakerWindow(QMainWindow, ToolsMixin):
                 "current_node": self.current_node,
                 "values": self.live_values,
                 "trace": self.trace,
+                "workdir": self.execution_workdir.text(),
+                "runner_browser_started": bool(
+                    self.controller.runner and self.controller.runner.context.session.page
+                ),
+                "preview_rows": self.result_table.rowCount(),
+                "preview_columns": self.result_table.columnCount(),
                 "browser": {**self.browser.state(), **self.observation_browser},
                 "browser_frame": self.probe_serial,
                 "status": self.status_label.text(),
@@ -851,6 +914,7 @@ class MakerWindow(QMainWindow, ToolsMixin):
                 ],
                 "demo_base": self.demo_base,
                 "demo_posts": self.demo_server.posts if self.demo_server else {},
+                "demo_api_posts": self.demo_server.api_posts if self.demo_server else 0,
                 "legacy": self.legacy.observation(),
             }
             atomic(Path(target), json.dumps(state, ensure_ascii=False).encode("utf-8"))

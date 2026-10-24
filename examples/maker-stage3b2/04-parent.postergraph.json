@@ -1,0 +1,144 @@
+{
+  "format": "poster.maker.graph",
+  "schema_version": 2,
+  "id": "34220132b1f841a49d64f72bf9b0a18f",
+  "name": "Подпроект",
+  "entry": "start",
+  "nodes": [
+    {
+      "id": "start",
+      "type": "Start",
+      "action_version": 1,
+      "title": "",
+      "x": 40.0,
+      "y": 40.0,
+      "params": {},
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    },
+    {
+      "id": "n0",
+      "type": "Project.Run",
+      "action_version": 1,
+      "title": "",
+      "x": 290.0,
+      "y": 40.0,
+      "params": {
+        "path": "child.postergraph.json",
+        "inputs": {
+          "argument": "Poster Ж"
+        }
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": "child",
+      "result_path": "outputs",
+      "protect_result": false
+    },
+    {
+      "id": "n1",
+      "type": "JSON.Get",
+      "action_version": 1,
+      "title": "",
+      "x": 540.0,
+      "y": 40.0,
+      "params": {
+        "value": "{{child}}",
+        "path": "/result"
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": "result",
+      "result_path": "value",
+      "protect_result": false
+    },
+    {
+      "id": "n2",
+      "type": "Files.WriteText",
+      "action_version": 1,
+      "title": "",
+      "x": 790.0,
+      "y": 40.0,
+      "params": {
+        "path": "nested/result.txt",
+        "text": "{{result}}",
+        "overwrite": true
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    },
+    {
+      "id": "n3",
+      "type": "Variables.Compare",
+      "action_version": 1,
+      "title": "",
+      "x": 40.0,
+      "y": 180.0,
+      "params": {
+        "left": "{{result}}",
+        "right": "POSTER Ж"
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    },
+    {
+      "id": "end",
+      "type": "End.Success",
+      "action_version": 1,
+      "title": "",
+      "x": 800.0,
+      "y": 500.0,
+      "params": {},
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    }
+  ],
+  "edges": [
+    {
+      "source": "start",
+      "port": "success",
+      "target": "n0"
+    },
+    {
+      "source": "n0",
+      "port": "success",
+      "target": "n1"
+    },
+    {
+      "source": "n1",
+      "port": "success",
+      "target": "n2"
+    },
+    {
+      "source": "n2",
+      "port": "success",
+      "target": "n3"
+    },
+    {
+      "source": "n3",
+      "port": "success",
+      "target": "end"
+    }
+  ],
+  "view": {
+    "zoom": 1.0
+  },
+  "max_steps": 500,
+  "metadata": {},
+  "extensions": {},
+  "secret_file": null,
+  "secret_sha256": null,
+  "variables": {}
+}

@@ -126,3 +126,48 @@ HTTP cookie jar не разделяются. Защищённые входы/в�
 Подпроекты исполняются batch без интерактивных дочерних breakpoint; breakpoint
 на Project.Run остаётся доступен. Browser.* и браузерный Logic.If внутри ребёнка
 отклоняются: контракт совместной живой браузерной сессии здесь не вводится.
+
+## Maker и примеры
+
+В Full: категории и поиск, русские формы Registry/Pydantic, JSON-редакторы, выбор
+метода/body, файлов и столбцов. «Проект» выбирает host workdir и объявляет выходы;
+«Результат» показывает безопасный JSON, списки и таблицы (200×50 preview).
+«Примеры 3B.2…» копирует четыре настоящих графа и child в пользовательский каталог,
+не перезаписывая изменённые примеры. HTTP-пример сам запускает loopback API, api_base
+уже заполнен. При сохранении Maker сохранит его порт и сможет запустить снова.
+Lite открывает те же графы, использует тот же Registry/Runner, поддерживает workdir.
+
+[HTTP + JSON](../examples/maker-stage3b2/01-http-json.postergraph.json),
+[список + цикл](../examples/maker-stage3b2/02-lists-loop.postergraph.json),
+[CSV / Excel](../examples/maker-stage3b2/03-csv-excel.postergraph.json),
+[родитель](../examples/maker-stage3b2/04-parent.postergraph.json),
+[ребёнок](../examples/maker-stage3b2/child.postergraph.json).
+
+Независимая проверка: `python scripts/check_maker_stage3b2.py --output .poster/data-check`.
+Каждый граф идёт в новый CLI-процесс с запретом импорта tkinter, PySide6 и playwright.
+Пример CLI: `python -m poster maker-run examples/maker-stage3b2/02-lists-loop.postergraph.json --workdir ./run-data`.
+Для HTTP standalone нужен доступный API из этого контракта и --input api_base=URL;
+проверочный скрипт сам владеет контролируемым сервером. Примеры 2–4 сервер не требуют.
+
+Количество: 29 → 78, добавлены 49 действий: HTTP (7), JSON (6), Lists (11), Files (9),
+Tables (10), CSV (2), Excel (3), Project (1). Список операций определяется Registry,
+все параметры представлены в UI, обработчики одни для Maker и CLI.
+
+## Дополнительные границы
+
+Новые GraphRunner-запуски имеют независимые variables/cookies/default workdir.
+Вложенные графы наследуют workdir осознанно, но не переменные/cookies. Выбранный
+один и тот же каталог между параллельными независимыми запусками — явное разделение
+файлов; для изоляции выбирайте отдельные каталоги (по умолчанию они отдельные).
+Нет синхронизации HTTP jar с browser storage. Full GUI сам использует Qt WebEngine;
+утверждение «без браузера» относится к исполнению графа: browser session не стартует.
+Независимый Runner действительно не импортирует Playwright и не создаёт его процессов.
+
+Объект точной формы {"secret_ref":...} зарезервирован существующим протоколом v2;
+JSON.Parse и внешние HTTP JSON-ответы отклоняют такую форму вместо принятия её за
+право читать Vault. JSON с NaN/Infinity не принимается. Ключи и профили не экспортируются.
+Заголовки ограничены 64 KB/100 именами, cookies — 1000; Vault — 24 MB шифротекста.
+
+Следующий этап: отдельный контракт browser/HTTP cookies и browser-подпроектов,
+постраничный просмотр больших данных и улучшение диагностики. Новый Dispatcher,
+Molab, планировщик и произвольные Python-плагины здесь не добавляются.

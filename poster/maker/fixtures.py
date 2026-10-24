@@ -2,6 +2,7 @@
 
 from contextlib import contextmanager
 import html
+import json
 from http.cookies import SimpleCookie
 import secrets
 import threading
@@ -15,7 +16,16 @@ DEMO_PASSWORD = "demo-password-Ж42"
 class MakerHandler(Handler):
     def do_GET(self):
         path = urlsplit(self.path).path
-        if path == "/":
+        if path == "/api/data":
+            raw = json.dumps(
+                {"items": [{"name": "alpha", "value": 3}, {"name": "beta", "value": 5}], "ok": True}
+            ).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+        elif path == "/":
             self.reply(
                 200,
                 """<!doctype html><meta charset="utf-8"><title>ProjectMaker demo</title>
@@ -93,7 +103,18 @@ class MakerHandler(Handler):
         raw = self.rfile.read(min(int(self.headers.get("Content-Length", "0")), 200000))
         values = parse_qs(raw.decode("utf-8"), keep_blank_values=True)
         path = urlsplit(self.path).path
-        if path == "/save":
+        if path == "/api/data":
+            try:
+                body = json.loads(raw)
+            except ValueError:
+                self.reply(400, "Invalid JSON")
+                return
+            if not isinstance(body, dict) or not isinstance(body.get("flag"), bool):
+                self.reply(400, "Expected boolean flag")
+                return
+            self.server.api_posts += 1
+            self.reply(200, "OK")
+        elif path == "/save":
             identity = str(len(self.server.posts) + 1)
             self.server.posts[identity] = {
                 "note": values.get("note", [""])[0],
@@ -127,6 +148,7 @@ def serve_maker(port=0):
     server.authorized = set()
     server.login_count = 0
     server.login_attempts = []
+    server.api_posts = 0
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:

@@ -13,8 +13,9 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
-from .model import GraphError, Node, Variable
+from .model import GraphError, Node, Variable, secret_refs
 from .variables import draft_parameters
+from .qt_data import DataToolsMixin
 
 
 def parse(text):
@@ -30,7 +31,7 @@ def display(value):
     return value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
 
 
-class ToolsMixin:
+class ToolsMixin(DataToolsMixin):
     def build_tools(self):
         self.tools_tabs = QTabWidget()
         self.tools_tabs.setObjectName("tools_tabs")
@@ -151,6 +152,7 @@ class ToolsMixin:
         form.addStretch()
         self.tools_tabs.addTab(profiles, "Профили")
         self.refresh_profiles()
+        self.build_data_tools()
         return self.tools_tabs
 
     def show_properties(self, node_id):
@@ -164,6 +166,8 @@ class ToolsMixin:
         if node_id:
             node = self.document.graph.node(node_id)
             spec = self.registry.get(node.type, node.action_version)
+            previous = next((r["value"] for r in reversed(self.trace) if r["node_id"] == node.id), {})
+            self.preview_value(previous)
             form.addRow(QLabel(node.type))
             self.node_title = QLineEdit(node.title)
             self.node_title.setObjectName("node_title")
@@ -175,15 +179,25 @@ class ToolsMixin:
                     value = field.get_default(call_default_factory=True)
                     if type(value).__name__ == "PydanticUndefinedType":
                         value = ""
-                secret = isinstance(value, dict) and set(value) == {"secret_ref"}
+                secret = bool(secret_refs(value)) and prop.secret
                 if prop.kind in {"bool", "boolean"}:
                     widget = QCheckBox()
                     widget.setChecked(bool(value))
+                elif prop.name == "column":
+                    widget = QComboBox()
+                    widget.setEditable(True)
+                    table = node.params.get("table", {})
+                    if isinstance(table, str) and table.startswith("{{") and table.endswith("}}"):
+                        table = self.live_values.get(table[2:-2].strip(), {})
+                    if isinstance(table, dict):
+                        widget.addItems(table.get("columns", []))
+                    widget.setCurrentText(str(value))
                 elif prop.choices:
                     widget = QComboBox()
-                    widget.addItems([str(x) for x in prop.choices])
-                    widget.setCurrentText(str(value))
-                elif prop.kind in {"lines", "json", "multiline"}:
+                    for choice in prop.choices:
+                        widget.addItem("Tab (\\t)" if choice == "\t" else str(choice), choice)
+                    widget.setCurrentIndex(max(0, widget.findData(value)))
+                elif prop.kind in {"lines", "json", "multiline", "value"}:
                     widget = QPlainTextEdit(
                         ""
                         if secret
@@ -200,6 +214,7 @@ class ToolsMixin:
                         widget.setEchoMode(QLineEdit.EchoMode.Password)
                         widget.setPlaceholderText("Защищено; пустое поле сохраняет ссылку")
                 widget.setObjectName("prop_" + prop.name)
+                widget.setToolTip(prop.help or prop.label)
                 self.property_widgets[prop.name] = (prop, widget)
                 if prop.secret:
                     protected = QCheckBox("Защитить")
@@ -215,6 +230,17 @@ class ToolsMixin:
                     row = QHBoxLayout()
                     row.addWidget(widget)
                     row.addWidget(protected)
+                    form.addRow(prop.label, row)
+                elif prop.kind == "file":
+                    row = QHBoxLayout()
+                    row.addWidget(widget)
+                    row.addWidget(
+                        self.make_button(
+                            "browse_" + prop.name,
+                            "…",
+                            lambda w=widget, n=node, p=prop: self.choose_property_file(w, n, p),
+                        )
+                    )
                     form.addRow(prop.label, row)
                 else:
                     form.addRow(prop.label, widget)
@@ -241,16 +267,22 @@ class ToolsMixin:
             if isinstance(widget, QCheckBox):
                 value = widget.isChecked()
             elif isinstance(widget, QComboBox):
-                value = widget.currentText()
+                value = (
+                    widget.currentData()
+                    if not widget.isEditable() and widget.currentData() is not None
+                    else widget.currentText()
+                )
             else:
                 value = widget.toPlainText() if isinstance(widget, QPlainTextEdit) else widget.text()
                 previous = node.params.get(name)
-                if isinstance(previous, dict) and set(previous) == {"secret_ref"} and not value:
+                if prop.secret and secret_refs(previous) and not value:
                     continue
                 if prop.kind == "lines":
                     value = [x for x in value.splitlines() if x]
                 elif prop.kind == "json":
                     value = json.loads(value)
+                elif prop.kind == "value":
+                    value = parse(value)
                 elif prop.kind == "integer" and "{{" not in value:
                     value = int(value)
                 if self.secret_fields.get(name) and self.secret_fields[name].isChecked():
@@ -308,6 +340,7 @@ class ToolsMixin:
         self.variable_secret.setChecked(protected)
         self.variable_input.setChecked(bool(definition and definition.input))
         self.variable_required.setChecked(bool(definition and definition.required))
+        self.preview_value(value)
 
     def save_variable(self):
         if not self.editable():

@@ -83,9 +83,24 @@ class MakerController:
             await self.recorder.stop(close=False)
         self.emit("recording", False)
 
-    async def execute(self, graph, vault, profile, *, step=False, selected=None, inputs=None):
+    async def execute(
+        self,
+        graph,
+        vault,
+        profile,
+        *,
+        step=False,
+        selected=None,
+        inputs=None,
+        workdir=None,
+        project_path=None,
+    ):
         runner = self.runner
-        if runner and runner.graph.id == graph.id and runner.state == "PAUSED":
+        if (
+            runner
+            and runner.graph.id == graph.id
+            and (runner.state == "PAUSED" or selected and runner.state in {"SUCCEEDED", "FAILED"})
+        ):
             runner.update_graph(graph)
         else:
             adopted = self.session() if selected else None
@@ -97,6 +112,8 @@ class MakerController:
                 headless=False,
                 inputs=inputs,
                 on_event=lambda data: self.emit("runtime", data),
+                workdir=workdir,
+                project_path=project_path,
             )
             runner.context.session = adopted or self.session_factory(profile)
             self.recorder = self.tools = self.inspector = None

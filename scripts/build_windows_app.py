@@ -56,6 +56,9 @@ def licenses(bundle, embedded):
 
 def package(bundle, output, commit, *, embedded=False):
     output.mkdir(parents=True, exist_ok=True)
+    examples = ROOT / "examples" / "maker-stage3b2"
+    if examples.is_dir():
+        shutil.copytree(examples, bundle / "examples" / "maker-stage3b2", dirs_exist_ok=True)
     info = {"commit": commit, "browser_bundled": embedded}
     if embedded:
         info["browser_provider"] = "qt"

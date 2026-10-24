@@ -1,12 +1,14 @@
-# Poster 3.0 — ProjectMaker, этап 3B.1
+# Poster 3.0 — ProjectMaker, этап 3B.2
 
 **Единый Full Maker:** Qt Widgets + QGraphicsScene + QWebEngineView в одном окне, поиск/undo/redo, профили, конструктор элементов и прежний Python GraphRunner. [Архитектура, проверки и ограничения](docs/PROJECTMAKER_3_STAGE3B1.md).
 
 **Визуальный конструктор с Python Runtime:** запись и продолжение записи, переменные и входы, условия/Switch, циклы/For Each/Break/Continue, breakpoint и правка при паузе, CSS/XPath-конструктор. [Инструкция этапа 2](docs/PROJECTMAKER_3_STAGE2.md) · [Матрица возможностей](docs/ZENNO_PARITY_MATRIX.md) · [Компоненты и Qt/CDP-прототип](docs/PROJECTMAKER_COMPONENT_REVIEW.md).
 
+Stage 3B.2: **78 действий** — HTTP, JSON Pointer, списки, таблицы, CSV/XLSX, файлы и подпроекты. В Full нажмите **«Примеры 3B.2…»**: четыре графа выполняются Python GraphRunner; HTTP/data/files-only Runner не импортирует браузер или GUI. [Контракт, лимиты и примеры](docs/PROJECTMAKER_3_STAGE3B2.md).
+
 Windows: распакуйте portable ZIP, дважды щёлкните `Poster.exe`, нажмите **«Демо-сайт» → «Пример с циклом»**. Терминал и Python пользователю не нужны. Lite использует установленный Chrome; Full Maker содержит браузер, граф, переменные и отладчик в одном окне Qt. Новый формат v2 загружает графы v1; старый HTTP Workflow v1 не меняется.
 
-Linux без GUI: `python -m poster maker-run project.postergraph.json --input prefix=Linux --output report.json`. Контролируемая сквозная проверка: `python scripts/check_maker_stage2.py --output .poster/stage2-check`.
+Linux без GUI: `python -m poster maker-run project.postergraph.json --workdir ./run-data --input prefix=Linux --output report.json`. Контролируемая сквозная проверка: `python scripts/check_maker_stage2.py --output .poster/stage2-check`.
 
 Старый Poster 2.0 сохранён в соседних вкладках. Его документация и команды ниже остаются применимыми.
 

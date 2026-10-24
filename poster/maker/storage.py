@@ -30,7 +30,12 @@ class Vault:
         if len(raw.encode("utf-8")) > 1_000_000:
             raise GraphError("SECRET_INVALID")
         ref = ref or "secret_" + identity()
-        self.tokens[ref] = encrypt_session({"value": value})
+        token = encrypt_session({"value": value})
+        if (len(self.tokens) >= 10000 and ref not in self.tokens) or (
+            sum(len(v) for k, v in self.tokens.items() if k != ref) + len(token) > 24_000_000
+        ):
+            raise GraphError("SECRET_INVALID")
+        self.tokens[ref] = token
         return {"secret_ref": ref}
 
     def get(self, ref):

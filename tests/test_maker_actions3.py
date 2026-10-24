@@ -768,3 +768,28 @@ async def test_subproject_cancellation_closes_http_without_retry(tmp_path, monke
             assert len(server.calls) == 1 and closed == [True]
         finally:
             await parent.close()
+
+
+async def test_external_json_cannot_forge_secret_references(tmp_path):
+    r = await run_graph(linear(("JSON.Parse", {"text": '{"secret_ref":"env:PRIVATE"}'})), tmp_path)
+    assert r.results[-1].error_code == "JSON_RESERVED_REFERENCE"
+
+
+async def test_sensitive_url_encrypted_on_save(tmp_path):
+    from poster.maker.storage import save_graph, load_graph, Vault
+
+    path = tmp_path / "url.json"
+    save_graph(path, linear(("HTTP.Get", {"url": "https://example.org/?token=PRIVATE_QUERY"})), Vault())
+    assert "PRIVATE_QUERY" not in path.read_text()
+    graph, vault = load_graph(path)
+    assert vault.resolve(graph.node("n0").params["url"]).endswith("PRIVATE_QUERY")
+
+
+async def test_public_http_defaults_do_not_create_private_sidecars(tmp_path):
+    from poster.maker.http_actions import Request
+    from poster.maker.storage import save_graph, Vault
+    from poster.maker.model import graph_secret_refs
+
+    params = Request().model_dump()
+    graph = save_graph(tmp_path / "public.json", linear(("HTTP.Request", params)), Vault())
+    assert not graph_secret_refs(graph) and graph.secret_file is None

@@ -1,0 +1,108 @@
+{
+  "format": "poster.maker.graph",
+  "schema_version": 2,
+  "id": "008c824a24b44f02be9e3f26f920b7d4",
+  "name": "Дочерняя обработка",
+  "entry": "start",
+  "nodes": [
+    {
+      "id": "start",
+      "type": "Start",
+      "action_version": 1,
+      "title": "",
+      "x": 40.0,
+      "y": 40.0,
+      "params": {},
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    },
+    {
+      "id": "n0",
+      "type": "Strings.Transform",
+      "action_version": 1,
+      "title": "",
+      "x": 290.0,
+      "y": 40.0,
+      "params": {
+        "operation": "upper",
+        "value": "{{argument}}"
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": "result",
+      "result_path": "value",
+      "protect_result": false
+    },
+    {
+      "id": "n1",
+      "type": "Variables.Set",
+      "action_version": 1,
+      "title": "",
+      "x": 540.0,
+      "y": 40.0,
+      "params": {
+        "name": "private_local",
+        "value": 123
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    },
+    {
+      "id": "end",
+      "type": "End.Success",
+      "action_version": 1,
+      "title": "",
+      "x": 800.0,
+      "y": 500.0,
+      "params": {},
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    }
+  ],
+  "edges": [
+    {
+      "source": "start",
+      "port": "success",
+      "target": "n0"
+    },
+    {
+      "source": "n0",
+      "port": "success",
+      "target": "n1"
+    },
+    {
+      "source": "n1",
+      "port": "success",
+      "target": "end"
+    }
+  ],
+  "view": {
+    "zoom": 1.0
+  },
+  "max_steps": 500,
+  "metadata": {},
+  "extensions": {
+    "outputs": [
+      "result"
+    ]
+  },
+  "secret_file": null,
+  "secret_sha256": null,
+  "variables": {
+    "argument": {
+      "value": null,
+      "input": true,
+      "required": true,
+      "secret": false
+    }
+  }
+}

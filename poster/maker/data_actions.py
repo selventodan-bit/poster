@@ -8,7 +8,7 @@ from typing import Any
 from pydantic import Field
 from .actions import Action
 from .action_fields import properties
-from .model import DataModel, GraphError
+from .model import DataModel, GraphError, secret_refs
 from .resources import MAX_DATA
 
 
@@ -20,6 +20,16 @@ def bounded(value):
     if len(raw.encode("utf-8")) > MAX_DATA:
         raise GraphError("DATA_LIMIT")
     return value
+
+
+def load_json(text):
+    def invalid_constant(value):
+        raise ValueError("JSON_INVALID")
+
+    value = json.loads(text, parse_constant=invalid_constant)
+    if secret_refs(value):
+        raise GraphError("JSON_RESERVED_REFERENCE")
+    return bounded(value)
 
 
 def tokens(path):
@@ -70,7 +80,7 @@ class Merge(DataModel):
 async def json_action(ctx, p, operation):
     try:
         if operation == "Parse":
-            value = json.loads(p.text)
+            value = load_json(p.text)
         elif operation == "Stringify":
             value = json.dumps(
                 bounded(p.value), ensure_ascii=False, allow_nan=False, indent=2 if p.pretty else None
