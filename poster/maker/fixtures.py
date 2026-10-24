@@ -32,7 +32,12 @@ class MakerHandler(Handler):
         elif path == "/tabs":
             self.reply(
                 200,
-                '<meta charset="utf-8"><title>Maker tabs</title><a id="popup" target="_blank" href="/iframe">Открыть форму</a><input id="main-note"><select id="choice"><option value="a">A</option><option value="b">B</option></select>',
+                '<meta charset="utf-8"><title>Maker tabs</title><a id="popup" target="_blank" href="/wide-iframe">Открыть форму</a><input id="main-note"><select id="choice"><option value="a">A</option><option value="b">B</option></select>',
+            )
+        elif path == "/wide-iframe":
+            self.reply(
+                200,
+                '<meta charset="utf-8"><title>ProjectMaker iframe</title><iframe id="inner" src="/login" width="700" height="400"></iframe>',
             )
         elif path == "/iframe":
             self.reply(

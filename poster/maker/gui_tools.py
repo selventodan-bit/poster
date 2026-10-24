@@ -336,7 +336,8 @@ class ToolsMixin:
                 )
                 if session:
                     runner.context.session = session
-                    runner.context.use_page(session.page)
+                    if session.page:
+                        runner.context.use_page(session.page)
                     if self.recorder and self.recorder.session is session:
                         self.recorder = None
                     if self.tools_context and self.tools_context.session is session:

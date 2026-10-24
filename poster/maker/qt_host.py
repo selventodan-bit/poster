@@ -121,6 +121,13 @@ def main():
                     }
                     for i in range(self.tabs.count())
                 ],
+                "tab_points": [
+                    [
+                        self.tabs.tabBar().mapToGlobal(self.tabs.tabBar().tabRect(i).center()).x(),
+                        self.tabs.tabBar().mapToGlobal(self.tabs.tabBar().tabRect(i).center()).y(),
+                    ]
+                    for i in range(self.tabs.count())
+                ],
                 "private_profile": self.profile.isOffTheRecord(),
                 "view_rect": [
                     current.mapToGlobal(QPoint(0, 0)).x(),

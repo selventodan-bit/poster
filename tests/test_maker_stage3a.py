@@ -93,6 +93,19 @@ async def test_real_record_popup_iframe_edit_breakpoint_save_replay(tmp_path, pr
                 save_graph(path, runner.graph, vault)
             finally:
                 await runner.close()
+        code = """import sys,importlib.abc
+class NoGUI(importlib.abc.MetaPathFinder):
+ def find_spec(self,fullname,path=None,target=None):
+  if fullname.startswith(('tkinter','PySide6')):raise RuntimeError('GUI dependency in runtime')
+sys.meta_path.insert(0,NoGUI())
+from poster.cli import main
+raise SystemExit(main(sys.argv[1:]))
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", code, "maker-run", str(path)], capture_output=True, text=True, timeout=60
+        )
+        assert result.returncode == 0, result.stderr
+        assert json.loads(result.stdout)["status"] == "SUCCEEDED"
 
 
 @pytest.mark.parametrize("provider", providers())

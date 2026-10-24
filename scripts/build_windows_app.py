@@ -23,13 +23,13 @@ def package(bundle, output, commit, *, embedded=False):
     target = output / (name + ".zip")
     with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for path in sorted(bundle.rglob("*")):
-            name = path.relative_to(bundle)
-            if path.is_symlink() or any(p in {".poster", ".venv", "__pycache__"} for p in name.parts):
+            relative = path.relative_to(bundle)
+            if path.is_symlink() or any(p in {".poster", ".venv", "__pycache__"} for p in relative.parts):
                 raise ValueError("Private files in executable bundle")
             if path.is_file():
                 if path.name.lower() in {"chrome.exe", "headless_shell.exe", "msedge.exe"}:
                     raise ValueError("A browser must not be bundled implicitly")
-                archive.write(path, name)
+                archive.write(path, relative)
     checksum = hashlib.sha256(target.read_bytes()).hexdigest()
     (output / (name + ".sha256")).write_text(checksum + "  " + target.name + "\n", encoding="ascii")
     report = {

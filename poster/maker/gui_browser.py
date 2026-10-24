@@ -52,6 +52,10 @@ class BrowserToolsMixin:
         self.profile_options = {"Без сохранённой сессии": None}
         for key, name in self.profile_store.list():
             self.profile_options[name + " · " + key[-6:]] = key
+        if self.profile_store.unreadable:
+            self.status.set(
+                "Некоторые профили не читаются этим ключом. Они сохранены без изменений; выберите другой профиль."
+            )
         self.profile_combo.configure(values=tuple(self.profile_options))
         key = self.document.graph.metadata.get("browser_profile")
         self.profile_name.set(

@@ -166,3 +166,22 @@ def test_executable_bundle_identifies_commit_and_excludes_private_state(tmp_path
     (bundle / ".poster/session.key").write_text("private")
     with pytest.raises(ValueError, match="Private"):
         builder.package(bundle, tmp_path / "bad", "b" * 40)
+
+
+def test_full_maker_package_has_distinct_identity_checksum_and_measured_sizes(tmp_path):
+    bundle = tmp_path / "full bundle"
+    bundle.mkdir()
+    (bundle / "Poster.exe").write_bytes(b"windowed exe")
+    (bundle / "QtWebEngineProcess.exe").write_bytes(b"Qt subprocess")
+    builder = module("build_windows_app")
+    output = tmp_path / "out"
+    checksum = builder.package(bundle, output, "c" * 40, embedded=True)
+    with zipfile.ZipFile(output / "poster-maker-windows.zip") as archive:
+        info = json.loads(archive.read("BUILD_INFO.json"))
+        assert info == {"commit": "c" * 40, "browser_bundled": True, "browser_provider": "qt"}
+        report = json.loads((output / "build-report.json").read_text())
+        assert report["unpacked_bytes"] == sum(item.file_size for item in archive.infolist())
+        assert report["zip_bytes"] == (output / "poster-maker-windows.zip").stat().st_size
+        assert report["sha256"] == checksum
+    assert checksum in (output / "poster-maker-windows.sha256").read_text()
+    assert not (output / "poster-windows.zip").exists()

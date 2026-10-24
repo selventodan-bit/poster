@@ -285,6 +285,63 @@ def check(executable, output):
             assert len(server.posts) == 3 and server.posts["3"]["note"] == "Изменено в кубике GUI Ж 日本語"
             picture("05-reopened-replay.png")
             completed.append("save_close_reopen_same_graph_and_replay")
+            if info.get("browser_provider") == "qt":
+                from poster.maker.fixtures import DEMO_PASSWORD
+
+                click("maker_stop")
+                wait(
+                    lambda s: not s["maker"]["busy"] and s["maker"]["run_state"] is None,
+                    "close prior browser",
+                )
+                fill("maker_url", base + "/tabs")
+                click("maker_record")
+                wait(lambda s: s["maker"]["recording"] and not s["maker"]["busy"], "Qt tabs recording")
+                browser_control("#main-note")
+                clipboard("Native Qt tabs")
+                browser_control("#popup")
+                wait(lambda s: s["maker"].get("browser", {}).get("qt", {}).get("tabs") == 2, "real popup")
+                browser_control("#inner >> #user")
+                clipboard("demo")
+                browser_control("#inner >> #password")
+                clipboard(DEMO_PASSWORD)
+                browser_control("#inner >> #login")
+                wait(lambda s: server.login_count == 1, "iframe POST authorized")
+                browser = Desktop(backend="win32").window(title="Poster Maker — браузер")
+                browser.set_focus()
+                point_tab = snapshot()["maker"]["browser"]["qt"]["tab_points"][0]
+                mouse.click(coords=tuple(point_tab))
+                browser_control("#main-note")
+                clipboard("Returned to main tab")
+                click("maker_record_stop")
+                recorded_tabs = wait(
+                    lambda s: not s["maker"]["recording"] and not s["maker"]["busy"], "tabs stopped"
+                )["maker"]["graph"]
+                assert any(n["type"] == "Browser.WaitPopup" for n in recorded_tabs["nodes"])
+                assert any(n["type"] == "Browser.SwitchTab" for n in recorded_tabs["nodes"])
+                assert DEMO_PASSWORD not in json.dumps(recorded_tabs)
+                click("maker_save")
+                tabs_saved = wait(lambda s: bool(s["maker"]["saved_file"]), "tabs saved")["maker"]["graph"][
+                    "id"
+                ]
+                picture("10-qt-tabs-iframe-graph.png")
+                click("maker_run")
+                confirm()
+                wait(
+                    lambda s: s["maker"]["run_state"] == "SUCCEEDED" and not s["maker"]["busy"],
+                    "Qt tabs replay",
+                )
+                assert server.login_count == 2
+                close()
+                start()
+                wait(lambda s: s["maker"]["graph"]["id"] == tabs_saved, "saved tabs reopened")
+                click("maker_run")
+                confirm()
+                wait(
+                    lambda s: s["maker"]["run_state"] == "SUCCEEDED" and not s["maker"]["busy"],
+                    "reopened Qt tabs replay",
+                )
+                assert server.login_count == 3
+                completed.append("native_qt_popup_iframe_authorization_tab_switch_save_reopen")
             close()
         # This second project uses the product's own server, with no harness
         # keeping it alive between app processes. It must start again itself.

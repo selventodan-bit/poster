@@ -34,9 +34,13 @@ class Profiles:
 
     def list(self):
         result = []
+        self.unreadable = []
         for path in sorted(self.root.glob("profile_*.enc")):
-            value = decrypt_bytes(read_bounded(self.path(path.stem)))
-            result.append((path.stem, value["name"]))
+            try:
+                value = decrypt_bytes(read_bounded(self.path(path.stem)))
+                result.append((path.stem, value["name"]))
+            except Exception:
+                self.unreadable.append(path.stem)
         return result
 
     def create(self, name):

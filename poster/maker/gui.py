@@ -92,7 +92,13 @@ class MakerPanel(BrowserToolsMixin, ToolsMixin, ClipboardMixin):
         self.pump_after = self.frame.after(80, self.pump)
 
     def button(self, parent, key, label, command):
-        widget = ttk.Button(parent, text=label, command=command)
+        def invoke():
+            try:
+                return command()
+            except Exception as error:
+                self.show_error(error)
+
+        widget = ttk.Button(parent, text=label, command=invoke)
         widget.pack(side="left", padx=2, pady=2)
         self.buttons[key] = widget
         return widget
@@ -968,11 +974,35 @@ class MakerPanel(BrowserToolsMixin, ToolsMixin, ClipboardMixin):
                   const r=e.getBoundingClientRect();return {selector:selector(e),x:r.x,y:r.y,width:r.width,height:r.height};
                 }).filter(r=>r.width>0&&r.height>0)};}""".replace("SELECTOR", SELECTOR_FUNCTION)
             self.browser_view = await page.evaluate(script)
+            for frame in page.frames:
+                if frame == page.main_frame:
+                    continue
+                try:
+                    element = await frame.frame_element()
+                    box = await element.bounding_box()
+                    if not box:
+                        continue
+                    child = await frame.evaluate(script)
+                    path = []
+                    current = frame
+                    from .record_script import SELECTOR_EXPRESSION
+
+                    while current.parent_frame:
+                        path.insert(0, await (await current.frame_element()).evaluate(SELECTOR_EXPRESSION))
+                        current = current.parent_frame
+                    for control in child["controls"]:
+                        control["selector"] = " >> ".join([*path, control["selector"]])
+                        control["x"] += box["x"] + 2
+                        control["y"] += box["y"] + 2
+                        self.browser_view["controls"].append(control)
+                except Exception:
+                    pass
             if host_state:
                 self.browser_view["qt"] = {
                     "view_rect": host_state["view_rect"],
                     "private_profile": host_state["private_profile"],
                     "tabs": len(host_state["tabs"]),
+                    "tab_points": host_state["tab_points"],
                 }
         except Exception:
             pass
