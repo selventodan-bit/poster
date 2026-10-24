@@ -13,7 +13,7 @@ from pydantic import Field
 from ..network import bounded_body, ResponseTooLarge
 from .actions import Action, Empty
 from .action_fields import properties
-from .model import DataModel, GraphError
+from .model import DataModel, GraphError, secret_refs
 from .resources import MAX_DATA, MAX_FILE
 
 SENSITIVE = re.compile(r"authorization|cookie|pass|secret|token|api.?key|session", re.I)
@@ -95,14 +95,55 @@ def session(ctx):
     return ctx.http
 
 
-def protect(ctx, value):
+def protect_values(vault, value):
     if isinstance(value, dict):
         return {
-            k: ctx.vault.put_value(v) if SENSITIVE.search(k) else protect(ctx, v) for k, v in value.items()
+            k: vault.put_value(v) if SENSITIVE.search(k) else protect_values(vault, v)
+            for k, v in value.items()
         }
     if isinstance(value, list):
-        return [protect(ctx, v) for v in value]
+        return [protect_values(vault, v) for v in value]
     return value
+
+
+def protect(ctx, value):
+    return protect_values(ctx.vault, value)
+
+
+def has_sensitive(value):
+    if isinstance(value, dict):
+        return any(SENSITIVE.search(k) or has_sensitive(v) for k, v in value.items())
+    return isinstance(value, list) and any(has_sensitive(v) for v in value)
+
+
+def protect_graph(graph, vault):
+    """Protect literal HTTP credentials before serializing a project."""
+    from .variables import has_reference
+
+    def fields(value):
+        if isinstance(value, dict):
+            if set(value) == {"secret_ref"}:
+                return value
+            return {
+                k: vault.put_value(v)
+                if SENSITIVE.search(k) and not secret_refs(v) and not has_reference(v)
+                else fields(v)
+                for k, v in value.items()
+            }
+        return [fields(v) for v in value] if isinstance(value, list) else value
+
+    for node in graph.nodes:
+        if not node.type.startswith("HTTP."):
+            continue
+        node.params = fields(node.params)
+        if (
+            node.type in {"HTTP.SetCookie", "HTTP.SetHeader"}
+            and (node.type == "HTTP.SetCookie" or SENSITIVE.search(node.params.get("name", "")))
+            and "value" in node.params
+        ):
+            value = node.params["value"]
+            if not secret_refs(value) and not has_reference(value):
+                node.params["value"] = vault.put_value(value)
 
 
 async def request(ctx, p, method=None, download=False):
@@ -113,7 +154,11 @@ async def request(ctx, p, method=None, download=False):
         raise GraphError("FILE_PATH_INVALID")
     headers = {**state.headers, **p.headers}
     sensitive = (
-        ctx.sensitive_action or state.tainted or any(SENSITIVE.search(k) for k in headers) or bool(p.cookies)
+        ctx.sensitive_action
+        or state.tainted
+        or any(SENSITIVE.search(k) for k in headers)
+        or bool(p.cookies)
+        or has_sensitive(p.body)
     )
     kwargs = {"params": p.query}
     if p.cookies:
@@ -209,6 +254,7 @@ async def request(ctx, p, method=None, download=False):
                 result["json"] = protect(ctx, json.loads(result["text"]))
         except (ValueError, LookupError, UnicodeError) as exc:
             raise GraphError("HTTP_DECODE") from exc
+    ctx.sensitive_action |= bool(secret_refs(result))
     return "success", result
 
 

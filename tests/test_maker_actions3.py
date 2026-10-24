@@ -235,3 +235,154 @@ async def test_http_connection_form_expected_status_and_request_cookies(tmp_path
         assert "name=" in value["body"] and "once=private-once" in value["cookie"]
         assert r.context.variables.reveal(r.context.variables.get("status")) == 418
         assert "private-once" not in str(r.results)
+
+
+@pytest.mark.parametrize(
+    "operation,params,expected",
+    [
+        ("Parse", {"text": '{"a":[true,null,3,{"x/y":false}]}'}, {"a": [True, None, 3, {"x/y": False}]}),
+        ("Stringify", {"value": [True, None, 3]}, "[true, null, 3]"),
+        ("Get", {"value": {"a/b": {"~": [False]}}, "path": "/a~1b/~0/0"}, False),
+        ("Set", {"value": {"a": [1]}, "path": "/a/-", "new_value": None}, {"a": [1, None]}),
+        ("Set", {"value": {"a": [1]}, "path": "/a/0", "new_value": True}, {"a": [True]}),
+        ("Delete", {"value": {"a": [1, 2]}, "path": "/a/0"}, {"a": [2]}),
+        ("Merge", {"left": {"a": {"x": 1}}, "right": {"a": {"y": False}}}, {"a": {"x": 1, "y": False}}),
+    ],
+)
+async def test_json_operations(operation, params, expected, tmp_path):
+    r = await run_graph(
+        linear(("JSON." + operation, params, {"save_as": "out", "result_path": "value"})), tmp_path
+    )
+    assert r.state == "SUCCEEDED", r.results
+    got = r.context.variables.get("out")
+    assert got == expected and type(got) is type(expected)
+
+
+@pytest.mark.parametrize(
+    "operation,params,code",
+    [
+        ("Parse", {"text": "{"}, "JSON_INVALID"),
+        ("Parse", {"text": "NaN"}, "JSON_INVALID"),
+        ("Get", {"value": [], "path": "/0"}, "JSON_PATH_MISSING"),
+        ("Get", {"value": {}, "path": "a"}, "JSON_PATH_INVALID"),
+        ("Get", {"value": {}, "path": "/~2"}, "JSON_PATH_INVALID"),
+        ("Delete", {"value": {}, "path": "/missing"}, "JSON_PATH_MISSING"),
+    ],
+)
+async def test_json_errors(operation, params, code, tmp_path):
+    r = await run_graph(linear(("JSON." + operation, params)), tmp_path)
+    assert r.results[-1].error_code == code, r.results
+
+
+@pytest.mark.parametrize(
+    "operation,params,expected",
+    [
+        ("Create", {"items": [True, {"a": [None]}]}, [True, {"a": [None]}]),
+        ("Add", {"items": [1], "item": False}, [1, False]),
+        ("Insert", {"items": [1], "index": 0, "item": {"x": 2}}, [{"x": 2}, 1]),
+        ("Get", {"items": [None, True], "index": 1}, True),
+        ("Set", {"items": [0], "index": 0, "item": [1]}, [[1]]),
+        ("Remove", {"items": [1, 2], "index": 0}, [2]),
+        ("Count", {"items": [1, 2]}, 2),
+        ("Contains", {"items": [True], "item": 1}, False),
+        ("Clear", {"items": [1]}, []),
+        ("Unique", {"items": [True, 1, True, {"x": 2}, {"x": 2}]}, [True, 1, {"x": 2}]),
+        ("Shuffle", {"items": [1], "seed": 12}, [1]),
+    ],
+)
+async def test_all_list_operations(operation, params, expected, tmp_path):
+    r = await run_graph(
+        linear(("Lists." + operation, params, {"save_as": "out", "result_path": "value"})), tmp_path
+    )
+    assert r.state == "SUCCEEDED", r.results
+    got = r.context.variables.get("out")
+    assert got == expected and type(got) is type(expected)
+
+
+@pytest.mark.parametrize("operation", ["Get", "Set", "Insert", "Remove"])
+async def test_list_bounds(operation, tmp_path):
+    r = await run_graph(
+        linear(
+            (
+                "Lists." + operation,
+                {"items": [], "index": 2, **({"item": 1} if operation in {"Set", "Insert"} else {})},
+            )
+        ),
+        tmp_path,
+    )
+    assert r.results[-1].error_code == "LIST_INDEX"
+
+
+async def test_http_json_secret_list_foreach_http_without_browser(tmp_path):
+    with api_server() as (server, base):
+        graph = linear(
+            ("HTTP.Get", {"url": base + "/echo"}, {"save_as": "raw", "result_path": "text"}),
+            ("JSON.Parse", {"text": "{{raw}}"}, {"save_as": "data", "result_path": "value"}),
+            (
+                "JSON.Get",
+                {"value": "{{data}}", "path": "/items"},
+                {"save_as": "items", "result_path": "value"},
+            ),
+            ("Lists.Unique", {"items": "{{items}}"}, {"save_as": "items", "result_path": "value"}),
+            ("Logic.ForEach", {"items": "{{items}}", "item": "number"}),
+            ("HTTP.Post", {"url": base + "/echo", "body_type": "json", "body": "{{number}}"}),
+            ("Logic.Continue", {}),
+        )
+        graph.edges.append(Edge(source="n4", port="error", target="end"))
+        r = await run_graph(graph, tmp_path)
+        assert r.state == "SUCCEEDED", r.results
+        assert sum(method == "POST" for method, _ in server.calls) == 3
+        assert r.context.variables.reveal(r.context.variables.get("number")) == 3
+        assert r.context.variables.snapshot()["number"] == "••••"
+
+
+async def test_new_action_breakpoint_edit_save_reopen(tmp_path):
+    from poster.maker.storage import save_graph, load_graph, Vault
+
+    graph = linear(
+        ("Lists.Create", {"items": [1]}, {"save_as": "out", "result_path": "value", "breakpoint": True})
+    )
+    path = tmp_path / "saved.postergraph.json"
+    save_graph(path, graph, Vault())
+    graph, vault = load_graph(path)
+    r = GraphRunner(graph, vault=vault, workdir=tmp_path)
+    try:
+        assert await r.run() == "PAUSED"
+        node = r.graph.node("n0").model_copy(deep=True)
+        node.params["items"] = [True, None, 3]
+        r.update_node(node)
+        assert await r.run() == "SUCCEEDED"
+        assert r.context.variables.get("out") == [True, None, 3]
+    finally:
+        await r.close()
+
+
+async def test_http_literal_credentials_encrypted_on_save_and_not_logged(tmp_path):
+    from poster.maker.storage import save_graph, load_graph, Vault
+    from poster.maker.variables import draft_parameters
+    from poster.maker.actions import default_registry
+
+    with api_server() as (_, base):
+        graph = linear(
+            (
+                "HTTP.Post",
+                {
+                    "url": base + "/echo",
+                    "body_type": "json",
+                    "body": {"password": "PRIVATE_PASSWORD"},
+                    "headers": {"Authorization": "Bearer PRIVATE_AUTH"},
+                    "protect_response": False,
+                },
+                {"save_as": "reply"},
+            )
+        )
+        path = tmp_path / "auth.postergraph.json"
+        save_graph(path, graph, Vault())
+        assert "PRIVATE_" not in path.read_text()
+        graph, vault = load_graph(path)
+        save_graph(path, graph, vault)
+        graph, vault = load_graph(path)
+        draft_parameters(default_registry().get("HTTP.Post"), graph.node("n0").params)
+        r = await run_graph(graph, tmp_path, vault=vault)
+        assert r.state == "SUCCEEDED", r.results
+        assert "PRIVATE_" not in str(r.results) and r.context.variables.snapshot()["reply"] == "••••"

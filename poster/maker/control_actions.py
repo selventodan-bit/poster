@@ -54,7 +54,7 @@ class Loop(DataModel):
 
 
 class ForEach(DataModel):
-    items: list[Any] = Field(default_factory=lambda: ["one", "two"], max_length=10000)
+    items: Any = Field(default_factory=lambda: ["one", "two"], max_length=10000)
     item: str = Field(default="item", pattern=r"^[A-Za-z_][A-Za-z0-9_]{0,79}$")
     index: str = Field(default="i", pattern=r"^[A-Za-z_][A-Za-z0-9_]{0,79}$")
     max_iterations: int = Field(default=1000, ge=1, le=10000)
@@ -158,14 +158,18 @@ async def loop(ctx, p):
         existing["index"] += 1
         frame = existing
     else:
-        count = len(p.items) if isinstance(p, ForEach) else p.count
+        items = ctx.variables.reveal(p.items) if isinstance(p, ForEach) else None
+        if isinstance(p, ForEach) and not isinstance(items, list):
+            raise GraphError("VARIABLE_TYPE_INVALID")
+        count = len(items) if isinstance(p, ForEach) else p.count
         if count > p.max_iterations:
             raise GraphError("LOOP_LIMIT")
         frame = {
             "node": ctx.current_node,
             "index": 0,
             "count": count,
-            "items": p.items if isinstance(p, ForEach) else None,
+            "items": items,
+            "protected": bool(secret_refs(p.items)) if isinstance(p, ForEach) else False,
         }
         ctx.loops.append(frame)
     if frame["index"] >= frame["count"]:
@@ -173,7 +177,8 @@ async def loop(ctx, p):
         return "error", {"completed": True, "iterations": frame["count"]}
     ctx.variables.set(p.index, frame["index"])
     if isinstance(p, ForEach):
-        ctx.variables.set(p.item, frame["items"][frame["index"]])
+        item = frame["items"][frame["index"]]
+        ctx.variables.set(p.item, ctx.vault.put_value(item) if frame["protected"] else item)
     return "success", {"iteration": frame["index"]}
 
 

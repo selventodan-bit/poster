@@ -279,4 +279,7 @@ def default_registry():
     from .http_actions import register_http_actions
 
     register_http_actions(registry)
+    from .data_actions import register_data_actions
+
+    register_data_actions(registry)
     return registry

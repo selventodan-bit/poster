@@ -23,7 +23,7 @@ def draft_parameters(spec, values):
     defaults = spec.params().model_dump(mode="json")
     check = {**defaults, **values}
     for key, value in values.items():
-        if has_reference(value):
+        if has_reference(value) or (spec.reveal_parameters and secret_refs(value)):
             check[key] = defaults.get(key)
     try:
         spec.params.model_validate(check)

@@ -81,6 +81,9 @@ def save_graph(path, graph, vault):
         except (ValueError, AttributeError) as exc:
             raise GraphError("FILE_INVALID") from exc
     saved = graph.validate_structure().model_copy(deep=True)
+    from .http_actions import protect_graph
+
+    protect_graph(saved, vault)
     refs = graph_secret_refs(saved)
     tokens = {k: base64.b64encode(v).decode("ascii") for k, v in vault.tokens.items() if k in refs}
     if tokens:
