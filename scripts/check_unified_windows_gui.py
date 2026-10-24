@@ -69,6 +69,17 @@ def check(executable, output):
     def click(name):
         window.set_focus()
         time.sleep(0.1)
+        state = snapshot()
+        page = state.get("main_page")
+        legacy_bars = {
+            "Сайт и обучение": "site",
+            "Проекты": "projects",
+            "Очередь": "queue",
+            "Результаты": "results",
+            "Система": "system",
+        }
+        if name not in state.get("positions", {}) and page in legacy_bars:
+            ensure_visible(name, "legacy_" + legacy_bars[page] + "_scrollbar")
         mouse.click(coords=tuple(point(name)))
 
     def paste(value):
@@ -381,12 +392,16 @@ def check(executable, output):
         keyboard.send_keys("{ENTER}")
         wait(lambda s: s["selected"] == ["n1190"], "large graph search")
         click("copy")
-        wait(lambda s: len(s["graph"]["nodes"]) == 1201, "copy block")
+        copied = wait(lambda s: len(s["graph"]["nodes"]) == 1201 and len(s["selected"]) == 1, "copy block")[
+            "selected"
+        ][0]
         click("undo")
         wait(lambda s: len(s["graph"]["nodes"]) == 1200, "undo")
         click("redo")
         wait(lambda s: len(s["graph"]["nodes"]) == 1201, "redo")
+        choose_node(copied)
         click("delete")
+        wait(lambda s: len(s["graph"]["nodes"]) == 1200, "copied block deleted")
         click("save")
         picture("04-unified-large-graph.png")
         scenarios.append("large_graph_search_copy_delete_undo_redo")

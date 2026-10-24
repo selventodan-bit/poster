@@ -84,7 +84,21 @@ def scenario(root):
     os.chdir(root)
     port = configure_browser(root)
     app = QApplication([])
-    window = MakerWindow(port, workspace=Workspace(Path(root) / ".poster"))
+    workspace = Workspace(Path(root) / ".poster")
+    from poster.recorder.preferences import Preferences
+    from poster.browser import find_browser
+
+    Preferences(workspace.root / "recorder-settings.json").save(
+        "https://saved.example/form?token=private", "saved-project"
+    )
+    browser = find_browser()
+    if browser:
+        (workspace.root / "browser.json").write_text(json.dumps({"path": browser}))
+    window = MakerWindow(port, workspace=workspace)
+    assert window.legacy.url.text() == "https://saved.example/form"
+    assert window.legacy.project_id.text() == "saved-project"
+    if browser:
+        assert os.environ["POSTER_CHROMIUM"] == browser
     window.show()
     QMessageBox.question = lambda *args, **kwargs: QMessageBox.StandardButton.Yes
 

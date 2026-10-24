@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import os
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
 import uuid
@@ -25,12 +26,24 @@ from ..recognition.knowledge import KnowledgeBase
 from ..recognition.policy import ResourcePolicy
 from ..recognition.service import RecognitionSession
 from ..recorder.workspace import EngineBridge, JOB_TEXT, local_test
+from ..recorder.preferences import Preferences
 
 
 class LegacyPanel:
     def __init__(self, window):
         self.window = window
         self.workspace = window.workspace
+        os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(self.workspace.root / "browsers"))
+        self.preferences = Preferences(self.workspace.root / "recorder-settings.json")
+        saved = self.preferences.load()
+        try:
+            chosen = json.loads((self.workspace.root / "browser.json").read_text(encoding="utf-8")).get(
+                "path"
+            )
+            if isinstance(chosen, str) and Path(chosen).is_file():
+                os.environ.setdefault("POSTER_CHROMIUM", chosen)
+        except (OSError, ValueError, AttributeError):
+            pass
         self.bridge = EngineBridge(self.workspace)
         self.session = self.knowledge = self.existing_site = None
         self.future = None
@@ -46,11 +59,11 @@ class LegacyPanel:
             )
         )
         fields = QFormLayout()
-        self.url = QLineEdit()
+        self.url = QLineEdit(saved.get("url", ""))
         self.url.setObjectName("legacy_url")
         self.title = QLineEdit("Проверка Poster")
         self.title.setObjectName("legacy_title")
-        self.project_id = QLineEdit()
+        self.project_id = QLineEdit(saved.get("project_id", ""))
         self.project_id.setObjectName("legacy_project_id")
         self.kind = QComboBox()
         self.kind.addItems(["auto", "topic", "reply", "comment"])
@@ -180,6 +193,15 @@ class LegacyPanel:
         page = QWidget()
         layout = QVBoxLayout(page)
         scroll = QScrollArea()
+        key = {
+            "Сайт и обучение": "site",
+            "Проекты": "projects",
+            "Очередь": "queue",
+            "Результаты": "results",
+            "Система": "system",
+        }[title]
+        scroll.setObjectName("legacy_" + key + "_scroll")
+        scroll.verticalScrollBar().setObjectName("legacy_" + key + "_scrollbar")
         scroll.setWidgetResizable(True)
         body = QWidget()
         form = QVBoxLayout(body)
@@ -246,6 +268,7 @@ class LegacyPanel:
 
     def recognize(self):
         name, url = self.identity(), self.url.text().strip()
+        self.preferences.save(url, name)
         kind, cdns = self.kind.currentText(), self.cdns.text().split()
 
         async def work():
@@ -427,8 +450,6 @@ class LegacyPanel:
     def choose_browser(self):
         path, _ = QFileDialog.getOpenFileName(self.window, "Chrome / Chromium / Edge")
         if path:
-            import os
-
             find_browser(path)
             os.environ["POSTER_CHROMIUM"] = path
             (self.workspace.root / "browser.json").write_text(json.dumps({"path": path}))
