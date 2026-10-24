@@ -153,10 +153,14 @@ class MakerController:
             self.emit("browser_probe", {})
             return
         page = await session.provider.active_page() if session.provider.name == "qt" else session.page
-        script = """()=>{const selector=SELECTOR;return {title:document.title,viewport:{width:innerWidth,height:innerHeight},
+        script = """()=>{const selector=SELECTOR;return {title:document.title,focused:document.hasFocus()?selector(document.activeElement):null,viewport:{width:innerWidth,height:innerHeight},
           controls:[...document.querySelectorAll('button,a,input:not([type=hidden]),textarea,select')].map(e=>{
           const r=e.getBoundingClientRect();return {selector:selector(e),x:r.x,y:r.y,width:r.width,height:r.height};
           }).filter(r=>r.width>0&&r.height>0)}}""".replace("SELECTOR", SELECTOR_FUNCTION)
+        # A newly adopted Qt popup can expose its DOM before its compositor has
+        # presented a frame. This read-only barrier is used only by the opt-in
+        # GUI observer; image bytes are discarded and never written to disk.
+        await page.screenshot(timeout=5000)
         result = await page.evaluate(script)
         for frame in page.frames:
             if frame == page.main_frame:
@@ -193,6 +197,8 @@ class MakerController:
                                 max(0, right - clip["x"]),
                                 max(0, bottom - clip["y"]),
                             )
+                if child.get("focused"):
+                    result["focused"] = " >> ".join([*path, child["focused"]])
                 for control in child["controls"]:
                     control["clip"] = clip
                     control["selector"] = " >> ".join([*path, control["selector"]])

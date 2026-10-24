@@ -160,7 +160,7 @@ def check(executable, output):
     def property_visible(name):
         ensure_visible(name)
 
-    def browser_control(selector):
+    def browser_control(selector, focus=False):
         def has_control(s):
             return any(c["selector"] == selector for c in s.get("browser", {}).get("controls", []))
 
@@ -196,6 +196,11 @@ def check(executable, output):
                         int(y + (top + bottom) / 2 * height / vh),
                     )
                 )
+                if focus:
+                    wait(
+                        lambda s: s.get("browser", {}).get("focused") == selector,
+                        "native input focused " + selector,
+                    )
                 return
             # Scroll the actual visible frame (or page) through the OS. Geometry
             # comes only from the observer; no JS scroll/click command is sent.
@@ -241,7 +246,7 @@ def check(executable, output):
         click("record")
         wait(lambda s: s["recording"] and not s["busy"], "recording started")
         browser_control("#show")
-        browser_control("#note")
+        browser_control("#note", focus=True)
         paste("Настоящая запись в одном окне Ж")
         browser_control("#mode")
         keyboard.send_keys("{DOWN}{ENTER}", pause=0.15)
@@ -330,13 +335,13 @@ def check(executable, output):
             wait(lambda s: s.get("browser", {}).get("title") == "Maker tabs" and not s["busy"], "tabs page")
             click("record")
             wait(lambda s: s["recording"] and not s["busy"], "tabs recording")
-            browser_control("#main-note")
+            browser_control("#main-note", focus=True)
             paste("Main tab")
             browser_control("#popup")
             wait(lambda s: len(s["browser"]["tabs"]) == 2, "popup opened")
-            browser_control("#inner >> #user")
+            browser_control("#inner >> #user", focus=True)
             paste("demo")
-            browser_control("#inner >> #password")
+            browser_control("#inner >> #password", focus=True)
             paste(DEMO_PASSWORD)
             browser_control("#inner >> #login")
 
@@ -366,7 +371,7 @@ def check(executable, output):
                 )
                 raise
             mouse.click(coords=tuple(snapshot()["browser"]["tab_points"][0]))
-            browser_control("#main-note")
+            browser_control("#main-note", focus=True)
             paste("Returned to main")
             click("record_stop")
             tabs_graph = wait(lambda s: not s["recording"] and not s["busy"], "tabs stopped")["graph"]
@@ -539,12 +544,12 @@ def check(executable, output):
         try:
             picture("failure.png")
             encoded = base64.b64encode((output / "failure.png").read_bytes()).decode("ascii")
-            for index in range(0, len(encoded), 40000):
+            for index in range(0, len(encoded), 3000):
                 print(
                     "::notice title=Unified GUI image "
-                    + str(index // 40000)
+                    + str(index // 3000)
                     + "::"
-                    + encoded[index : index + 40000],
+                    + encoded[index : index + 3000],
                     flush=True,
                 )
         except Exception:
