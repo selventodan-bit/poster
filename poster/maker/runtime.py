@@ -320,6 +320,7 @@ class GraphRunner:
         )
         self.context.ancestry = (*ancestry, self.context.project_path or self.graph.id)
         self.on_event = on_event or (lambda event: None)
+        self.context.emit = self.event
         self.current = self.graph.entry
         self.state = "READY"
         self.pause_reason = None
@@ -397,6 +398,7 @@ class GraphRunner:
                 await self.context.page()
                 self.context.use_page(await self.context.session.select_tab(node.extensions["browser_tab"]))
             values = self.context.variables.resolve(node.params)
+            self.context.raw_params = values
             self.context.sensitive_action = node.protect_result or bool(secret_refs(values))
             spec = self.registry.get(node.type, node.action_version)
             spec, params = self.registry.parameters(
@@ -572,7 +574,13 @@ class GraphRunner:
             self.state = "STOPPED"
 
     async def close(self):
+        action = self._action
         await self.stop()
+        if action and action is not asyncio.current_task() and not action.done():
+            try:
+                await action
+            except asyncio.CancelledError:
+                pass
         try:
             if self.context.http:
                 await self.context.http.close()

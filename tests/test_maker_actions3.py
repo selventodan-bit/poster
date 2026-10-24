@@ -635,3 +635,136 @@ async def test_xlsx_formula_cache_and_archive_limits(tmp_path):
         archive.writestr("huge.xml", b"x" * 20_000_001)
     r = await run_graph(linear(("Excel.ListSheets", {"path": "bomb.xlsx"})), tmp_path)
     assert r.results[-1].error_code == "XLSX_INVALID"
+
+
+def saved_child(path, *, secret=False, action=None):
+    from poster.maker.model import Variable
+    from poster.maker.storage import save_graph, Vault
+
+    child = linear(
+        action or ("Variables.Set", {"name": "result", "value": "{{argument}}"}),
+        ("Variables.Set", {"name": "private_local", "value": "must not escape"}),
+    )
+    child.variables = {"argument": Variable(value=None, input=True, required=True, secret=secret)}
+    child.extensions["outputs"] = ["result"]
+    save_graph(path, child, Vault())
+    return child
+
+
+async def test_subproject_inputs_explicit_outputs_local_variables_and_protection(tmp_path):
+    from poster.maker.storage import Vault, save_graph
+
+    saved_child(tmp_path / "child.postergraph.json")
+    parent = linear(
+        (
+            "Project.Run",
+            {"path": "child.postergraph.json", "inputs": {"argument": [True, None, 3]}},
+            {"save_as": "out", "result_path": "outputs"},
+        ),
+        ("Variables.Set", {"name": "after", "value": True}),
+    )
+    root = tmp_path / "parent.postergraph.json"
+    save_graph(root, parent, Vault())
+    r = await run_graph(parent, tmp_path / "work", project_path=root)
+    assert r.state == "SUCCEEDED", r.results
+    assert r.context.variables.get("out") == {"result": [True, None, 3]}
+    assert "private_local" not in r.context.variables.data and r.context.variables.get("after") is True
+    saved_child(tmp_path / "secret.postergraph.json", secret=True)
+    vault = Vault()
+    parent = linear(
+        (
+            "Project.Run",
+            {"path": "secret.postergraph.json", "inputs": {"argument": vault.put_value([True, None])}},
+            {"save_as": "out", "result_path": "outputs"},
+        )
+    )
+    r = await run_graph(parent, tmp_path / "secret-work", project_path=root, vault=vault)
+    assert r.state == "SUCCEEDED", r.results
+    assert r.context.variables.reveal(r.context.variables.get("out")) == {"result": [True, None]}
+    assert r.context.variables.snapshot()["out"] == "••••"
+
+
+async def test_subproject_error_port_exports_and_recursion(tmp_path):
+    from poster.maker.storage import save_graph, Vault
+
+    child = linear(("JSON.Parse", {"text": "invalid"}))
+    save_graph(tmp_path / "bad.json", child, Vault())
+    parent = linear(("Project.Run", {"path": "bad.json"}))
+    parent.edges.append(Edge(source="n0", port="error", target="end"))
+    r = await run_graph(parent, tmp_path / "work", project_path=tmp_path / "root.json")
+    assert r.state == "SUCCEEDED" and r.results[1].error_code == "PROJECT_CHILD_FAILED"
+    assert r.results[1].details["child_code"] == "JSON_INVALID"
+    root = tmp_path / "self.json"
+    parent = linear(("Project.Run", {"path": "self.json"}))
+    save_graph(root, parent, Vault())
+    r = await run_graph(parent, tmp_path / "work", project_path=root)
+    assert r.results[-1].error_code == "PROJECT_RECURSION"
+    saved_child(tmp_path / "child.json")
+    r = await run_graph(
+        linear(
+            ("Project.Run", {"path": "child.json", "inputs": {"argument": 1}, "outputs": ["private_local"]})
+        ),
+        tmp_path / "work",
+        project_path=root,
+    )
+    assert r.results[-1].error_code == "PROJECT_OUTPUT_INVALID"
+
+
+async def test_nested_projects_share_steps_time_and_depth_limits(tmp_path):
+    from poster.maker.storage import save_graph, Vault
+
+    saved_child(tmp_path / "child.json")
+    parent = linear(("Project.Run", {"path": "child.json", "inputs": {"argument": 1}}))
+    parent.max_steps = 4
+    r = await run_graph(parent, tmp_path / "work", project_path=tmp_path / "root.json")
+    assert r.state == "FAILED" and r.results[-1].error_code == "STEP_LIMIT"
+    for i in range(10):
+        save_graph(
+            tmp_path / f"level{i}.json", linear(("Project.Run", {"path": f"level{i + 1}.json"})), Vault()
+        )
+    from poster.maker.storage import load_graph
+
+    parent, vault = load_graph(tmp_path / "level0.json")
+    r = await run_graph(parent, tmp_path / "work", project_path=tmp_path / "level0.json", vault=vault)
+    assert r.state == "FAILED" and r.results[-1].error_code == "PROJECT_DEPTH"
+    save_graph(tmp_path / "slow.json", linear(("Logic.Delay", {"milliseconds": 100})), Vault())
+    r = await run_graph(
+        linear(("Project.Run", {"path": "slow.json"})),
+        tmp_path / "work",
+        project_path=tmp_path / "root.json",
+        max_seconds=0.02,
+    )
+    assert r.state == "FAILED" and r.results[-1].error_code == "RUN_TIMEOUT"
+
+
+async def test_subproject_cancellation_closes_http_without_retry(tmp_path, monkeypatch):
+    from poster.maker.storage import save_graph, Vault
+    from poster.maker.http_actions import HTTPState
+
+    closed = []
+    original = HTTPState.close
+
+    async def capture(self):
+        await original(self)
+        closed.append(self.client.is_closed)
+
+    monkeypatch.setattr(HTTPState, "close", capture)
+    with api_server() as (server, base):
+        save_graph(tmp_path / "slow.json", linear(("HTTP.Post", {"url": base + "/slow"})), Vault())
+        parent = GraphRunner(
+            linear(("Project.Run", {"path": "slow.json"})),
+            workdir=tmp_path / "work",
+            project_path=tmp_path / "root.json",
+        )
+        task = asyncio.create_task(parent.run(breakpoints=False))
+        try:
+            for _ in range(100):
+                if server.calls:
+                    break
+                await asyncio.sleep(0.01)
+            assert server.calls
+            await parent.stop()
+            assert await asyncio.wait_for(task, 2) == "STOPPED"
+            assert len(server.calls) == 1 and closed == [True]
+        finally:
+            await parent.close()
