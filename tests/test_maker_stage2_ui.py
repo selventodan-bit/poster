@@ -98,6 +98,10 @@ def scenario():
         fill(maker.variable_value, "0")
         maker.buttons["var_save"].invoke()
         assert maker.document.graph.variables["counter"].value == 0
+        maker.buttons["demo"].invoke()
+        wait(lambda: not maker.busy)
+        open_url = add("Browser.OpenURL", url=maker.url.get())
+        assert maker.document.graph.metadata["maker_demo"] == maker.demo_base
         start = maker.document.graph.entry
         end = next(n.id for n in maker.document.graph.nodes if n.type == "End")
         loop = add("Logic.Loop", count="3", max_iterations="5")
@@ -108,7 +112,8 @@ def scenario():
         switch = add("Logic.Switch", value="{{counter}}", cases="[2]")
         fail = add("End.Failure")
         for a, port, b in [
-            (start, "success", loop.id),
+            (start, "success", open_url.id),
+            (open_url.id, "success", loop.id),
             (loop.id, "success", increment.id),
             (increment.id, "success", compare.id),
             (compare.id, "success", break_node.id),
@@ -134,7 +139,7 @@ def scenario():
         wait(lambda: maker.runner.state == "SUCCEEDED" and not maker.busy)
         assert maker.runtime_values["counter"] == 2
         assert maker.runtime_values["last_increment"] == 2
-        assert maker.runner.context.session.browser is None
+        assert maker.runner.context.session.browser is not None
         assert maker.save()
         path = maker.path
         loaded, _ = load_graph(path)

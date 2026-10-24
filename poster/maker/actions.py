@@ -122,12 +122,19 @@ def resolve(ctx, value):
     return ctx.vault.get(value.secret_ref) if isinstance(value, SecretRef) else value
 
 
+def resolve_text(ctx, value):
+    result = text_value(resolve(ctx, value))
+    if not isinstance(result, str):
+        raise GraphError("VARIABLE_TYPE_INVALID")
+    return result
+
+
 async def no_op(ctx, params):
     return "success", {}
 
 
 async def open_url(ctx, params):
-    url = resolve(ctx, params.url)
+    url = resolve_text(ctx, params.url)
     parsed = urlsplit(url)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
         raise GraphError("URL_INVALID")
@@ -150,9 +157,7 @@ async def fill(ctx, params):
     ):
         raise GraphError("PASSWORD_REF_REQUIRED")
     await ctx.before_action()
-    value = text_value(resolve(ctx, params.value))
-    if not isinstance(value, str):
-        raise GraphError("VARIABLE_TYPE_INVALID")
+    value = resolve_text(ctx, params.value)
     await locator.fill(value, timeout=params.timeout_ms)
     return "success", {"filled": True, "protected": isinstance(params.value, SecretRef)}
 
@@ -170,14 +175,14 @@ async def wait_element(ctx, params):
 
 async def wait_url(ctx, params):
     return "success", await ctx.wait_url(
-        resolve(ctx, params.url), params.timeout_ms, params.after_action, params.after_node
+        resolve_text(ctx, params.url), params.timeout_ms, params.after_action, params.after_node
     )
 
 
 async def condition(ctx, params):
-    expected = resolve(ctx, params.expected)
+    expected = resolve_text(ctx, params.expected)
     if params.condition == "equals":
-        value = resolve(ctx, params.left) == expected
+        value = resolve_text(ctx, params.left) == expected
     elif params.condition == "url_contains":
         value = expected in (await ctx.page()).url
     else:

@@ -6,6 +6,7 @@ PySide6 is a prototype-only dependency, never imported by Poster or bundled in i
 import argparse
 import asyncio
 import importlib.metadata
+import importlib.util
 import json
 import os
 import re
@@ -19,6 +20,33 @@ import traceback
 from poster.maker.fixtures import serve_maker
 
 
+def audit_linux_libraries(directory):
+    """Check the actual wheel's ELF dependencies before Qt's generic xcb error."""
+    if sys.platform != "linux":
+        return None
+    package = Path(importlib.util.find_spec("PySide6").origin).parent
+    libraries = ("Qt/plugins/platforms/libqxcb.so", "Qt/lib/libQt6WebEngineCore.so.6")
+    report = {"platform": sys.platform, "display_present": bool(os.environ.get("DISPLAY")), "checked": {}}
+    unresolved = set()
+    for name in libraries:
+        result = subprocess.run(["ldd", str(package / name)], capture_output=True, text=True, check=False)
+        missing = sorted(
+            {line.strip() for line in (result.stdout + result.stderr).splitlines() if "not found" in line}
+        )
+        report["checked"][name] = {"ldd_exit": result.returncode, "unresolved": missing}
+        unresolved.update(missing)
+        if result.returncode:
+            raise AssertionError("Qt ELF dependency inspection failed: " + name)
+    report["status"] = "FAILED" if unresolved else "PASSED"
+    (directory / "dependencies.json").write_text(json.dumps(report, indent=2))
+    print("::notice title=Qt native dependencies::" + json.dumps(report), flush=True)
+    if unresolved:
+        for library in sorted(unresolved):
+            print("::error title=Unresolved Qt native dependency::" + library, flush=True)
+        raise AssertionError("Qt wheel has unresolved ELF dependencies")
+    return report
+
+
 def host(port, url, directory):
     os.environ["QTWEBENGINE_REMOTE_DEBUGGING"] = str(port)
     os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
@@ -27,6 +55,8 @@ def host(port, url, directory):
     os.environ["QTWEBENGINE_DISABLE_SANDBOX"] = "1"
     os.environ["QT_QUICK_BACKEND"] = "software"
     os.environ["XDG_CACHE_HOME"] = str(directory / "cache")
+    if sys.platform == "linux":
+        os.environ["QT_QPA_PLATFORM"] = "xcb"
     from PySide6.QtCore import QTimer, QUrl
     from PySide6.QtWidgets import QApplication, QMainWindow
     from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -38,6 +68,9 @@ def host(port, url, directory):
     view = QWebEngineView(window)
     profile = QWebEngineProfile(view)
     profile.setHttpCacheType(QWebEngineProfile.HttpCacheType.MemoryHttpCache)
+    (directory / "host-info.json").write_text(
+        json.dumps({"qt_platform": app.platformName(), "private_profile": profile.isOffTheRecord()})
+    )
     view.setPage(QWebEnginePage(profile, view))
     window.setCentralWidget(view)
     window.resize(1000, 700)
@@ -63,6 +96,7 @@ async def check(directory):
     from playwright.async_api import async_playwright
 
     directory.mkdir(parents=True, exist_ok=False)
+    dependencies = audit_linux_libraries(directory)
     with socket.socket() as reserved:
         reserved.bind(("127.0.0.1", 0))
         port = reserved.getsockname()[1]
@@ -164,7 +198,11 @@ async def check(directory):
                 "installed_bytes": sizes,
                 "production_provider": False,
                 "default_connection": default_connection,
+                "native_dependencies": dependencies,
+                **json.loads((directory / "host-info.json").read_text()),
             }
+            assert report["private_profile"]
+            assert report["qt_platform"] == ("xcb" if sys.platform == "linux" else "windows")
             (directory / "report.json").write_text(json.dumps(report, indent=2))
             print("::notice title=Embedded browser prototype::" + json.dumps(report), flush=True)
             return report

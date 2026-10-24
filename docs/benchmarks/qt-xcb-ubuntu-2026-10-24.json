@@ -1,0 +1,26 @@
+{
+  "scope": "Qt native dependency incident reproduction, not a replacement for the full CI CDP test",
+  "environment": "clean Ubuntu 24.04 container",
+  "pyside6": "6.8.3",
+  "baseline": "Playwright 1.64.0 install-deps chromium plus Qt packages from commit 677f9f6",
+  "before": {
+    "qxcb_unresolved": ["libxcb-shape.so.0"],
+    "webengine_unresolved": ["libatomic.so.1", "libXtst.so.6"],
+    "qt_xvfb_exit": 134,
+    "qt_debug_plugins_cause": "Cannot load library libqxcb.so: libxcb-shape.so.0: cannot open shared object file: No such file or directory"
+  },
+  "verified_deb_providers": {
+    "libxcb-shape0": "1.15-1ubuntu2",
+    "libatomic1": "14.2.0-4ubuntu2~24.04.1",
+    "libxtst6": "2:1.2.3-1.1ubuntu0.1"
+  },
+  "after": {
+    "qxcb_unresolved": [],
+    "webengine_unresolved": [],
+    "qt_xvfb_exit": 0,
+    "qt_platform": "xcb"
+  },
+  "xvfb": "1280x1024x24, no TCP listener",
+  "offscreen_fallback": false,
+  "ci_test_disabled": false
+}

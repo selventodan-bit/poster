@@ -34,3 +34,16 @@ python scripts/prototype_embedded_browser.py --output .poster/embedded-check
 ```
 
 На Linux нужен графический display/Xvfb и системные библиотеки Qt; точный рецепт сохранён в `embedded-prototype` job. Это исследовательская установка разработчика, не автоматическая загрузка при запуске Poster.
+
+## Причина сбоя Ubuntu/xcb и воспроизведение
+
+Сбой коммита `677f9f6` воспроизведён в отдельном чистом Ubuntu 24.04 с теми же `playwright install-deps chromium` и дополнительными пакетами из workflow. Присутствие `libxcb-cursor0` не устраняло ошибку: `ldd` для фактического `PySide6/Qt/plugins/platforms/libqxcb.so` показал **`libxcb-shape.so.0 => not found`**. Общая подсказка Qt про cursor не называла настоящую отсутствующую зависимость. Ранее исправленная `libEGL.so.1` к этому моменту уже разрешалась.
+
+| Проверенный ELF-объект | Не разрешалось в чистом окружении | Проверенный пакет Ubuntu |
+|---|---|---|
+| `libqxcb.so` и его Qt-зависимости | `libxcb-shape.so.0` | `libxcb-shape0` |
+| `libQt6WebEngineCore.so.6` | `libatomic.so.1`, `libXtst.so.6` | `libatomic1`, `libxtst6` |
+
+Библиотеки WebEngine могут уже присутствовать в полном GitHub runner image; рецепт теперь объявляет их явно и работает также в чистом Ubuntu. Имена пакетов сверены с содержимым `.deb`, а не выбраны по общей подсказке Qt. `xauth` также объявлен явно для `xvfb-run`.
+
+Перед запуском Qt прототип сохраняет `dependencies.json` с результатом `ldd` обоих объектов. Неразрешённая библиотека даёт именованную CI-ошибку и останавливает проверку. Linux запускается с `QT_QPA_PLATFORM=xcb` в настоящем Xvfb 1280×1024×24; отчёт проверяет `QApplication.platformName() == "xcb"` и private-профиль. Перехода на offscreen, `continue-on-error` или замены CDP-сценария нет. Артефакт сохраняет ELF-аудит и при неудаче; успешность по-прежнему требует реальных DOM binding, ввода, POST и снимка встроенного окна.

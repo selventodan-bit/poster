@@ -388,6 +388,10 @@ class MakerPanel(ToolsMixin, ClipboardMixin):
             self.document.checkpoint()
             for key in ("params", "title", "save_as", "result_path", "protect_result"):
                 setattr(node, key, getattr(updated, key))
+            if node.type == "Browser.OpenURL" and self.demo_base:
+                target = values.get("url")
+                if isinstance(target, str) and target.startswith(self.demo_base + "/"):
+                    self.document.graph.metadata["maker_demo"] = self.demo_base
             self.canvas.draw()
             self.select(node.id)
             self.changed()

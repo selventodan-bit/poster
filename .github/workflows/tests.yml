@@ -237,19 +237,21 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           python -m playwright install-deps chromium
-          sudo apt-get install -y xvfb libegl1 libgl1 libopengl0 libxcb-cursor0 libxkbcommon-x11-0 libxcb-icccm4 libxcb-keysyms1 libxcb-xinerama0
+          sudo apt-get install -y xvfb xauth libegl1 libgl1 libopengl0 libxcb-cursor0 libxkbcommon-x11-0 libxcb-icccm4 libxcb-keysyms1 libxcb-xinerama0 libxcb-shape0 libatomic1 libxtst6
       - name: Real embedded Qt browser with CDP on Linux
         if: runner.os == 'Linux'
-        run: xvfb-run -a python scripts/prototype_embedded_browser.py --output .poster/embedded-prototype
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24 -nolisten tcp" python scripts/prototype_embedded_browser.py --output .poster/embedded-prototype
       - name: Real embedded Qt browser with CDP on Windows
         if: runner.os == 'Windows'
         run: python scripts/prototype_embedded_browser.py --output .poster/embedded-prototype
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: embedded-prototype-${{ matrix.os }}
           path: |
             .poster/embedded-prototype/report.json
             .poster/embedded-prototype/embedded.png
+            .poster/embedded-prototype/dependencies.json
           include-hidden-files: true
           if-no-files-found: error
   original-editors:

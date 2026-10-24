@@ -106,6 +106,21 @@ async def test_api_key_urls_and_extracted_links_stay_protected():
             await runner.close()
 
 
+@pytest.mark.parametrize("value", [3, False])
+async def test_if_text_comparison_accepts_typed_protected_values(value):
+    vault = Vault()
+    condition = Node(
+        type="Logic.If", params={"condition": "equals", "left": vault.put_value(value), "expected": value}
+    )
+    runner = GraphRunner(sequence(Node(type="Start"), condition, Node(type="End.Success")), vault=vault)
+    try:
+        assert await runner.run() == "SUCCEEDED"
+        assert runner.results[1].port == "success"
+        assert runner.context.session.browser is None
+    finally:
+        await runner.close()
+
+
 def test_v1_migration_does_not_write_until_explicit_save(tmp_path):
     path = tmp_path / "old.postergraph.json"
     raw = {
