@@ -156,6 +156,7 @@ class MakerWindow(QMainWindow, ToolsMixin):
             self.observer.start(100)
         self.observation_browser = {}
         self.probe_busy = False
+        self.probe_serial = 0
 
     def guard(self, operation):
         try:
@@ -678,6 +679,7 @@ class MakerWindow(QMainWindow, ToolsMixin):
             self.browser.address.setText(data + "/")
         elif kind == "browser_probe":
             self.observation_browser = data
+            self.probe_serial += 1
             self.probe_busy = False
         elif kind == "profile_saved":
             self.profile_status.setText("Сессия зашифрована и сохранена. Автоматического сохранения нет.")
@@ -822,6 +824,7 @@ class MakerWindow(QMainWindow, ToolsMixin):
                 "values": self.live_values,
                 "trace": self.trace,
                 "browser": {**self.browser.state(), **self.observation_browser},
+                "browser_frame": self.probe_serial,
                 "status": self.status_label.text(),
                 "error": self.last_error,
                 "saved_file": str(self.path) if self.path else None,

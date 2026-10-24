@@ -162,18 +162,42 @@ class MakerController:
             if frame == page.main_frame:
                 continue
             try:
-                box = await (await frame.frame_element()).bounding_box()
+                element = await frame.frame_element()
+                box = await element.bounding_box()
                 if not box:
                     continue
+                border = await element.evaluate(
+                    "e=>({x:e.clientLeft,y:e.clientTop,width:e.clientWidth,height:e.clientHeight})"
+                )
+                clip = {
+                    "x": box["x"] + border["x"],
+                    "y": box["y"] + border["y"],
+                    "width": border["width"],
+                    "height": border["height"],
+                }
                 child = await frame.evaluate(script)
                 path, current = [], frame
                 while current.parent_frame:
                     path.insert(0, await (await current.frame_element()).evaluate(SELECTOR_EXPRESSION))
                     current = current.parent_frame
+                    if current.parent_frame:
+                        ancestor = await (await current.frame_element()).bounding_box()
+                        if ancestor:
+                            right = min(clip["x"] + clip["width"], ancestor["x"] + ancestor["width"])
+                            bottom = min(clip["y"] + clip["height"], ancestor["y"] + ancestor["height"])
+                            clip["x"], clip["y"] = (
+                                max(clip["x"], ancestor["x"]),
+                                max(clip["y"], ancestor["y"]),
+                            )
+                            clip["width"], clip["height"] = (
+                                max(0, right - clip["x"]),
+                                max(0, bottom - clip["y"]),
+                            )
                 for control in child["controls"]:
+                    control["clip"] = clip
                     control["selector"] = " >> ".join([*path, control["selector"]])
-                    control["x"] += box["x"] + 2
-                    control["y"] += box["y"] + 2
+                    control["x"] += box["x"] + border["x"]
+                    control["y"] += box["y"] + border["y"]
                     result["controls"].append(control)
             except Exception:
                 pass

@@ -22,7 +22,7 @@ def streams():
 
 def main():
     streams()
-    from PySide6.QtCore import QObject, Signal, QTimer, QUrl
+    from PySide6.QtCore import QObject, Signal, QTimer, QUrl, QEvent
     from PySide6.QtWidgets import QApplication, QMainWindow
     from .qt_browser import BrowserPane, configure_browser
 
@@ -56,7 +56,13 @@ def main():
     class Bridge(QObject):
         received = Signal(dict)
 
+        def eventFilter(self, watched, event):
+            if watched is window and event.type() == QEvent.Type.Close:
+                QTimer.singleShot(0, shutdown)
+            return False
+
     bridge = Bridge()
+    window.installEventFilter(bridge)
 
     def command(message):
         try:
@@ -66,6 +72,10 @@ def main():
                 QTimer.singleShot(0, shutdown)
             elif name in {"state", "new_tab", "activate", "close_tab"}:
                 result = pane.command(name, message.get("params", {}))
+                if name == "activate":
+                    window.show()
+                    window.raise_()
+                    window.activateWindow()
             else:
                 raise ValueError("Unsupported command")
             send({"id": message.get("id"), "result": result})

@@ -45,6 +45,7 @@ class BrowserPane(QWidget):
 
     def __init__(self):
         super().__init__()
+        self.setMinimumHeight(200)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.toolbar = QToolBar("Браузер")

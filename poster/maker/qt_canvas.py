@@ -97,6 +97,7 @@ class GraphView(QGraphicsView):
     def __init__(self, document, editable):
         super().__init__()
         self.setObjectName("graph_canvas")
+        self.setMinimumHeight(120)
         self.document, self.editable = document, editable
         self.blocks, self.links, self.adjacent = {}, [], {}
         self.connection = None

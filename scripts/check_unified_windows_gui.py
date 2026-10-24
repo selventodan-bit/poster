@@ -159,20 +159,42 @@ def check(executable, output):
         ensure_visible(name)
 
     def browser_control(selector):
-        state = wait(
-            lambda s: any(c["selector"] == selector for c in s.get("browser", {}).get("controls", [])),
-            "browser element " + selector,
-        )
-        view = state["browser"]
-        control = next(c for c in view["controls"] if c["selector"] == selector)
-        x, y, width, height = view["view_rect"]
-        window.set_focus()
-        mouse.click(
-            coords=(
-                int(x + (control["x"] + control["width"] / 2) * width / view["viewport"]["width"]),
-                int(y + (control["y"] + control["height"] / 2) * height / view["viewport"]["height"]),
+        def has_control(s):
+            return any(c["selector"] == selector for c in s.get("browser", {}).get("controls", []))
+
+        state = wait(has_control, "browser element " + selector)
+        for _ in range(18):
+            view = state["browser"]
+            control = next(c for c in view["controls"] if c["selector"] == selector)
+            x, y, width, height = view["view_rect"]
+            vw, vh = view["viewport"]["width"], view["viewport"]["height"]
+            clip = control.get("clip", {"x": 0, "y": 0, "width": vw, "height": vh})
+            left, top = max(0, control["x"], clip["x"]), max(0, control["y"], clip["y"])
+            right = min(vw, control["x"] + control["width"], clip["x"] + clip["width"])
+            bottom = min(vh, control["y"] + control["height"], clip["y"] + clip["height"])
+            window.set_focus()
+            if right - left > 3 and bottom - top > 3:
+                mouse.click(
+                    coords=(
+                        int(x + (left + right) / 2 * width / vw),
+                        int(y + (top + bottom) / 2 * height / vh),
+                    )
+                )
+                return
+            # Scroll the actual visible frame (or page) through the OS. Geometry
+            # comes only from the observer; no JS scroll/click command is sent.
+            sx = min(vw - 10, max(10, clip["x"] + clip["width"] / 2))
+            sy = min(vh - 10, max(10, clip["y"] + clip["height"] / 2))
+            frame = state.get("browser_frame", 0)
+            mouse.scroll(
+                coords=(int(x + sx * width / vw), int(y + sy * height / vh)),
+                wheel_dist=3 if control["y"] < 0 else -3,
             )
-        )
+            state = wait(
+                lambda s, previous_frame=frame: s.get("browser_frame", 0) > previous_frame and has_control(s),
+                "browser scrolled " + selector,
+            )
+        raise AssertionError("Browser control remains clipped: " + selector)
 
     def picture(name):
         window.set_focus()
