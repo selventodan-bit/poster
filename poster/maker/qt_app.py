@@ -309,6 +309,8 @@ class MakerWindow(QMainWindow, ToolsMixin):
             self.changed()
 
     def replace(self, graph, *, vault=None, dirty=False):
+        if graph.id != self.document.graph.id:
+            self.live_values = {}
         self.document = Document(graph)
         self.document.dirty = dirty
         if vault is not None:

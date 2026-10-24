@@ -280,10 +280,17 @@ class ToolsMixin:
 
     def refresh_variables(self):
         self.variables_table.blockSignals(True)
-        self.variables_table.setRowCount(len(self.document.graph.variables))
-        for row, (name, definition) in enumerate(self.document.graph.variables.items()):
+        definitions = self.document.graph.variables
+        names = list(dict.fromkeys([*definitions, *self.live_values]))
+        self.variables_table.setRowCount(len(names))
+        for row, name in enumerate(names):
+            definition = definitions.get(name)
             for column, value in enumerate(
-                (name, display(definition.value), display(self.live_values.get(name, "")))
+                (
+                    name,
+                    display(definition.value) if definition else "",
+                    display(self.live_values.get(name, "")),
+                )
             ):
                 self.variables_table.setItem(row, column, QTableWidgetItem(value))
         self.variables_table.blockSignals(False)
@@ -293,12 +300,14 @@ class ToolsMixin:
         if row < 0:
             return
         name = self.variables_table.item(row, 0).text()
-        definition = self.document.graph.variables[name]
+        definition = self.document.graph.variables.get(name)
+        value = self.live_values.get(name, definition.value if definition else None)
+        protected = bool(definition and definition.secret) or value == "••••"
         self.variable_name.setText(name)
-        self.variable_value.setPlainText("" if definition.secret else display(definition.value))
-        self.variable_secret.setChecked(definition.secret)
-        self.variable_input.setChecked(definition.input)
-        self.variable_required.setChecked(definition.required)
+        self.variable_value.setPlainText("" if protected else display(value))
+        self.variable_secret.setChecked(protected)
+        self.variable_input.setChecked(bool(definition and definition.input))
+        self.variable_required.setChecked(bool(definition and definition.required))
 
     def save_variable(self):
         if not self.editable():

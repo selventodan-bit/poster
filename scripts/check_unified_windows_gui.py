@@ -418,6 +418,13 @@ def check(executable, output):
             lambda s: s["values"].get("debug_marker") == "native live value" and not s["busy"],
             "live variable edit",
         )
+        # A breakpoint is intentionally hit on every loop iteration. Remove it through
+        # the UI before asking the debugger to finish the remaining iterations.
+        click("breakpoint")
+        wait(
+            lambda s: not next(n for n in s["graph"]["nodes"] if n["id"] == "input")["breakpoint"],
+            "loop breakpoint removed",
+        )
         click("run")
         wait(lambda s: s["run_state"] == "SUCCEEDED" and not s["busy"], "loop completed")
         assert snapshot()["values"]["counter"] == 2

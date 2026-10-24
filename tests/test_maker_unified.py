@@ -148,11 +148,21 @@ def scenario(root):
         wait(lambda: window.browser.current().page().devToolsId(), "window starts")
         assert window.browser.current().window() is window
         assert window.canvas.window() is window
+        window.live_values = {"runtime_number": 17, "runtime_secret": "••••"}
+        window.refresh_variables()
+        assert window.variables_table.rowCount() == 2
+        window.variables_table.selectRow(0)
+        assert window.variable_name.text() == "runtime_number"
+        assert window.variable_value.toPlainText() == "17"
+        window.variables_table.selectRow(1)
+        assert window.variable_secret.isChecked()
+        assert window.variable_value.toPlainText() == ""
         window.splitter.setSizes([280, 380])
         app.processEvents()
         assert window.browser.height() > 100 and window.canvas.height() > 100
         started = time.monotonic()
         window.replace(large_graph(), dirty=False)
+        assert not window.live_values and window.variables_table.rowCount() == 0
         window.canvas.fit()
         app.processEvents()
         assert len(window.canvas.blocks) == 1200 and time.monotonic() - started < 12
