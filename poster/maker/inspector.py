@@ -60,6 +60,9 @@ class Inspector:
             path.insert(0, await (await frame.frame_element()).evaluate(SELECTOR_EXPRESSION))
             frame = frame.parent_frame
         data["frame"] = path
+        data["tab_id"] = self.session.tab_id(source["page"])
+        if data["tab_id"] is None:
+            raise GraphError("TAB_CONTEXT_MISSING")
         # Filter again across the binding boundary; never trust page-supplied attributes.
         data["attributes"] = {
             str(k)[:100]: "[hidden]"
@@ -74,6 +77,8 @@ class Inspector:
         self.on_pick(data)
 
     async def enable(self):
+        if self.session.provider.name == "qt":
+            self.session.page = await self.session.provider.active_page()
         if not self.session.page or self.session.page.is_closed():
             raise GraphError("TAB_MISSING")
         session = self.session
@@ -87,7 +92,7 @@ class Inspector:
         for frame in session.page.frames:
             await frame.evaluate(PICKER_JS)
             await frame.evaluate("window.__posterMakerPicking=true")
-        await session.page.bring_to_front()
+        await session.provider.activate(session.page)
 
     async def disable(self):
         for page in self.session.context.pages if self.session.context else []:

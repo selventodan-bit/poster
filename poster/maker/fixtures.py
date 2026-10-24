@@ -29,6 +29,11 @@ class MakerHandler(Handler):
                 200,
                 """<meta charset="utf-8"><title>ProjectMaker async</title><button id="async" onclick="setTimeout(()=>location.href='/async?stage=two',250)">Next</button>""",
             )
+        elif path == "/tabs":
+            self.reply(
+                200,
+                '<meta charset="utf-8"><title>Maker tabs</title><a id="popup" target="_blank" href="/iframe">Открыть форму</a><input id="main-note"><select id="choice"><option value="a">A</option><option value="b">B</option></select>',
+            )
         elif path == "/iframe":
             self.reply(
                 200,

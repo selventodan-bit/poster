@@ -140,22 +140,37 @@ def check(executable, output):
         )
         view = state["maker"]["browser"]
         control = next(c for c in view["controls"] if c["selector"] == selector)
-        browsers = [
-            w
-            for w in Desktop(backend="win32").windows(class_name="Chrome_WidgetWin_1", visible_only=True)
-            if "ProjectMaker" in w.window_text()
-        ]
-        assert browsers, "Controlled Chrome window missing"
-        browser = browsers[-1]
-        browser.set_focus()
-        time.sleep(0.15)
-        renderers = [
-            w
-            for w in browser.descendants(class_name="Chrome_RenderWidgetHostHWND")
-            if w.rectangle().width() > 100 and w.rectangle().height() > 100
-        ]
-        assert renderers, "Chrome renderer HWND missing"
-        rectangle = max(renderers, key=lambda w: w.rectangle().width() * w.rectangle().height()).rectangle()
+        if info.get("browser_provider") == "qt":
+            from types import SimpleNamespace
+
+            browser = Desktop(backend="win32").window(title="Poster Maker — браузер")
+            browser.wait("visible", timeout=10)
+            browser.set_focus()
+            time.sleep(0.2)
+            # Refetch read-only native Qt view geometry after focusing the window.
+            state = wait(lambda s: bool(s["maker"]["browser"].get("qt")), "Qt view geometry")
+            left, top, width, height = state["maker"]["browser"]["qt"]["view_rect"]
+            rectangle = SimpleNamespace(left=left, top=top, width=lambda: width, height=lambda: height)
+            assert state["maker"]["browser"]["qt"]["private_profile"]
+        else:
+            browsers = [
+                w
+                for w in Desktop(backend="win32").windows(class_name="Chrome_WidgetWin_1", visible_only=True)
+                if "ProjectMaker" in w.window_text()
+            ]
+            assert browsers, "Controlled Chrome window missing"
+            browser = browsers[-1]
+            browser.set_focus()
+            time.sleep(0.15)
+            renderers = [
+                w
+                for w in browser.descendants(class_name="Chrome_RenderWidgetHostHWND")
+                if w.rectangle().width() > 100 and w.rectangle().height() > 100
+            ]
+            assert renderers, "Chrome renderer HWND missing"
+            rectangle = max(
+                renderers, key=lambda w: w.rectangle().width() * w.rectangle().height()
+            ).rectangle()
         x = (
             rectangle.left
             + (control["x"] + control["width"] / 2) * rectangle.width() / view["viewport"]["width"]
@@ -477,7 +492,7 @@ def check(executable, output):
             "graph_nodes": count,
             "writes": 3,
             "scenarios": completed,
-            "browser_embedded": False,
+            "browser_embedded": info.get("browser_provider") == "qt",
         }
         (output / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
         print("::notice title=Maker Windows GUI E2E::" + json.dumps(report), flush=True)

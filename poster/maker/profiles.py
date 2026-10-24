@@ -1,0 +1,147 @@
+"""Explicit encrypted session snapshots, never a shared mutable browser directory."""
+
+from pathlib import Path
+import re
+from urllib.parse import urlsplit
+
+from filelock import FileLock
+
+from ..auth import decrypt_bytes, encrypt_session
+from .model import GraphError, identity
+from .storage import atomic, read_bounded
+
+RESTORE = """state=>{
+ const origin=location.origin;
+ for(const item of state.origins||[]) if(item.origin===origin)
+   for(const entry of item.localStorage||[]) localStorage.setItem(entry.name,entry.value);
+}"""
+
+
+class Profiles:
+    def __init__(self, root):
+        self.root = Path(root)
+        self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if self.root.is_symlink():
+            raise GraphError("PROFILE_INVALID")
+
+    def path(self, name):
+        if not re.fullmatch(r"profile_[a-f0-9]{12,32}", name):
+            raise GraphError("PROFILE_INVALID")
+        path = self.root / (name + ".enc")
+        if path.is_symlink():
+            raise GraphError("PROFILE_INVALID")
+        return path
+
+    def list(self):
+        result = []
+        for path in sorted(self.root.glob("profile_*.enc")):
+            value = decrypt_bytes(read_bounded(self.path(path.stem)))
+            result.append((path.stem, value["name"]))
+        return result
+
+    def create(self, name):
+        if not name.strip() or len(name) > 100:
+            raise GraphError("PROFILE_INVALID")
+        key = "profile_" + identity()
+        atomic(self.path(key), encrypt_session({"name": name, "revision": 0, "state": {}}))
+        return key
+
+    def open(self, key):
+        path = self.path(key)
+        if not path.is_file():
+            raise GraphError("PROFILE_MISSING")
+        return Profile(self, key, decrypt_bytes(read_bounded(path)))
+
+    def clear(self, key):
+        # Revision change invalidates any other session's unsaved snapshot.
+        profile = self.open(key)
+        profile.commit({})
+
+
+class Profile:
+    def __init__(self, store, key, data):
+        self.store, self.key, self.data = store, key, data
+
+    def commit(self, state):
+        path = self.store.path(self.key)
+        with FileLock(str(path) + ".lock"):
+            previous = decrypt_bytes(read_bounded(path))
+            if previous["revision"] != self.data["revision"]:
+                raise GraphError("PROFILE_CONFLICT")
+            updated = {"name": self.data["name"], "revision": previous["revision"] + 1, "state": state}
+            raw = encrypt_session(updated)
+            if len(raw) > 10_000_000:
+                raise GraphError("FILE_TOO_LARGE")
+            atomic(path, raw)
+            self.data = updated
+
+    async def restore(self, session):
+        state = self.data["state"]
+        cookies = state.get("cookies", [])
+        if cookies:
+            cdp = await session.context.new_cdp_session(session.page)
+            try:
+                await cdp.send("Network.setCookies", {"cookies": cookies})
+            finally:
+                await cdp.detach()
+        # Seed an origin through a synthetic intercepted document, once per run.
+        # No request reaches the website and no init script can reset later edits
+        # or undo a logout's localStorage.clear(). Every tab shares this storage.
+        original = session.page
+        for item in state.get("origins", []):
+            origin = item["origin"]
+            parsed = urlsplit(origin)
+            if (
+                parsed.scheme not in {"http", "https"}
+                or not parsed.hostname
+                or parsed.username
+                or parsed.password
+                or parsed.path not in {"", "/"}
+                or parsed.query
+                or parsed.fragment
+            ):
+                raise GraphError("PROFILE_INVALID")
+            bootstrap = origin.rstrip("/") + "/.poster-local-bootstrap-" + identity()
+
+            async def stub(route):
+                await route.fulfill(
+                    status=200, content_type="text/html", body="<title>Poster session initialization</title>"
+                )
+
+            await session.context.route(bootstrap, stub)
+            page = None
+            try:
+                page = await session.provider.new_page()
+                await page.goto(bootstrap, wait_until="domcontentloaded", timeout=10000)
+                await page.evaluate(RESTORE, {"origins": [item]})
+            finally:
+                if page and not page.is_closed():
+                    await session.provider.close_page(page)
+                await session.context.unroute(bootstrap, stub)
+        await session.provider.activate(original)
+
+    async def save(self, session):
+        if not session.context or not session.context.pages:
+            raise GraphError("TAB_MISSING")
+        cdp = await session.context.new_cdp_session(session.context.pages[0])
+        try:
+            raw = (await cdp.send("Network.getAllCookies"))["cookies"]
+        finally:
+            await cdp.detach()
+        fields = {"name", "value", "domain", "path", "secure", "httpOnly", "sameSite", "expires"}
+        cookies = [{key: value for key, value in cookie.items() if key in fields} for cookie in raw]
+        # Session cookies use expires=-1 in CDP; omit it when restoring.
+        for cookie in cookies:
+            if cookie.get("expires", -1) < 0:
+                cookie.pop("expires", None)
+        origins = {item["origin"]: item for item in self.data["state"].get("origins", [])}
+        for page in session.context.pages:
+            for frame in page.frames:
+                try:
+                    value = await frame.evaluate("""()=>({origin:location.origin,
+                        localStorage:Object.keys(localStorage).map(name=>({name,value:localStorage.getItem(name)}))})""")
+                    if value["origin"].startswith(("http://", "https://")):
+                        origins[value["origin"]] = value
+                except Exception:
+                    pass  # Closed frames / opaque origins have no portable localStorage.
+        self.commit({"cookies": cookies, "origins": list(origins.values())})

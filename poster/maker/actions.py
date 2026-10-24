@@ -146,6 +146,7 @@ async def open_url(ctx, params):
 async def click(ctx, params):
     locator = await ctx.locator(params)
     await ctx.before_action()
+    await ctx.session.provider.prepare_pointer(locator, params.timeout_ms)
     await locator.click(button=params.button, timeout=params.timeout_ms)
     return "success", {"clicked": True}
 

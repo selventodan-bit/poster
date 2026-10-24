@@ -10,6 +10,10 @@ def main():
     multiprocessing.freeze_support()
     if getattr(sys, "frozen", False):
         os.chdir(Path(sys.executable).resolve().parent)
+    if "--qt-browser-host" in sys.argv:
+        from poster.maker.qt_host import main as host_main
+
+        return host_main()
     os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(Path(".poster/browsers").absolute()))
     try:
         from poster.recorder.app import launch

@@ -64,11 +64,16 @@ class ActionRecorder:
         self.last_action = None
         self.last_action_time = 0
         self.seen_events = set()
+        self.pages = {}
+        self.page_tasks = {}
+        self.active_tab = "main"
+        self.action_lock = asyncio.Lock()
+        self.page_listener = lambda page: self.task(self.attach_page(page, created=True))
 
     def changed(self):
         self.on_change(self.graph.model_dump(mode="json"))
 
-    def append(self, action, params, *, event_id=None):
+    def append(self, action, params, *, event_id=None, page=None):
         if len(self.graph.nodes) >= 2000:
             raise GraphError("RECORD_LIMIT")
         count = len(self.graph.nodes) - 1
@@ -79,6 +84,10 @@ class ActionRecorder:
         self.graph.edges.extend(
             [Edge(source=self.tail, target=node.id), Edge(source=node.id, target=self.end)]
         )
+        if action.startswith("Browser."):
+            tab = self.session.tab_id(page or self.session.page)
+            if tab:
+                node.extensions["browser_tab"] = tab
         self.graph.nodes.insert(-1, node)
         self.tail = node.id
         if event_id:
@@ -116,23 +125,106 @@ class ActionRecorder:
                     binding="__poster_maker_action",
                 )
                 session.record_binding = True
-            for frame in self.session.page.frames:
-                await frame.evaluate(RECORD_JS)
-                await frame.evaluate("window.__posterMakerStart?.()")
-            self.cdp = await self.session.context.new_cdp_session(self.session.page)
-            await self.cdp.send("Page.enable")
-            main_id = (await self.cdp.send("Page.getFrameTree"))["frameTree"]["frame"]["id"]
-            self.cdp.on(
-                "Page.frameRequestedNavigation",
-                lambda event: self.navigation_intent(event, main_id),
-            )
-            self.session.page.on("framenavigated", self.navigation_event)
+            self.session.context.on("page", self.page_listener)
+            for page in self.session.context.pages:
+                await self.attach_page(page)
             self.accepting = True
             self.changed()
             return self
         except BaseException:
             await self.close()
             raise
+
+    async def attach_page(self, page, created=False):
+        if page in self.pages:
+            return
+        self.pages[page] = {
+            "cdp": None,
+            "listener": None,
+            "last_action": None,
+            "renderer": False,
+            "intent_time": 0,
+            "ready": asyncio.Event(),
+        }
+        state = self.pages[page]
+        try:
+            if created:
+                # The action binding may arrive before Playwright's page event.
+                # Install the binding globally, then serialize creation before page actions.
+                opener = await page.opener()
+                if opener is None and self.session.provider.name == "qt":
+                    provider = self.session.provider
+                    host = await provider.request("state")
+                    target = await provider.target(page)
+                    parent = next((t["opener"] for t in host["tabs"] if t["target"] == target), None)
+                    if parent:
+                        opener = await provider.page_for(parent)
+                name = "tab_" + str(len(self.session.tabs))
+                self.session.bind_tab(name, page)
+                if opener:
+                    await asyncio.sleep(0.05)  # Drain the causal click binding before the popup.
+                    cause = self.pages.get(opener, {}).get("last_action") or self.last_action
+                    if not cause:
+                        self.on_warning("POPUP_ANCHOR_MISSING")
+                    else:
+                        self.append("Browser.WaitPopup", {"tab_id": name, "after_node": cause}, page=opener)
+                else:
+                    self.append("Browser.NewTab", {"tab_id": name}, page=self.session.page)
+                self.active_tab = name
+                self.session.page = page
+            for frame in page.frames:
+                try:
+                    await frame.evaluate(RECORD_JS)
+                    await frame.evaluate("window.__posterMakerStart?.()")
+                except Exception:
+                    pass
+            cdp = await self.session.context.new_cdp_session(page)
+            state["cdp"] = cdp
+            await cdp.send("Page.enable")
+            main_id = (await cdp.send("Page.getFrameTree"))["frameTree"]["frame"]["id"]
+            cdp.on("Page.frameRequestedNavigation", lambda event: self.page_intent(page, event, main_id))
+
+            def listener(frame):
+                self.page_navigation(page, frame)
+
+            state["listener"] = listener
+            page.on("framenavigated", listener)
+            state["close_listener"] = lambda: self.page_closed(page)
+            page.on("close", state["close_listener"])
+        except Exception:
+            if not page.is_closed() and self.accepting:
+                self.on_warning("TAB_ATTACH_FAILED")
+        finally:
+            state["ready"].set()
+
+    def page_closed(self, page):
+        if not self.accepting or not self.session.tab_id(page):
+            return
+        remaining = [p for p in self.session.context.pages if p is not page and not p.is_closed()]
+        if remaining:
+            self.append("Browser.CloseTab", {}, page=page)
+            self.session.page = remaining[-1]
+            self.active_tab = self.session.tab_id(self.session.page)
+
+    def page_intent(self, page, event, main_id):
+        if event.get("frameId") == main_id and event.get("reason") in {
+            "anchorClick",
+            "formSubmissionGet",
+            "formSubmissionPost",
+            "scriptInitiated",
+            "metaTagRefresh",
+            "httpHeaderRefresh",
+        }:
+            self.pages[page]["renderer"] = True
+            self.pages[page]["intent_time"] = time.monotonic()
+
+    def page_navigation(self, page, frame):
+        if not self.accepting or frame != page.main_frame:
+            return
+        state = self.pages[page]
+        renderer = state["renderer"] and time.monotonic() - state["intent_time"] < 2
+        state["renderer"] = False
+        self.task(self.navigation(frame, bool(self.opening), renderer, state["last_action"], page=page))
 
     def navigation_intent(self, event, main_id):
         if event.get("frameId") == main_id and event.get("reason") in {
@@ -155,11 +247,21 @@ class ActionRecorder:
         return selectors
 
     async def action(self, source, data):
+        async with self.action_lock:
+            await self.record_action(source, data)
+
+    async def record_action(self, source, data):
         if not self.accepting:
             return
-        if source["page"] != self.session.page:
-            self.on_warning("POPUP_UNSUPPORTED")
-            return
+        page = source["page"]
+        if page not in self.pages:
+            await self.attach_page(page, created=True)
+        await self.pages[page]["ready"].wait()
+        tab = self.session.tab_id(page)
+        if tab != self.active_tab:
+            self.append("Browser.SwitchTab", {"tab_id": tab}, page=self.session.page)
+            self.active_tab = tab
+        self.session.page = page
         try:
             kind = data.get("kind")
             selector = data.get("selector", "")
@@ -174,9 +276,10 @@ class ActionRecorder:
                 return
             self.seen_events.add(event_id)
             frame = await self.frame_path(source["frame"])
-            key = (tuple(frame), selector, data.get("document_id"))
+            key = (tab, tuple(frame), selector, data.get("document_id"))
             if not frame:
                 self.document_id = data.get("document_id")
+                self.pages[page]["document_id"] = self.document_id
             if (
                 kind == "input"
                 and self.last_input
@@ -217,6 +320,7 @@ class ActionRecorder:
                     "Browser.Click", {**target, "button": data.get("button", "left")}, event_id=event_id
                 )
                 self.last_input = None
+            self.pages[page]["last_action"] = self.last_action
         except Exception as exc:
             self.on_warning(
                 {
@@ -234,11 +338,14 @@ class ActionRecorder:
         self.renderer_navigation = False
         self.task(self.navigation(frame, explicit, renderer, self.last_action))
 
-    async def navigation(self, frame, explicit, renderer, after_node):
+    async def navigation(self, frame, explicit, renderer, after_node, page=None):
         try:
             document = await frame.evaluate("window.__posterMakerDocumentId||null")
-            same_document = bool(document and document == self.document_id)
+            previous = self.pages.get(page, {}).get("document_id") if page else self.document_id
+            same_document = bool(document and document == previous)
             self.document_id = document
+            if page in self.pages:
+                self.pages[page]["document_id"] = document
             if explicit or not self.accepting:
                 return
             url = frame.url
@@ -262,10 +369,11 @@ class ActionRecorder:
                 self.append(
                     "Browser.WaitURL",
                     {"url": navigation_pattern(url), "after_action": True, "after_node": after_node},
+                    page=page,
                 )
             else:
                 value = self.vault.put(url) if sensitive_url(url) else url
-                self.append("Browser.OpenURL", {"url": value})
+                self.append("Browser.OpenURL", {"url": value}, page=page)
             self.last_input = None
         except Exception:
             self.on_warning("NAVIGATION_NOT_RECORDED")
@@ -297,11 +405,19 @@ class ActionRecorder:
         if self.pending:
             await asyncio.gather(*list(self.pending), return_exceptions=True)
         self.accepting = False
-        if self.session.page:
-            self.session.page.remove_listener("framenavigated", self.navigation_event)
-        if self.cdp:
-            await self.cdp.detach()
-            self.cdp = None
+        if self.session.context:
+            self.session.context.remove_listener("page", self.page_listener)
+        for page, state in self.pages.items():
+            if state["listener"]:
+                page.remove_listener("framenavigated", state["listener"])
+            if state.get("close_listener"):
+                page.remove_listener("close", state["close_listener"])
+            if state["cdp"]:
+                try:
+                    await state["cdp"].detach()
+                except Exception:
+                    pass
+        self.pages = {}
         if close:
             await self.session.close()
         self.changed()

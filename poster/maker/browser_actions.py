@@ -15,10 +15,18 @@ class Attribute(Target):
 
 class Tab(DataModel):
     index: int = Field(default=0, ge=0, le=100)
+    tab_id: str = ""
 
 
 class NewTab(OpenURL):
     url: str = ""
+    tab_id: str = ""
+
+
+class Popup(DataModel):
+    tab_id: str
+    after_node: str
+    timeout_ms: int = Field(default=10000, ge=1, le=120000)
 
 
 async def text(ctx, p):
@@ -40,7 +48,7 @@ async def attribute(ctx, p):
 
 async def new_tab(ctx, p):
     await ctx.page()
-    page = await ctx.session.context.new_page()
+    page = await ctx.session.new_page(p.tab_id or None)
     ctx.use_page(page)
     if p.url:
         await open_url(ctx, OpenURL(url=p.url))
@@ -50,19 +58,55 @@ async def new_tab(ctx, p):
 async def switch_tab(ctx, p):
     await ctx.page()
     pages = ctx.session.context.pages
+    if p.tab_id:
+        page = ctx.use_page(await ctx.session.select_tab(p.tab_id))
+        return "success", {"tab_id": p.tab_id, "index": pages.index(page)}
     if p.index >= len(pages):
         raise GraphError("TAB_MISSING")
     page = ctx.use_page(pages[p.index])
-    await page.bring_to_front()
+    await ctx.session.provider.activate(page)
     return "success", {"index": p.index}
 
 
 async def close_tab(ctx, p):
     page = await ctx.page()
-    await page.close()
+    await ctx.session.provider.close_page(page)
     pages = ctx.session.context.pages
-    ctx.use_page(pages[-1] if pages else await ctx.session.context.new_page())
+    ctx.use_page(pages[-1] if pages else await ctx.session.new_page())
     return "success", {"remaining": len(ctx.session.context.pages)}
+
+
+async def wait_popup(ctx, p):
+    checkpoint = ctx.checkpoints.get(p.after_node)
+    if checkpoint is None:
+        raise GraphError("WAIT_ANCHOR_MISSING")
+    opener = checkpoint[1]
+    previous = ctx.popup_checkpoints.get(p.after_node, set())
+    import asyncio
+
+    deadline = asyncio.get_running_loop().time() + p.timeout_ms / 1000
+    while asyncio.get_running_loop().time() < deadline:
+        for page in ctx.session.context.pages:
+            if page in previous or page.is_closed():
+                continue
+            actual_opener = await page.opener()
+            if actual_opener is None and ctx.session.provider.name == "qt":
+                provider = ctx.session.provider
+                state = await provider.request("state")
+                target, parent = await provider.target(page), await provider.target(opener)
+                actual_opener = (
+                    opener
+                    if any(t["target"] == target and t["opener"] == parent for t in state["tabs"])
+                    else None
+                )
+            if actual_opener is opener:
+                ctx.session.bind_tab(p.tab_id, page)
+                ctx.use_page(page)
+                await ctx.session.provider.activate(page)
+                await page.wait_for_load_state("domcontentloaded", timeout=p.timeout_ms)
+                return "success", {"tab_id": p.tab_id}
+        await asyncio.sleep(0.05)
+    raise GraphError("POPUP_TIMEOUT")
 
 
 def register_browser_actions(registry):
@@ -72,6 +116,17 @@ def register_browser_actions(registry):
         Property("timeout_ms", "Ожидание, мс", "integer"),
     )
     for action in (
+        Action(
+            "Browser.WaitPopup",
+            "Вкладки · Ждать popup",
+            Popup,
+            wait_popup,
+            (
+                Property("tab_id", "ID новой вкладки"),
+                Property("after_node", "ID вызвавшего кубика"),
+                Property("timeout_ms", "Ожидание, мс", "integer"),
+            ),
+        ),
         Action("Browser.ReadText", "Браузер · Читать текст", Target, text, target),
         Action(
             "Browser.ReadAttribute",
@@ -81,14 +136,21 @@ def register_browser_actions(registry):
             (*target, Property("attribute", "Атрибут")),
         ),
         Action(
-            "Browser.NewTab", "Вкладки · Открыть", NewTab, new_tab, (Property("url", "URL (необязательно)"),)
+            "Browser.NewTab",
+            "Вкладки · Открыть",
+            NewTab,
+            new_tab,
+            (Property("url", "URL (необязательно)"), Property("tab_id", "ID новой вкладки (необязательно)")),
         ),
         Action(
             "Browser.SwitchTab",
             "Вкладки · Переключить",
             Tab,
             switch_tab,
-            (Property("index", "Индекс вкладки (с нуля)", "integer"),),
+            (
+                Property("index", "Индекс вкладки (с нуля)", "integer"),
+                Property("tab_id", "ID вкладки (вместо индекса)"),
+            ),
         ),
         Action("Browser.CloseTab", "Вкладки · Закрыть текущую", Empty, close_tab),
     ):

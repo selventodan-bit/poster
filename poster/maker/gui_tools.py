@@ -121,6 +121,11 @@ class ToolsMixin:
         row.pack(fill="x")
         self.button(row, "read_text", "Читать текст", lambda: self.add_extraction("Browser.ReadText"))
         self.button(row, "read_attribute", "Атрибут", lambda: self.add_extraction("Browser.ReadAttribute"))
+        row = ttk.Frame(browser)
+        row.pack(fill="x")
+        self.button(row, "element_click", "Клик", lambda: self.add_element_action("Browser.Click"))
+        self.button(row, "element_input", "Ввод", lambda: self.add_element_action("Browser.Input"))
+        self.button(row, "element_wait", "Ожидание", lambda: self.add_element_action("Browser.WaitElement"))
         self.element_details = tk.Text(browser, width=25, height=5, state="disabled", wrap="word")
         self.element_details.pack(fill="both", expand=True, pady=3)
         row = ttk.Frame(browser)
@@ -314,7 +319,7 @@ class ToolsMixin:
             if inputs is None:
                 return
         graph = self.document.graph.model_copy(deep=True)
-        session = self.browser_session()
+        session = self.browser_session() or self.new_browser_session()
         messages, epoch = self.messages, self.epoch
 
         async def work():
@@ -373,15 +378,18 @@ class ToolsMixin:
             self.show_error(GraphError("URL_INVALID"))
             return
 
+        new_session = self.new_browser_session() if not self.browser_session() else None
+
         async def work():
             await self.ensure_demo()
             session = self.browser_session()
             if not session:
                 self.tools_context = Context(self.vault, headless=False)
+                self.tools_context.session = new_session
                 await self.tools_context.page()
                 session = self.tools_context.session
             await session.page.goto(url, wait_until="domcontentloaded")
-            await session.page.bring_to_front()
+            await session.provider.activate(session.page)
 
         self.submit("browser_open", work)
 
@@ -404,7 +412,16 @@ class ToolsMixin:
         self.element_details.delete("1.0", "end")
         self.element_details.insert(
             "end",
-            json.dumps({"tag": data["tag"], "attributes": data["attributes"]}, ensure_ascii=False, indent=2),
+            json.dumps(
+                {
+                    "tab_id": data.get("tab_id"),
+                    "frame": data["frame"],
+                    "tag": data["tag"],
+                    "attributes": data["attributes"],
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
         )
         self.element_details.configure(state="disabled")
         self.status.set("Элемент выбран. Проверьте селектор или добавьте чтение текста/атрибута.")
@@ -440,6 +457,27 @@ class ToolsMixin:
                 widget.delete(0, "end")
                 widget.insert(0, value)
         self.apply()
+        if self.last_pick and self.last_pick.get("tab_id"):
+            node.extensions["browser_tab"] = self.last_pick["tab_id"]
+            runner = self.active_runner()
+            if runner:
+                runner.update_node(node)
+            self.changed()
+
+    def add_element_action(self, action):
+        if not self.editable():
+            return
+        target = self.selector_target()
+        if action == "Browser.Input":
+            target["value"] = ""
+        node = self.document.add(action, target)
+        if self.last_pick and self.last_pick.get("tab_id"):
+            node.extensions["browser_tab"] = self.last_pick["tab_id"]
+        self.canvas.selected = {node.id}
+        self.canvas.draw()
+        self.select(node.id)
+        self.tools_notebook.select(self.properties_page)
+        self.changed()
 
     def add_extraction(self, action):
         if not self.editable():
@@ -464,6 +502,8 @@ class ToolsMixin:
                 raise GraphError("VARIABLE_NAME_INVALID")
             node = self.document.add(action, params)
             node.save_as, node.result_path = name, "value"
+            if self.last_pick and self.last_pick.get("tab_id"):
+                node.extensions["browser_tab"] = self.last_pick["tab_id"]
             self.canvas.selected = {node.id}
             self.canvas.draw()
             self.select(node.id)
@@ -481,23 +521,21 @@ class ToolsMixin:
                 raise GraphError("TAB_MISSING")
             pages = session.context.pages
             if operation == "new":
-                page = await session.context.new_page()
+                page = await session.new_page()
             elif operation == "switch":
                 number = int(index)
                 if not 0 <= number < len(pages):
                     raise GraphError("TAB_MISSING")
                 page = pages[number]
             else:
-                await session.page.close()
-                page = (
-                    session.context.pages[-1] if session.context.pages else await session.context.new_page()
-                )
+                await session.provider.close_page(session.page)
+                page = session.context.pages[-1] if session.context.pages else await session.new_page()
             runner = self.active_runner()
             if runner and runner.context.session is session:
                 runner.context.use_page(page)
             else:
                 session.page = page
-            await page.bring_to_front()
+            await session.provider.activate(page)
 
         self.submit("tab", work)
 

@@ -208,7 +208,10 @@ class Document:
             if n.id in ids
         ]
         for node in nodes:
-            if node.type == "Browser.WaitURL" and node.params.get("after_node") in mapping:
+            if (
+                node.type in {"Browser.WaitURL", "Browser.WaitPopup"}
+                and node.params.get("after_node") in mapping
+            ):
                 node.params["after_node"] = mapping[node.params["after_node"]]
         edges = [
             e.model_copy(update={"source": mapping[e.source], "target": mapping[e.target]})

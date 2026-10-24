@@ -6,7 +6,7 @@ from collections import deque
 from copy import deepcopy
 import time
 
-from ..recorder.capture import chromium_options
+from .providers import make_provider
 from .actions import default_registry
 from .model import GraphError, secret_refs
 from .navigation import matches, safe_url
@@ -14,6 +14,14 @@ from .variables import Variables, draft_parameters
 from .storage import Vault
 
 ERRORS = {
+    "POPUP_TIMEOUT": "После указанного действия новое окно не открылось. Проверьте кубик и политику popup сайта. Действие автоматически не повторялось.",
+    "PROFILE_MISSING": "Этот локальный профиль отсутствует на компьютере. Выберите другой профиль или новую сессию.",
+    "PROFILE_INVALID": "Профиль повреждён или содержит недопустимый путь. Остальные профили не изменены.",
+    "TAB_CONTEXT_MISSING": "Записанная вкладка закрыта или ещё не создана. Проверьте NewTab/WaitPopup и связи графа.",
+    "TAB_ID_DUPLICATE": "Две открытые вкладки получили одинаковый идентификатор. Проверьте граф.",
+    "BROWSER_HOST_CLOSED": "Окно браузера закрыто. Остановите исполнение и откройте проект заново.",
+    "BROWSER_HOST_START_FAILED": "Не удалось запустить встроенный браузер. Проверьте состав полной сборки и системные зависимости Qt.",
+    "PROFILE_CONFLICT": "Сессия профиля была изменена другим запуском. Сохранение отменено, чтобы не потерять данные.",
     "WAIT_URL_TIMEOUT": "Переход не подтверждён. Сравните ожидаемую маску и фактический адрес в журнале. Форма повторно не отправлялась.",
     "WAIT_ANCHOR_MISSING": "Вызывающее переход действие не выполнялось в этой сессии. Проверьте связи графа.",
     "VARIABLE_MISSING": "Переменная ещё не задана. Проверьте порядок кубиков и имя переменной.",
@@ -43,9 +51,12 @@ ERRORS = {
 
 
 class BrowserSession:
-    def __init__(self, headless=True):
+    def __init__(self, headless=True, *, provider="chromium", profile=None):
         self.headless = headless
+        self.provider = make_provider(provider)
+        self.profile = profile
         self.playwright = self.browser = self.context = self.page = None
+        self.tabs = {}
 
     async def start(self):
         from playwright.async_api import async_playwright
@@ -59,41 +70,62 @@ class BrowserSession:
             raise
         try:
             self.record_binding = self.inspector_binding = False
-            self.browser = await self.playwright.chromium.launch(
-                **chromium_options(self.headless, self.playwright.chromium.executable_path)
-            )
-            self.context = await self.browser.new_context()
-            self.page = await self.context.new_page()
+            self.browser, self.context, self.page = await self.provider.start(self.playwright, self.headless)
+            self.tabs = {"main": self.page}
+            if self.profile:
+                await self.profile.restore(self)
             return self
         except BaseException:
             await self.close()
             raise
 
+    def bind_tab(self, name, page):
+        if name in self.tabs and self.tabs[name] is not page and not self.tabs[name].is_closed():
+            raise GraphError("TAB_ID_DUPLICATE")
+        self.tabs[name] = page
+
+    def tab_id(self, page):
+        return next((name for name, item in self.tabs.items() if item is page), None)
+
+    async def select_tab(self, name):
+        page = self.tabs.get(name)
+        if page is None or page.is_closed():
+            raise GraphError("TAB_CONTEXT_MISSING")
+        self.page = page
+        await self.provider.activate(page)
+        return page
+
+    async def new_page(self, name=None):
+        page = await self.provider.new_page()
+        if name:
+            self.bind_tab(name, page)
+        self.page = page
+        return page
+
     async def close(self):
-        context, browser, driver = self.context, self.browser, self.playwright
+        driver = self.playwright
         self.context = self.browser = self.playwright = self.page = None
+        self.tabs = {}
         try:
-            if context:
-                await context.close()
+            await self.provider.close()
         finally:
-            try:
-                if browser:
-                    await browser.close()
-            finally:
-                if driver:
-                    await driver.stop()
+            if driver:
+                await driver.stop()
 
 
 class Context:
-    def __init__(self, vault, headless=True, *, definitions=None, inputs=None):
+    def __init__(
+        self, vault, headless=True, *, definitions=None, inputs=None, provider="chromium", profile=None
+    ):
         self.vault = vault
         self.variables = Variables(definitions or {}, vault, inputs)
-        self.session = BrowserSession(headless)
+        self.session = BrowserSession(headless, provider=provider, profile=profile)
         self.navigation_serial = 0
         self.action_serial = 0
         self.navigation_event = asyncio.Event()
         self.navigations = deque(maxlen=100)
         self.checkpoints = {}
+        self.popup_checkpoints = {}
         self.last_checkpoint = None
         self.watched_pages = set()
         self.current_node = None
@@ -128,6 +160,7 @@ class Context:
         self.last_checkpoint = (self.action_serial, page, page.url)
         if self.current_node:
             self.checkpoints[self.current_node] = self.last_checkpoint
+            self.popup_checkpoints[self.current_node] = set(self.session.context.pages)
         return page
 
     async def wait_url(self, expected, timeout_ms, after_action, after_node):
@@ -209,10 +242,28 @@ class NodeResult:
 
 
 class GraphRunner:
-    def __init__(self, graph, *, vault=None, registry=None, headless=True, on_event=None, inputs=None):
+    def __init__(
+        self,
+        graph,
+        *,
+        vault=None,
+        registry=None,
+        headless=True,
+        on_event=None,
+        inputs=None,
+        provider="chromium",
+        profile=None,
+    ):
         self.graph = graph.validate_structure().model_copy(deep=True)
         self.registry = registry or default_registry()
-        self.context = Context(vault or Vault(), headless, definitions=self.graph.variables, inputs=inputs)
+        self.context = Context(
+            vault or Vault(),
+            headless,
+            definitions=self.graph.variables,
+            inputs=inputs,
+            provider=provider,
+            profile=profile,
+        )
         self.context.graph = self.graph
         self.on_event = on_event or (lambda event: None)
         self.current = self.graph.entry
@@ -239,7 +290,15 @@ class GraphRunner:
         ):
             raise GraphError("DEBUG_STATE_INVALID")
         draft_parameters(self.registry.get(updated.type, updated.action_version), updated.params)
-        for key in ("params", "title", "breakpoint", "save_as", "result_path", "protect_result"):
+        for key in (
+            "params",
+            "title",
+            "breakpoint",
+            "save_as",
+            "result_path",
+            "protect_result",
+            "extensions",
+        ):
             setattr(node, key, deepcopy(getattr(updated, key)))
 
     def update_graph(self, graph):
@@ -277,6 +336,9 @@ class GraphRunner:
         try:
             if len(self.results) >= self.graph.max_steps:
                 raise GraphError("STEP_LIMIT")
+            if node.type.startswith("Browser.") and node.extensions.get("browser_tab"):
+                await self.context.page()
+                self.context.use_page(await self.context.session.select_tab(node.extensions["browser_tab"]))
             values = self.context.variables.resolve(node.params)
             self.context.sensitive_action = node.protect_result or bool(secret_refs(values))
             spec, params = self.registry.parameters(node, values)

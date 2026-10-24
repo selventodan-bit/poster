@@ -18,6 +18,7 @@ from .canvas import GraphCanvas
 from .fixtures import serve_maker
 from .model import Document, Graph, GraphError, Node, empty_graph, graph_secret_refs
 from .gui_tools import ToolsMixin, parse_value, show_value
+from .gui_browser import BrowserToolsMixin
 from .recorder import ActionRecorder
 from .record_script import SELECTOR_FUNCTION
 from .runtime import ERRORS, GraphRunner
@@ -30,14 +31,15 @@ MESSAGES = {
     "SECRET_FILE_INVALID": "Зашифрованный файл секретов отсутствует или изменён. Восстановите его рядом с графом.",
     "FILE_TOO_LARGE": "Проект превышает лимит 10 МБ.",
     "RECORD_LIMIT": "Достигнут лимит 2000 кубиков. Остановите запись и разделите проект.",
-    "POPUP_UNSUPPORTED": "Первый этап записывает одну вкладку. Действия в новом окне пока не добавляются.",
+    "TAB_ATTACH_FAILED": "Не удалось подключить новую вкладку. Проверьте граф перед повторным запуском.",
+    "POPUP_ANCHOR_MISSING": "Не найдено действие, открывшее popup. Добавьте WaitPopup с ID вызывающего кубика.",
     "RECORD_EVENT_FAILED": "Одно действие не удалось записать. Проверьте граф перед воспроизведением.",
     "NAVIGATION_NOT_RECORDED": "Переход не удалось записать. Добавьте открытие URL или ожидание вручную.",
     "DEMO_PORT_BUSY": "Демо-порт занят. Закройте другой экземпляр демо-сайта и повторите запуск.",
 }
 
 
-class MakerPanel(ToolsMixin, ClipboardMixin):
+class MakerPanel(BrowserToolsMixin, ToolsMixin, ClipboardMixin):
     def __init__(self, notebook, loop, workspace):
         self.frame = ttk.Frame(notebook, padding=5)
         self.root = self.frame.winfo_toplevel()
@@ -135,9 +137,10 @@ class MakerPanel(ToolsMixin, ClipboardMixin):
         self.button(row, "example", "Пример с циклом", self.example_project)
         ttk.Label(
             self.frame,
-            text="Браузер открывается отдельным управляемым окном. Встроенный Chromium запланирован на следующий этап.",
+            text="chromium — установленный Chrome. qt — браузер Maker в отдельном управляемом окне Qt; редактор остаётся в Tk.",
             wraplength=880,
         ).pack(anchor="w", pady=3)
+        self.build_browser_controls()
         panes = ttk.Panedwindow(self.frame, orient="horizontal")
         panes.pack(fill="both", expand=True)
         library = ttk.Frame(panes, width=160)
@@ -229,6 +232,7 @@ class MakerPanel(ToolsMixin, ClipboardMixin):
         self.canvas.results = {}
         self.refresh_variables()
         self.project_name.set(graph.name)
+        self.refresh_browser_controls()
         self.canvas.draw()
         self.select(None)
 
@@ -574,7 +578,16 @@ class MakerPanel(ToolsMixin, ClipboardMixin):
         self.buttons["selected_run"].configure(
             state="normal" if self.params_editable() and len(self.canvas.selected) == 1 else "disabled"
         )
-        for name in ("var_save", "var_delete", "example", "read_text", "read_attribute"):
+        for name in (
+            "var_save",
+            "var_delete",
+            "example",
+            "read_text",
+            "read_attribute",
+            "element_click",
+            "element_input",
+            "element_wait",
+        ):
             self.buttons[name].configure(state="normal" if edit else "disabled")
         self.buttons["var_live"].configure(state="normal" if paused else "disabled")
         for name in (
@@ -598,7 +611,9 @@ class MakerPanel(ToolsMixin, ClipboardMixin):
                 state="normal" if not self.closed and not self.busy and not self.recording else "disabled"
             )
         self.buttons["stop"].configure(
-            state="normal" if (self.busy or self.runner) and not self.closed else "disabled"
+            state="normal"
+            if (self.busy or self.runner or self.recorder or self.tools_context) and not self.closed
+            else "disabled"
         )
 
     async def ensure_demo(self, origin=None):
@@ -689,6 +704,7 @@ class MakerPanel(ToolsMixin, ClipboardMixin):
             self.vault = Vault()
             self.path = None
         self.trace = []
+        session = reused or self.new_browser_session()
         recording = ActionRecorder(
             headless=False,
             vault=self.vault,
@@ -696,10 +712,13 @@ class MakerPanel(ToolsMixin, ClipboardMixin):
             on_warning=lambda code: messages.put((epoch, "warning", code)),
             graph=self.document.graph if continued else None,
             after_node=selected,
-            session=reused,
+            session=session,
         )
         if self.demo_base and url.startswith(self.demo_base + "/"):
             recording.graph.metadata["maker_demo"] = self.demo_base
+        for key in ("browser_provider", "browser_profile"):
+            if key in self.document.graph.metadata:
+                recording.graph.metadata[key] = self.document.graph.metadata[key]
         self.recorder = recording
 
         async def work():
@@ -775,6 +794,8 @@ class MakerPanel(ToolsMixin, ClipboardMixin):
         messages = self.messages
         epoch = self.epoch
 
+        session = self.new_browser_session() if fresh else None
+
         async def work():
             if fresh:
                 if self.recorder:
@@ -793,6 +814,7 @@ class MakerPanel(ToolsMixin, ClipboardMixin):
                     on_event=lambda event: messages.put((epoch, "event", event)),
                     inputs=inputs,
                 )
+                self.runner.context.session = session
             if step:
                 await self.runner.step()
             else:
@@ -931,13 +953,12 @@ class MakerPanel(ToolsMixin, ClipboardMixin):
         """Read-only DOM geometry for OS-input tests; never reads field values."""
         self.probe_task = asyncio.current_task()
         try:
-            page = (
-                self.recorder.session.page
-                if self.recorder
-                else self.runner.context.session.page
-                if self.runner
-                else None
-            )
+            session = self.browser_session()
+            page = session.page if session else None
+            host_state = None
+            if session and session.context and session.provider.name == "qt":
+                host_state = await session.provider.request("state")
+                page = await session.provider.active_page()
             if not page or page.is_closed():
                 self.browser_view = {}
                 return
@@ -947,6 +968,12 @@ class MakerPanel(ToolsMixin, ClipboardMixin):
                   const r=e.getBoundingClientRect();return {selector:selector(e),x:r.x,y:r.y,width:r.width,height:r.height};
                 }).filter(r=>r.width>0&&r.height>0)};}""".replace("SELECTOR", SELECTOR_FUNCTION)
             self.browser_view = await page.evaluate(script)
+            if host_state:
+                self.browser_view["qt"] = {
+                    "view_rect": host_state["view_rect"],
+                    "private_profile": host_state["private_profile"],
+                    "tabs": len(host_state["tabs"]),
+                }
         except Exception:
             pass
         finally:
