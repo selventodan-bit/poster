@@ -67,7 +67,7 @@ async def scenario(directory):
             p["note"] == entry.params["value"] for k, p in server.posts.items() if k != "1"
         )
 
-        secret_recording = ActionRecorder(headless=True)
+        secret_recording = ActionRecorder(headless=True, on_change=lambda g: snapshots.append(g))
         try:
             await secret_recording.start()
             await secret_recording.navigate(base + "/login")

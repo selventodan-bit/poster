@@ -13,6 +13,7 @@ from poster.maker.actions import Action, Empty, default_registry
 from poster.maker.fixtures import serve_maker
 from poster.maker.model import Document, Edge, Graph, GraphError, Node, empty_graph
 from poster.maker.runtime import GraphRunner
+from poster.maker.recorder import ActionRecorder
 from poster.maker.storage import Vault, load_graph, save_graph
 
 
@@ -186,6 +187,27 @@ async def test_stop_interrupts_wait_and_never_executes_next_node(tmp_path):
             await runner.stop()
             assert await asyncio.wait_for(task, 5) == "STOPPED"
             assert not any(r.action == "End" for r in runner.results)
+        finally:
+            await runner.close()
+
+
+async def test_recorded_delayed_navigation_does_not_match_the_old_page():
+    with serve_maker() as (_, base):
+        recorder = ActionRecorder(headless=True)
+        try:
+            await recorder.start()
+            await recorder.navigate(base + "/async")
+            await recorder.session.page.locator("#async").click()
+            await recorder.session.page.wait_for_url("**stage=two")
+            graph = await recorder.stop()
+        finally:
+            await recorder.close()
+        wait_node = next(n for n in graph.nodes if n.type == "Browser.WaitURL")
+        assert wait_node.params["after_action"]
+        runner = GraphRunner(graph)
+        try:
+            assert await runner.run() == "SUCCEEDED"
+            assert (await runner.context.page()).url.endswith("?stage=two")
         finally:
             await runner.close()
 

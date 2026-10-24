@@ -1,6 +1,7 @@
 """Extensible action registry. Graph data never imports or evaluates Python/JS."""
 
 from dataclasses import dataclass
+import asyncio
 from typing import Literal
 from urllib.parse import urlsplit
 
@@ -56,6 +57,7 @@ class WaitElement(Target):
 class WaitURL(DataModel):
     url: Value = "https://example.org/**"
     timeout_ms: int = Field(default=10000, ge=50, le=120000)
+    after_action: bool = False
 
 
 class If(Target):
@@ -122,25 +124,31 @@ async def open_url(ctx, params):
     parsed = urlsplit(url)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
         raise GraphError("URL_INVALID")
-    await (await ctx.page()).goto(url, wait_until="domcontentloaded", timeout=30000)
+    page = await ctx.before_action()
+    await page.goto(url, wait_until="domcontentloaded", timeout=30000)
     return "success", {"opened": True}
 
 
 async def click(ctx, params):
     locator = await ctx.locator(params)
+    await ctx.before_action()
     await locator.click(button=params.button, timeout=params.timeout_ms)
     return "success", {"clicked": True}
 
 
 async def fill(ctx, params):
     locator = await ctx.locator(params)
-    if await locator.get_attribute("type") == "password" and not isinstance(params.value, SecretRef):
+    if await locator.get_attribute("type", timeout=params.timeout_ms) == "password" and not isinstance(
+        params.value, SecretRef
+    ):
         raise GraphError("PASSWORD_REF_REQUIRED")
+    await ctx.before_action()
     await locator.fill(resolve(ctx, params.value), timeout=params.timeout_ms)
     return "success", {"filled": True, "protected": isinstance(params.value, SecretRef)}
 
 
 async def select(ctx, params):
+    await ctx.before_action()
     await (await ctx.locator(params)).select_option(value=params.values, timeout=params.timeout_ms)
     return "success", {"selected": True}
 
@@ -151,6 +159,17 @@ async def wait_element(ctx, params):
 
 
 async def wait_url(ctx, params):
+    if params.after_action:
+
+        async def changed():
+            while ctx.navigation_serial <= ctx.action_serial:
+                ctx.navigation_event.clear()
+                await ctx.navigation_event.wait()
+
+        try:
+            await asyncio.wait_for(changed(), params.timeout_ms / 1000)
+        except TimeoutError as exc:
+            raise GraphError("ELEMENT_TIMEOUT") from exc
     await (await ctx.page()).wait_for_url(
         resolve(ctx, params.url), timeout=params.timeout_ms, wait_until="domcontentloaded"
     )
@@ -220,7 +239,11 @@ def default_registry():
             "Ждать переход",
             WaitURL,
             wait_url,
-            (Property("url", "URL / маска", secret=True), timeout),
+            (
+                Property("url", "URL / маска", secret=True),
+                timeout,
+                Property("after_action", "Требовать переход после действия", "bool"),
+            ),
         ),
         Action(
             "Logic.If",

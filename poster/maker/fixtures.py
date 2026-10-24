@@ -24,6 +24,11 @@ class MakerHandler(Handler):
             <label>Режим <select id="mode" name="mode"><option value="one">Один</option><option value="two">Два</option></select></label>
             <button id="continue" type="submit">Перейти дальше</button></form><p><a href="/login">Проверка входа</a></p>""",
             )
+        elif path == "/async":
+            self.reply(
+                200,
+                """<meta charset="utf-8"><title>ProjectMaker async</title><button id="async" onclick="setTimeout(()=>location.href='/async?stage=two',250)">Next</button>""",
+            )
         elif path.startswith("/result/"):
             item = self.server.posts.get(path.rsplit("/", 1)[-1])
             self.reply(

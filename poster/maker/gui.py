@@ -51,6 +51,7 @@ class MakerPanel(ClipboardMixin):
         self.operation_kind = None
         self.recorder = self.runner = None
         self.demo_context = None
+        self.demo_server = None
         self.demo_base = None
         self.trace = []
         self.last_error = None
@@ -245,6 +246,10 @@ class MakerPanel(ClipboardMixin):
             self.status.set(MESSAGES["ACTION_UNSUPPORTED"])
             return
         defaults = spec.params().model_dump(mode="json")
+        if node.type == "Start":
+            ttk.Button(
+                self.prop_frame, text="Сделать точкой входа", command=lambda: self.set_entry(node.id)
+            ).pack(anchor="w", pady=3)
         for prop in spec.properties:
             ttk.Label(self.prop_frame, text=prop.label, wraplength=240).pack(anchor="w")
             value = node.params.get(prop.name, defaults.get(prop.name, ""))
@@ -256,13 +261,20 @@ class MakerPanel(ClipboardMixin):
                 if isinstance(value, list)
                 else str(value)
             )
+            if prop.kind == "bool":
+                shown = "Да" if value else "Нет"
             if prop.kind in {"multiline", "lines"}:
                 widget = tk.Text(
                     self.prop_frame, height=3 if prop.kind == "multiline" else 2, width=28, wrap="word"
                 )
                 widget.insert("1.0", shown)
-            elif prop.kind == "choice":
-                widget = ttk.Combobox(self.prop_frame, values=prop.choices, state="readonly", width=27)
+            elif prop.kind in {"choice", "bool"}:
+                widget = ttk.Combobox(
+                    self.prop_frame,
+                    values=("Нет", "Да") if prop.kind == "bool" else prop.choices,
+                    state="readonly",
+                    width=27,
+                )
                 widget.set(shown)
             else:
                 widget = ttk.Entry(self.prop_frame, width=29)
@@ -281,7 +293,7 @@ class MakerPanel(ClipboardMixin):
         node = self.document.graph.node(next(iter(self.canvas.selected)))
         try:
             spec = self.registry.get(node.type, node.action_version)
-            values = spec.params().model_dump(mode="json")
+            values = {**spec.params().model_dump(mode="json"), **node.params}
             for name, (prop, widget, secure, _old) in self.props.items():
                 text = widget.get("1.0", "end-1c") if isinstance(widget, tk.Text) else widget.get()
                 if prop.secret and secure.get():
@@ -293,6 +305,8 @@ class MakerPanel(ClipboardMixin):
                     raise GraphError("PASSWORD_REF_REQUIRED")
                 elif prop.kind == "integer":
                     values[name] = int(text)
+                elif prop.kind == "bool":
+                    values[name] = text == "Да"
                 elif prop.kind == "lines":
                     values[name] = [s for s in text.splitlines() if s]
                 else:
@@ -329,6 +343,13 @@ class MakerPanel(ClipboardMixin):
     def scroll_properties(self, event):
         self.property_canvas.yview_scroll(-1 if event.delta > 0 else 1, "units")
         return "break"
+
+    def set_entry(self, node_id):
+        if self.editable():
+            self.document.checkpoint()
+            self.document.graph.entry = node_id
+            self.canvas.draw()
+            self.changed()
 
     def submit(self, kind, operation):
         if self.closed or self.busy:
@@ -472,7 +493,7 @@ class MakerPanel(ClipboardMixin):
             self.demo_context = None
         manager = serve_maker(parsed.port)
         try:
-            _, self.demo_base = manager.__enter__()
+            self.demo_server, self.demo_base = manager.__enter__()
         except OSError as exc:
             raise GraphError("DEMO_PORT_BUSY") from exc
         self.demo_context = manager
@@ -490,7 +511,7 @@ class MakerPanel(ClipboardMixin):
                     port = 0
                 manager = serve_maker(port)
                 try:
-                    _, self.demo_base = manager.__enter__()
+                    self.demo_server, self.demo_base = manager.__enter__()
                 except OSError as exc:
                     raise GraphError("DEMO_PORT_BUSY") from exc
                 self.demo_context = manager
@@ -749,6 +770,7 @@ class MakerPanel(ClipboardMixin):
         if self.demo_context:
             self.demo_context.__exit__(None, None, None)
             self.demo_context = None
+            self.demo_server = None
 
     async def probe_browser(self):
         """Read-only DOM geometry for OS-input tests; never reads field values."""
@@ -815,6 +837,9 @@ class MakerPanel(ClipboardMixin):
             "status": self.status.get(),
             "saved_file": str(self.path) if self.path else None,
             "browser": self.browser_view,
+            "demo": {"origin": self.demo_base, "posts": self.demo_server.posts.copy()}
+            if self.demo_server
+            else None,
         }
 
     def dispose(self):

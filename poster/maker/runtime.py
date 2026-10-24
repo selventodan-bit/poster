@@ -68,11 +68,25 @@ class Context:
     def __init__(self, vault, headless=True):
         self.vault = vault
         self.session = BrowserSession(headless)
+        self.navigation_serial = 0
+        self.action_serial = 0
+        self.navigation_event = asyncio.Event()
 
     async def page(self):
         if self.session.page is None:
             await self.session.start()
+            self.session.page.on("framenavigated", self.navigated)
         return self.session.page
+
+    def navigated(self, frame):
+        if self.session.page and frame == self.session.page.main_frame:
+            self.navigation_serial += 1
+            self.navigation_event.set()
+
+    async def before_action(self):
+        page = await self.page()
+        self.action_serial = self.navigation_serial
+        return page
 
     async def locator(self, params):
         root = await self.page()

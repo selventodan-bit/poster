@@ -309,6 +309,11 @@
             "minimum": 50,
             "title": "Timeout Ms",
             "type": "integer"
+          },
+          "after_action": {
+            "default": false,
+            "title": "After Action",
+            "type": "boolean"
           }
         },
         "title": "WaitURL",

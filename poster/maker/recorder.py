@@ -91,11 +91,13 @@ class ActionRecorder:
             await self.session.page.evaluate(RECORD_JS)
             self.cdp = await self.session.context.new_cdp_session(self.session.page)
             await self.cdp.send("Page.enable")
+            main_id = (await self.cdp.send("Page.getFrameTree"))["frameTree"]["frame"]["id"]
             self.cdp.on(
                 "Page.frameRequestedNavigation",
                 lambda event: (
                     setattr(self, "renderer_navigation", True)
-                    if event.get("reason")
+                    if event.get("frameId") == main_id
+                    and event.get("reason")
                     in {
                         "anchorClick",
                         "formSubmissionGet",
@@ -200,7 +202,7 @@ class ActionRecorder:
             if urlsplit(url).scheme not in {"http", "https"}:
                 return
             if renderer or same_document:
-                self.append("Browser.WaitURL", {"url": navigation_pattern(url)})
+                self.append("Browser.WaitURL", {"url": navigation_pattern(url), "after_action": True})
             else:
                 value = self.vault.put(url) if sensitive_url(url) else url
                 self.append("Browser.OpenURL", {"url": value})

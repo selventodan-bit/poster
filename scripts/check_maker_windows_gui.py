@@ -3,6 +3,7 @@
 import argparse
 import json
 import os
+import socket
 from pathlib import Path
 import time
 import traceback
@@ -245,6 +246,42 @@ def check(executable, output):
             picture("05-reopened-replay.png")
             completed.append("save_close_reopen_same_graph_and_replay")
             close()
+        # This second project uses the product's own server, with no harness
+        # keeping it alive between app processes. It must start again itself.
+        start()
+        click("maker_demo")
+        wait(lambda s: bool(s["maker"].get("demo")) and not s["maker"]["busy"], "owned demo server")
+        click("maker_record")
+        wait(lambda s: s["maker"]["recording"] and not s["maker"]["busy"], "owned demo recording")
+        browser_control("#show")
+        browser_control("#note")
+        clipboard("Сохранённый демо-проект Ж")
+        browser_control("#continue")
+        wait(lambda s: len((s["maker"].get("demo") or {}).get("posts", {})) == 1, "owned demo form posted")
+        click("maker_record_stop")
+        wait(lambda s: not s["maker"]["recording"] and not s["maker"]["busy"], "owned demo recording stopped")
+        click("maker_save")
+        owned = wait(lambda s: bool(s["maker"]["saved_file"]), "owned demo saved")["maker"]
+        from urllib.parse import urlsplit
+
+        port = urlsplit(owned["graph"]["metadata"]["maker_demo"]).port
+        close()
+        with socket.socket() as probe:
+            assert probe.connect_ex(("127.0.0.1", port)) != 0
+        start()
+        wait(lambda s: s["maker"]["graph"]["id"] == owned["graph"]["id"], "owned demo graph reopened")
+        click("maker_run")
+        confirm()
+        restored = wait(
+            lambda s: s["maker"]["run_state"] == "SUCCEEDED" and not s["maker"]["busy"],
+            "owned demo server restarted for replay",
+        )["maker"]
+        assert restored["demo"]["posts"]["1"]["note"] == "Сохранённый демо-проект Ж"
+        picture("06-owned-demo-restarted.png")
+        close()
+        with socket.socket() as probe:
+            assert probe.connect_ex(("127.0.0.1", port)) != 0
+        completed.append("owned_demo_server_stops_and_restarts_with_saved_graph")
         report = {
             "status": "PASSED",
             "commit": info["commit"],
