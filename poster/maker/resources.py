@@ -21,6 +21,7 @@ class Budget:
     used: int = 0
     result_bytes: int = 0
     stopped: bool = False
+    file_bytes: int = 0
 
     def remaining(self):
         return self.seconds - (time.monotonic() - self.started)
@@ -40,8 +41,9 @@ class FileSandbox:
         self.root = Path(root or tempfile.mkdtemp(prefix="poster-run-")).absolute().resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         self.allow_external = allow_external
+        self.budget = None
 
-    def path(self, text):
+    def path(self, text, *, allow_root=False):
         if not text or "\x00" in str(text):
             raise GraphError("FILE_PATH_INVALID")
         text = str(text)
@@ -59,7 +61,7 @@ class FileSandbox:
                 continue
             if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
                 raise GraphError("FILE_LINK_FORBIDDEN")
-        if resolved == self.root:
+        if resolved == self.root and not allow_root:
             raise GraphError("FILE_PATH_INVALID")
         return resolved
 
@@ -78,6 +80,10 @@ class FileSandbox:
 
         if len(raw) > MAX_FILE:
             raise GraphError("FILE_LIMIT")
+        if self.budget:
+            self.budget.file_bytes += len(raw)
+            if self.budget.file_bytes > 100_000_000:
+                raise GraphError("FILE_LIMIT")
         path = self.path(text)
         path.parent.mkdir(parents=True, exist_ok=True)
         self.path(text)  # Recheck after creating parents.

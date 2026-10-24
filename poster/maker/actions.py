@@ -282,4 +282,7 @@ def default_registry():
     from .data_actions import register_data_actions
 
     register_data_actions(registry)
+    from .file_actions import register_file_actions
+
+    register_file_actions(registry)
     return registry

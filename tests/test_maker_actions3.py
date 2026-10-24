@@ -386,3 +386,80 @@ async def test_http_literal_credentials_encrypted_on_save_and_not_logged(tmp_pat
         r = await run_graph(graph, tmp_path, vault=vault)
         assert r.state == "SUCCEEDED", r.results
         assert "PRIVATE_" not in str(r.results) and r.context.variables.snapshot()["reply"] == "••••"
+
+
+async def test_all_file_operations_unicode_and_bom(tmp_path):
+    graph = linear(
+        ("Files.CreateDirectory", {"path": "Ж папка"}),
+        ("Files.WriteText", {"path": "Ж папка/a.txt", "text": "Привет", "encoding": "utf-8-sig"}),
+        ("Files.AppendText", {"path": "Ж папка/a.txt", "text": "\n世界", "encoding": "utf-8-sig"}),
+        (
+            "Files.ReadText",
+            {"path": "Ж папка/a.txt", "encoding": "utf-8-sig"},
+            {"save_as": "text", "result_path": "value"},
+        ),
+        ("Files.Copy", {"source": "Ж папка/a.txt", "destination": "Ж папка/b.txt"}),
+        ("Files.Move", {"source": "Ж папка/b.txt", "destination": "Ж папка/c.txt"}),
+        ("Files.Exists", {"path": "Ж папка/b.txt"}, {"save_as": "exists", "result_path": "value"}),
+        (
+            "Files.ListDirectory",
+            {"path": "Ж папка", "pattern": "*.txt"},
+            {"save_as": "files", "result_path": "value"},
+        ),
+        ("Files.Delete", {"path": "Ж папка/c.txt"}),
+    )
+    r = await run_graph(graph, tmp_path)
+    assert r.state == "SUCCEEDED", r.results
+    assert r.context.variables.get("text") == "Привет\n世界"
+    assert r.context.variables.get("exists") is False
+    assert [x["name"] for x in r.context.variables.get("files")] == ["a.txt", "c.txt"]
+    assert (tmp_path / "Ж папка/a.txt").read_bytes().count(b"\xef\xbb\xbf") == 1
+    assert not (tmp_path / "Ж папка/c.txt").exists()
+
+
+@pytest.mark.parametrize("path", ["../outside.txt", "a/../../outside.txt", "C:\\outside.txt"])
+async def test_files_cannot_escape_workdir(path, tmp_path):
+    r = await run_graph(linear(("Files.WriteText", {"path": path, "text": "wrong"})), tmp_path / "safe")
+    assert r.results[-1].error_code == "FILE_OUTSIDE_WORKDIR"
+    assert not (tmp_path / "outside.txt").exists()
+
+
+async def test_file_links_overwrite_missing_and_concurrent_runs(tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "valuable.txt").write_text("original")
+    root = tmp_path / "safe"
+    root.mkdir()
+    try:
+        (root / "link").symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pass
+    else:
+        r = await run_graph(linear(("Files.Delete", {"path": "link/valuable.txt"})), root)
+        assert r.state == "FAILED" and (outside / "valuable.txt").read_text() == "original"
+    graph = linear(("Files.WriteText", {"path": "same.txt", "text": "independent"}))
+    a, b = await asyncio.gather(run_graph(graph, root / "a"), run_graph(graph, root / "b"))
+    assert a.state == b.state == "SUCCEEDED"
+    r = await run_graph(graph, root / "a")
+    assert r.results[-1].error_code == "FILE_EXISTS"
+    r = await run_graph(linear(("Files.ReadText", {"path": "missing"})), root)
+    assert r.results[-1].error_code == "FILE_MISSING"
+    r = await run_graph(
+        linear(("Files.Move", {"source": "same.txt", "destination": "same.txt", "overwrite": True})),
+        root / "a",
+    )
+    assert r.results[-1].error_code == "FILE_PATH_INVALID" and (root / "a/same.txt").exists()
+
+
+async def test_default_runs_have_separate_files_and_explicit_external_permission(tmp_path):
+    from poster.maker.resources import FileSandbox
+
+    a, b = FileSandbox(), FileSandbox()
+    assert a.root != b.root
+    outside = tmp_path / "outside.txt"
+    r = await run_graph(
+        linear(("Files.WriteText", {"path": str(outside), "text": "explicit"})),
+        tmp_path / "root",
+        allow_external_files=True,
+    )
+    assert r.state == "SUCCEEDED" and outside.read_text() == "explicit"

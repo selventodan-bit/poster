@@ -25,6 +25,11 @@ def parser():
     maker_run.add_argument("project", type=Path)
     maker_run.add_argument("--headed", action="store_true")
     maker_run.add_argument("--output", type=Path)
+    maker_run.add_argument("--workdir", type=Path, help="Explicit sandbox directory for data files")
+    maker_run.add_argument(
+        "--allow-external-files", action="store_true", help="Explicitly allow file access outside workdir"
+    )
+    maker_run.add_argument("--timeout", type=int, default=300, choices=range(1, 3601), metavar="SECONDS")
     maker_run.add_argument(
         "--breakpoints",
         action="store_true",
@@ -185,13 +190,23 @@ def main(argv=None):
                     ):
                         raise ValueError("INPUT_SECRET_REF_REQUIRED")
                     inputs[name] = value
-                runner = GraphRunner(graph, vault=vault, headless=not a.headed, inputs=inputs)
+                runner = GraphRunner(
+                    graph,
+                    vault=vault,
+                    headless=not a.headed,
+                    inputs=inputs,
+                    workdir=a.workdir,
+                    allow_external_files=a.allow_external_files,
+                    project_path=a.project,
+                    max_seconds=a.timeout,
+                )
                 try:
                     status = await runner.run(breakpoints=a.breakpoints)
                     return {
                         "status": status,
                         "results": [asdict(r) for r in runner.results],
                         "variables": runner.context.variables.snapshot(),
+                        "workdir": str(runner.context.files.root),
                     }
                 finally:
                     await runner.close()

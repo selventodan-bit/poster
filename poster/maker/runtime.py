@@ -310,6 +310,7 @@ class GraphRunner:
         )
         self.context.graph = self.graph
         self.context.budget = budget or Budget(self.graph.max_steps, max_seconds)
+        self.context.files.budget = self.context.budget
         self.context.registry = self.registry
         self.context.project_path = Path(project_path).absolute().resolve() if project_path else None
         self.context.project_root = (
@@ -386,6 +387,7 @@ class GraphRunner:
         started = time.monotonic()
         self.context.current_node = node.id
         self.context.control = None
+        spec = None
         self.event(kind="node", node_id=node.id, status="RUNNING")
         try:
             self.context.budget.consume()
@@ -439,6 +441,9 @@ class GraphRunner:
             code = (
                 exc.code
                 if isinstance(exc, GraphError)
+                else "FILE_OPERATION"
+                if getattr(spec, "reveal_parameters", False)
+                and isinstance(exc, (OSError, UnicodeError, LookupError))
                 else "ELEMENT_TIMEOUT"
                 if type(exc).__name__ == "TimeoutError"
                 else "BROWSER_ERROR"
