@@ -26,6 +26,9 @@ google-auth — Apache-2.0, https://github.com/googleapis/google-auth-library-py
 filelock — Unlicense, https://github.com/tox-dev/filelock
 Beautiful Soup — MIT, https://www.crummy.com/software/BeautifulSoup/
 SQLite — public domain, https://www.sqlite.org/copyright.html
+openpyxl — MIT, https://openpyxl.readthedocs.io/
+et-xmlfile — MIT, https://et-xmlfile.readthedocs.io/
+defusedxml — PSF, https://github.com/tiran/defusedxml
 
 Available installed package license/notice files are retained under
 licenses/packages. Python's license and build runtime notices are retained when

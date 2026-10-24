@@ -285,4 +285,7 @@ def default_registry():
     from .file_actions import register_file_actions
 
     register_file_actions(registry)
+    from .table_actions import register_table_actions
+
+    register_table_actions(registry)
     return registry

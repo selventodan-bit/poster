@@ -463,3 +463,175 @@ async def test_default_runs_have_separate_files_and_explicit_external_permission
         allow_external_files=True,
     )
     assert r.state == "SUCCEEDED" and outside.read_text() == "explicit"
+
+
+TABLE = {"columns": ["name", "n"], "rows": [["a", 1], ["b", 2], ["c", 3]]}
+
+
+@pytest.mark.parametrize(
+    "operation,params,expected",
+    [
+        ("Create", TABLE, TABLE),
+        (
+            "AddRow",
+            {"table": TABLE, "row": ["d", 4]},
+            {"columns": ["name", "n"], "rows": [["a", 1], ["b", 2], ["c", 3], ["d", 4]]},
+        ),
+        ("GetCell", {"table": TABLE, "row": 1, "column": "n"}, 2),
+        (
+            "SetCell",
+            {"table": TABLE, "row": 0, "column": "n", "value": False},
+            {"columns": ["name", "n"], "rows": [["a", False], ["b", 2], ["c", 3]]},
+        ),
+        ("RemoveRow", {"table": TABLE, "row": 1}, {"columns": ["name", "n"], "rows": [["a", 1], ["c", 3]]}),
+        ("FindRows", {"table": TABLE, "column": "n", "operator": "ge", "value": 2}, [1, 2]),
+        (
+            "Filter",
+            {"table": TABLE, "column": "n", "operator": "gt", "value": 2},
+            {"columns": ["name", "n"], "rows": [["c", 3]]},
+        ),
+        ("RowCount", {"table": TABLE}, 3),
+        (
+            "FromJSON",
+            {"value": [{"a": True}, {"b": [None]}]},
+            {"columns": ["a", "b"], "rows": [[True, None], [None, [None]]]},
+        ),
+        ("ToJSON", {"table": TABLE}, [{"name": "a", "n": 1}, {"name": "b", "n": 2}, {"name": "c", "n": 3}]),
+    ],
+)
+async def test_each_table_operation(operation, params, expected, tmp_path):
+    r = await run_graph(
+        linear(("Tables." + operation, params, {"save_as": "out", "result_path": "value"})), tmp_path
+    )
+    assert r.state == "SUCCEEDED", r.results
+    assert r.context.variables.get("out") == expected
+
+
+@pytest.mark.parametrize("delimiter", [",", ";", "\t"])
+@pytest.mark.parametrize("encoding", ["utf-8", "utf-8-sig"])
+async def test_csv_quotes_newlines_empty_and_types(delimiter, encoding, tmp_path):
+    table = {"columns": ["Ж", "data"], "rows": [['"quote",;\t\nline', ""], ["value", True]]}
+    r = await run_graph(
+        linear(
+            (
+                "CSV.Write",
+                {"path": "данные/input.csv", "table": table, "delimiter": delimiter, "encoding": encoding},
+            ),
+            (
+                "CSV.Read",
+                {
+                    "path": "данные/input.csv",
+                    "delimiter": delimiter,
+                    "encoding": encoding,
+                    "infer_json": True,
+                },
+                {"save_as": "table", "result_path": "value"},
+            ),
+        ),
+        tmp_path,
+    )
+    assert r.state == "SUCCEEDED", r.results
+    assert r.context.variables.get("table") == table
+
+
+async def test_excel_read_write_sheets_update_atomicity_formula_literals(tmp_path):
+    import hashlib
+    import openpyxl
+
+    table = {
+        "columns": ["label", "bool", "number", "empty"],
+        "rows": [["=1+1", True, 3, None], ["Ж", False, 2.5, ""]],
+    }
+    graph = linear(
+        ("Excel.Write", {"path": "Ж книга.xlsx", "table": table, "sheet": "Первый"}),
+        ("Excel.Write", {"path": "Ж книга.xlsx", "table": TABLE, "sheet": "Второй", "update_existing": True}),
+        ("Excel.ListSheets", {"path": "Ж книга.xlsx"}, {"save_as": "sheets", "result_path": "value"}),
+        (
+            "Excel.Read",
+            {"path": "Ж книга.xlsx", "sheet": "Первый"},
+            {"save_as": "table", "result_path": "value"},
+        ),
+    )
+    r = await run_graph(graph, tmp_path)
+    assert r.state == "SUCCEEDED", r.results
+    assert r.context.variables.get("sheets") == ["Первый", "Второй"]
+    got = r.context.variables.get("table")
+    assert got["rows"][0] == ["=1+1", True, 3, None]
+    book = openpyxl.load_workbook(tmp_path / "Ж книга.xlsx")
+    assert book["Первый"]["A2"].data_type == "s"
+    book.close()
+    before = hashlib.sha256((tmp_path / "Ж книга.xlsx").read_bytes()).digest()
+    r = await run_graph(
+        linear(
+            (
+                "Excel.Write",
+                {"path": "Ж книга.xlsx", "sheet": "Первый", "table": TABLE, "update_existing": True},
+            )
+        ),
+        tmp_path,
+    )
+    assert r.state == "FAILED" and r.results[-1].error_code == "FILE_EXISTS"
+    assert hashlib.sha256((tmp_path / "Ж книга.xlsx").read_bytes()).digest() == before
+    r = await run_graph(
+        linear(
+            (
+                "Excel.Write",
+                {
+                    "path": "Ж книга.xlsx",
+                    "sheet": "Первый",
+                    "table": TABLE,
+                    "update_existing": True,
+                    "replace_sheet": True,
+                },
+            ),
+            (
+                "Excel.Read",
+                {"path": "Ж книга.xlsx", "sheet": "Первый"},
+                {"save_as": "table", "result_path": "value"},
+            ),
+        ),
+        tmp_path,
+    )
+    assert r.state == "SUCCEEDED" and r.context.variables.get("table") == TABLE
+
+
+async def test_bad_table_csv_xlsx_and_empty_roundtrip(tmp_path):
+    cases = [
+        ("Tables.Create", {"columns": ["a", "a"], "rows": []}),
+        ("Tables.GetCell", {"table": TABLE, "column": "missing", "row": 0}),
+        ("CSV.Read", {"path": "bad.csv"}),
+        ("Excel.Read", {"path": "bad.xlsx"}),
+    ]
+    (tmp_path / "bad.csv").write_text('a,b\n"unterminated', encoding="utf-8")
+    (tmp_path / "bad.xlsx").write_bytes(b"bad")
+    for action, params in cases:
+        r = await run_graph(linear((action, params)), tmp_path)
+        assert r.state == "FAILED", action
+    r = await run_graph(
+        linear(
+            ("Excel.Write", {"path": "empty.xlsx", "table": {"columns": [], "rows": []}}),
+            ("Excel.Read", {"path": "empty.xlsx"}, {"save_as": "empty", "result_path": "value"}),
+        ),
+        tmp_path,
+    )
+    assert r.state == "SUCCEEDED" and r.context.variables.get("empty") == {"columns": [], "rows": []}
+
+
+async def test_xlsx_formula_cache_and_archive_limits(tmp_path):
+    import openpyxl
+    import zipfile
+
+    book = openpyxl.Workbook()
+    book.active.append(["formula"])
+    book.active.append(["=1+1"])
+    book.save(tmp_path / "formula.xlsx")
+    book.close()
+    r = await run_graph(
+        linear(("Excel.Read", {"path": "formula.xlsx"}, {"save_as": "table", "result_path": "value"})),
+        tmp_path,
+    )
+    assert r.state == "SUCCEEDED" and r.context.variables.get("table")["rows"] == [[None]]
+    with zipfile.ZipFile(tmp_path / "bomb.xlsx", "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("huge.xml", b"x" * 20_000_001)
+    r = await run_graph(linear(("Excel.ListSheets", {"path": "bomb.xlsx"})), tmp_path)
+    assert r.results[-1].error_code == "XLSX_INVALID"

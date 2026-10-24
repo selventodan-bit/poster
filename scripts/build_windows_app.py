@@ -26,6 +26,9 @@ def licenses(bundle, embedded):
         "google-auth",
         "beautifulsoup4",
         "PyYAML",
+        "openpyxl",
+        "et-xmlfile",
+        "defusedxml",
     ):
         try:
             distribution = importlib.metadata.distribution(name)
