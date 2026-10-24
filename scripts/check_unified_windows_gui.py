@@ -339,6 +339,7 @@ def check(executable, output):
             browser_control("#inner >> #password")
             paste(DEMO_PASSWORD)
             browser_control("#inner >> #login")
+
             def authorized(s):
                 if server.login_attempts and server.login_count == 0:
                     raise AssertionError("Controlled login rejected: " + json.dumps(server.login_attempts))
@@ -348,7 +349,21 @@ def check(executable, output):
                 wait(authorized, "iframe POST authorization")
             except Exception:
                 print("::error::Controlled login checks " + json.dumps(server.login_attempts), flush=True)
-                print("::error::Recorded iframe actions " + json.dumps([{"type": n["type"], "selector": n["params"].get("selector"), "frame": n["params"].get("frame"), "protected": n["params"].get("sensitive", False)} for n in snapshot()["graph"]["nodes"][-20:]), flush=True)
+                print(
+                    "::error::Recorded iframe actions "
+                    + json.dumps(
+                        [
+                            {
+                                "type": n["type"],
+                                "selector": n["params"].get("selector"),
+                                "frame": n["params"].get("frame"),
+                                "protected": n["params"].get("sensitive", False),
+                            }
+                            for n in snapshot()["graph"]["nodes"][-20:]
+                        ]
+                    ),
+                    flush=True,
+                )
                 raise
             mouse.click(coords=tuple(snapshot()["browser"]["tab_points"][0]))
             browser_control("#main-note")
@@ -525,7 +540,13 @@ def check(executable, output):
             picture("failure.png")
             encoded = base64.b64encode((output / "failure.png").read_bytes()).decode("ascii")
             for index in range(0, len(encoded), 40000):
-                print("::notice title=Unified GUI image " + str(index // 40000) + "::" + encoded[index:index + 40000], flush=True)
+                print(
+                    "::notice title=Unified GUI image "
+                    + str(index // 40000)
+                    + "::"
+                    + encoded[index : index + 40000],
+                    flush=True,
+                )
         except Exception:
             pass
         print("::error::Unified GUI " + type(error).__name__ + "; phase=" + phase, flush=True)
