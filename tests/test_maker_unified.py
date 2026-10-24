@@ -74,7 +74,7 @@ def scenario(root):
 
     from PySide6.QtCore import Qt
     from PySide6.QtTest import QTest
-    from PySide6.QtWidgets import QApplication, QMessageBox
+    from PySide6.QtWidgets import QApplication, QLineEdit, QMessageBox
 
     from poster.maker.qt_app import MakerWindow
     from poster.maker.qt_browser import configure_browser
@@ -168,6 +168,20 @@ def scenario(root):
         assert len(window.canvas.blocks) == 1200 and time.monotonic() - started < 12
         window.canvas.find("Large 1190")
         assert window.selected_id == "node_1190"
+        action("copy")
+        copied = window.selected_id
+        assert len(window.document.graph.nodes) == 1201
+        action("undo")
+        assert len(window.document.graph.nodes) == 1200
+        action("redo")
+        search = window.findChild(QLineEdit, "node_search")
+        search.setFocus()
+        QTest.keyClicks(search, copied)
+        QTest.keyClick(search, Qt.Key.Key_Return)
+        wait(lambda: window.selected_id == copied, "copied block selected through search")
+        action("delete")
+        assert len(window.document.graph.nodes) == 1200
+        assert copied not in window.canvas.blocks
         window.document.dirty = False
         action("new")
         wait(lambda: not window.busy, "new graph")

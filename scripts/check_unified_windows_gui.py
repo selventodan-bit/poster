@@ -136,10 +136,16 @@ def check(executable, output):
         state = wait(lambda s: s.get("canvas_frame", 0) > frame, "graph fit painted")
         if not visible(state):
             # Large graphs can exceed the minimum zoom; use the real search UI
-            # to bring the requested cube into view before the OS canvas click.
+            # to select and reveal the cube. Enter already selects it: do not
+            # send a second click using geometry from before the search paint.
             fill("node_search", node_id)
+            frame = snapshot().get("canvas_frame", 0)
             keyboard.send_keys("{ENTER}")
-            state = wait(lambda s: visible(s) and s.get("selected") == [node_id], "node scrolled into view")
+            wait(
+                lambda s: visible(s) and s.get("selected") == [node_id] and s.get("canvas_frame", 0) > frame,
+                "node selected through search and painted",
+            )
+            return
         window.set_focus()
         mouse.click(coords=tuple(state["nodes"][node_id]))
         wait(lambda s: s.get("selected") == [node_id], "node selected")
