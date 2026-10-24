@@ -82,7 +82,10 @@ class MakerHandler(Handler):
             if sid not in self.server.authorized:
                 self.reply(401, "Login required")
                 return
-            self.reply(200, '<meta charset="utf-8"><h1 id="account">Вход выполнен</h1>')
+            self.reply(
+                200,
+                '<meta charset="utf-8"><title>Maker authorized</title><h1 id="account">Вход выполнен</h1>',
+            )
         else:
             self.reply(404, "Missing")
 

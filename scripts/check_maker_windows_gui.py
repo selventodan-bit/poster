@@ -12,6 +12,7 @@ from poster.maker.fixtures import serve_maker
 
 
 def check(executable, output):
+    import psutil
     import win32api
     import win32clipboard
     import win32con
@@ -124,12 +125,18 @@ def check(executable, output):
     def close():
         nonlocal process
         if process:
+            editor_pid = win32process.GetWindowThreadProcessId(window.handle)[1]
+            children = psutil.Process(editor_pid).children(recursive=True)
             window.set_focus()
             keyboard.send_keys("%{F4}", pause=0.2)
             assert win32event.WaitForSingleObject(process, 30000) == win32con.WAIT_OBJECT_0
             assert win32process.GetExitCodeProcess(process) == 0
             win32api.CloseHandle(process)
             process = None
+            _, alive = psutil.wait_procs(children, timeout=15)
+            assert not [child for child in alive if child.status() != psutil.STATUS_ZOMBIE], (
+                "Owned browser process survived GUI shutdown"
+            )
 
     def browser_control(selector):
         state = wait(
@@ -293,6 +300,16 @@ def check(executable, output):
                     lambda s: not s["maker"]["busy"] and s["maker"]["run_state"] is None,
                     "close prior browser",
                 )
+                click("maker_profile_create")
+                dialog = Desktop(backend="win32").window(title="Новый профиль")
+                dialog.wait("visible", timeout=10)
+                dialog.set_focus()
+                clipboard("Windows GUI profile")
+                keyboard.send_keys("{ENTER}", pause=0.2)
+                wait(
+                    lambda s: bool(s["maker"]["graph"]["metadata"].get("browser_profile")),
+                    "local profile selected",
+                )
                 fill("maker_url", base + "/tabs")
                 click("maker_record")
                 wait(lambda s: s["maker"]["recording"] and not s["maker"]["busy"], "Qt tabs recording")
@@ -319,6 +336,8 @@ def check(executable, output):
                 assert any(n["type"] == "Browser.WaitPopup" for n in recorded_tabs["nodes"])
                 assert any(n["type"] == "Browser.SwitchTab" for n in recorded_tabs["nodes"])
                 assert DEMO_PASSWORD not in json.dumps(recorded_tabs)
+                click("maker_profile_save")
+                wait(lambda s: not s["maker"]["busy"], "profile snapshot encrypted")
                 click("maker_save")
                 tabs_saved = wait(lambda s: bool(s["maker"]["saved_file"]), "tabs saved")["maker"]["graph"][
                     "id"
@@ -331,6 +350,25 @@ def check(executable, output):
                     "Qt tabs replay",
                 )
                 assert server.login_count == 2
+                click("maker_stop")
+                wait(
+                    lambda s: not s["maker"]["busy"] and s["maker"]["run_state"] is None,
+                    "stop before profile restore",
+                )
+                fill("maker_url", base + "/account")
+                click("maker_tab_element")
+                click("maker_browser_open")
+                wait(
+                    lambda s: (
+                        s["maker"].get("browser", {}).get("title") == "Maker authorized"
+                        and not s["maker"]["busy"]
+                    ),
+                    "authorized profile restored without another login",
+                )
+                assert server.login_count == 2
+                picture("11-qt-profile-restored.png")
+                click("maker_stop")
+                wait(lambda s: not s["maker"]["busy"], "close restored session")
                 close()
                 start()
                 wait(lambda s: s["maker"]["graph"]["id"] == tabs_saved, "saved tabs reopened")

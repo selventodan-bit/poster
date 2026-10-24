@@ -95,7 +95,7 @@ The explicit native provider suite is
 `POSTER_TEST_QT=1 pytest -q tests/test_maker_stage3a.py` on Windows or Xvfb Linux.
 Windows packaging runs `scripts/build_windows_app.py --embedded` followed by the
 same real OS-input graph/debugger scenario used for Lite, adapted to native Qt view
-geometry. CI also retains all original CMS, editor, HTTP, database and Drive checks.
+geometry, including popup/iframe login, profile save/reuse and process-tree shutdown. CI also retains all original CMS, editor, HTTP, database and Drive checks.
 
 ## Limits / next stage
 
