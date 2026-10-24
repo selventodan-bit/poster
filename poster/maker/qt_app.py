@@ -411,6 +411,8 @@ class MakerWindow(QMainWindow, ToolsMixin):
         url = self.browser.address.text().strip()
         if self.demo_base and url.startswith(self.demo_base + "/"):
             self.document.graph.metadata["maker_demo"] = self.demo_base
+        elif not continued:
+            self.document.graph.metadata.pop("maker_demo", None)
         self.trace = []
         self.run_state = None
         self.submit(
@@ -803,6 +805,12 @@ class MakerWindow(QMainWindow, ToolsMixin):
                     "element": [self.tools_tabs.width(), self.tools_tabs.height()],
                 },
                 "nodes": nodes,
+                "canvas_frame": self.canvas.render_serial,
+                "canvas_rect": [
+                    *self.canvas.viewport().mapToGlobal(self.canvas.viewport().rect().topLeft()).toTuple(),
+                    self.canvas.viewport().width(),
+                    self.canvas.viewport().height(),
+                ],
                 "graph": self.document.graph.model_dump(mode="json"),
                 "selected": self.canvas.selection(),
                 "recording": self.recording,

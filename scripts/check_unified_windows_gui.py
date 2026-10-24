@@ -111,8 +111,22 @@ def check(executable, output):
         wait(lambda s: s.get("tools_page" if tools else "main_page") == label, "selected tab " + label)
 
     def choose_node(node_id):
+        def visible(state):
+            if node_id not in state.get("nodes", {}) or not state.get("canvas_rect"):
+                return False
+            x, y = state["nodes"][node_id]
+            left, top, width, height = state["canvas_rect"]
+            return left < x < left + width and top < y < top + height
+
+        frame = snapshot().get("canvas_frame", 0)
         click("fit")
-        state = wait(lambda s: node_id in s.get("nodes", {}), "node geometry")
+        state = wait(lambda s: s.get("canvas_frame", 0) > frame, "graph fit painted")
+        if not visible(state):
+            # Large graphs can exceed the minimum zoom; use the real search UI
+            # to bring the requested cube into view before the OS canvas click.
+            fill("node_search", node_id)
+            keyboard.send_keys("{ENTER}")
+            state = wait(lambda s: visible(s) and s.get("selected") == [node_id], "node scrolled into view")
         window.set_focus()
         mouse.click(coords=tuple(state["nodes"][node_id]))
         wait(lambda s: s.get("selected") == [node_id], "node selected")
@@ -281,6 +295,7 @@ def check(executable, output):
             paste("Returned to main")
             click("record_stop")
             tabs_graph = wait(lambda s: not s["recording"] and not s["busy"], "tabs stopped")["graph"]
+            assert "maker_demo" not in tabs_graph["metadata"]
             assert any(n["type"] == "Browser.WaitPopup" for n in tabs_graph["nodes"])
             assert DEMO_PASSWORD not in json.dumps(tabs_graph)
             click("profile_save")

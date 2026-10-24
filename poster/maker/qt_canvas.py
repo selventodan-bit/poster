@@ -100,6 +100,7 @@ class GraphView(QGraphicsView):
         self.document, self.editable = document, editable
         self.blocks, self.links, self.adjacent = {}, [], {}
         self.connection = None
+        self.render_serial = 0
         self.scene_model = QGraphicsScene(self)
         self.setScene(self.scene_model)
         self.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -108,6 +109,10 @@ class GraphView(QGraphicsView):
         self.setViewportUpdateMode(self.ViewportUpdateMode.MinimalViewportUpdate)
         self.scene_model.selectionChanged.connect(self.selection_changed)
         self.redraw()
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        self.render_serial += 1
 
     def redraw(self):
         selected = self.selection()
@@ -231,6 +236,7 @@ class GraphView(QGraphicsView):
             self.resetTransform()
             self.scale(zoom, zoom)
             self.document.graph.view.zoom = zoom
+            self.viewport().update()
 
     def wheelEvent(self, event):
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:

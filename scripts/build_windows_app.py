@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import importlib.metadata
 from pathlib import Path
 import shutil
 import subprocess
@@ -10,6 +11,44 @@ import sys
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def licenses(bundle, embedded):
+    shutil.copyfile(ROOT / "THIRD_PARTY_NOTICES.txt", bundle / "THIRD_PARTY_NOTICES.txt")
+    if embedded:
+        shutil.copytree(ROOT / "licenses" / "qt", bundle / "licenses" / "qt", dirs_exist_ok=True)
+    for name in (
+        "playwright",
+        "httpx",
+        "pydantic",
+        "cryptography",
+        "filelock",
+        "google-auth",
+        "beautifulsoup4",
+        "PyYAML",
+    ):
+        try:
+            distribution = importlib.metadata.distribution(name)
+        except importlib.metadata.PackageNotFoundError:
+            continue
+        for file in distribution.files or []:
+            if any(
+                part in {"license", "licenses", "notice", "copying"}
+                for part in str(file).lower().replace(".", "/").split("/")
+            ):
+                source = distribution.locate_file(file)
+                if source.is_file() and source.stat().st_size < 5_000_000:
+                    relative = Path(*[part for part in Path(file).parts if part not in {"..", ".", "/"}])
+                    target = bundle / "licenses" / "packages" / name / relative
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(source, target)
+    for name in ("LICENSE.txt", "LICENSE"):
+        source = Path(sys.base_prefix) / name
+        if source.is_file():
+            target = bundle / "licenses" / "Python.txt"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, target)
+            break
 
 
 def package(bundle, output, commit, *, embedded=False):
@@ -20,6 +59,7 @@ def package(bundle, output, commit, *, embedded=False):
         info["ui"] = "qt"
     (bundle / "BUILD_INFO.json").write_text(json.dumps(info, indent=2), encoding="utf-8")
     shutil.copyfile(ROOT / "WINDOWS_README.txt", bundle / "WINDOWS_README.txt")
+    licenses(bundle, embedded)
     name = "poster-maker-windows" if embedded else "poster-windows"
     target = output / (name + ".zip")
     with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -40,6 +80,15 @@ def package(bundle, output, commit, *, embedded=False):
         "unpacked_bytes": sum(p.stat().st_size for p in bundle.rglob("*") if p.is_file()),
         "browser_bundled": embedded,
     }
+    if embedded and sys.platform == "win32":
+        from PySide6.QtCore import qVersion
+        from PySide6.QtWebEngineCore import qWebEngineChromiumVersion, qWebEngineChromiumSecurityPatchVersion
+
+        report.update(
+            qt=qVersion(),
+            chromium=qWebEngineChromiumVersion(),
+            chromium_security_patch=qWebEngineChromiumSecurityPatchVersion(),
+        )
     (output / "build-report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     print("::notice title=Windows build measurement::" + json.dumps(report))
     print("::notice title=Windows ZIP SHA256::" + checksum)
