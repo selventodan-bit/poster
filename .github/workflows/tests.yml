@@ -338,11 +338,41 @@ jobs:
           EXPECTED_POSTER_COMMIT: '${{ github.sha }}'
           PYTHONUTF8: '1'
       - uses: actions/upload-artifact@v4
+        with:
+          name: maker-windows-graph
+          path: .poster/maker-qt-gui/windows-maker-demo.postergraph.json
+          include-hidden-files: true
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: maker-qt-gui
           path: |
             .poster/maker-qt-gui/report.json
             .poster/maker-qt-gui/*.png
+          include-hidden-files: true
+          if-no-files-found: error
+
+  windows-graph-on-linux:
+    needs: maker-windows-package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.13'
+      - run: uv sync --frozen --extra dev --extra recorder
+      - run: uv run --no-sync python -m playwright install --with-deps chromium
+      - uses: actions/download-artifact@v4
+        with:
+          name: maker-windows-graph
+          path: windows-graph
+      - name: Execute the exact graph saved by frozen Windows Maker without Qt or Tk
+        run: uv run --no-sync python scripts/check_windows_graph_linux.py windows-graph/windows-maker-demo.postergraph.json --output .poster/windows-graph-linux
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-graph-linux-report
+          path: .poster/windows-graph-linux/report.json
           include-hidden-files: true
           if-no-files-found: error

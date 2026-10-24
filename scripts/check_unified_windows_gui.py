@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import socket
+import shutil
 import time
 import traceback
 
@@ -174,6 +175,20 @@ def check(executable, output):
             bottom = min(vh, control["y"] + control["height"], clip["y"] + clip["height"])
             window.set_focus()
             if right - left > 3 and bottom - top > 3:
+                if " >> " in selector:
+                    print(
+                        "::notice title=Native iframe geometry::"
+                        + json.dumps(
+                            {
+                                "selector": selector,
+                                "viewport": view["viewport"],
+                                "element": {k: control[k] for k in ["x", "y", "width", "height"]},
+                                "clip": clip,
+                                "visible": [left, top, right, bottom],
+                            }
+                        ),
+                        flush=True,
+                    )
                 mouse.click(
                     coords=(
                         int(x + (left + right) / 2 * width / vw),
@@ -275,6 +290,7 @@ def check(executable, output):
         picture("01-unified-record-edit-debug.png")
         click("save")
         saved = wait(lambda s: s.get("saved_file") and not s["dirty"], "saved graph")
+        shutil.copyfile(saved["saved_file"], output / "windows-maker-demo.postergraph.json")
         demo_port = (
             __import__("urllib.parse", fromlist=["urlsplit"])
             .urlsplit(saved["graph"]["metadata"]["maker_demo"])
