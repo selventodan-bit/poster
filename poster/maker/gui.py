@@ -16,11 +16,13 @@ from ..recorder.clipboard import ClipboardMixin
 from .actions import default_registry
 from .canvas import GraphCanvas
 from .fixtures import serve_maker
-from .model import Document, Graph, GraphError, empty_graph, secret_refs
+from .model import Document, Graph, GraphError, Node, empty_graph, graph_secret_refs
+from .gui_tools import ToolsMixin, parse_value, show_value
 from .recorder import ActionRecorder
 from .record_script import SELECTOR_FUNCTION
 from .runtime import ERRORS, GraphRunner
 from .storage import Vault, load_graph, save_graph
+from .variables import draft_parameters, has_reference
 
 MESSAGES = {
     **ERRORS,
@@ -35,7 +37,7 @@ MESSAGES = {
 }
 
 
-class MakerPanel(ClipboardMixin):
+class MakerPanel(ToolsMixin, ClipboardMixin):
     def __init__(self, notebook, loop, workspace):
         self.frame = ttk.Frame(notebook, padding=5)
         self.root = self.frame.winfo_toplevel()
@@ -113,6 +115,7 @@ class MakerPanel(ClipboardMixin):
         self.url_entry.pack(side="left", fill="x", expand=True, padx=3)
         self.button(row, "navigate", "Открыть URL", self.navigate)
         self.button(row, "record", "Начать запись", self.start_recording)
+        self.button(row, "record_resume", "Продолжить запись", lambda: self.start_recording(continued=True))
         self.button(row, "record_stop", "Остановить запись", self.stop_recording)
         self.button(row, "demo", "Демо-сайт", self.demo)
         row = ttk.Frame(self.frame)
@@ -125,6 +128,11 @@ class MakerPanel(ClipboardMixin):
         self.button(row, "undo", "Отменить правку", lambda: self.canvas.undo())
         self.button(row, "fit", "Показать всё", lambda: self.canvas.fit())
         self.button(row, "zoom", "100%", self.reset_zoom)
+        row = ttk.Frame(self.frame)
+        row.pack(fill="x")
+        self.button(row, "breakpoint", "Точка останова", self.toggle_breakpoint)
+        self.button(row, "selected_run", "Выполнить кубик", self.run_selected)
+        self.button(row, "example", "Пример с циклом", self.example_project)
         ttk.Label(
             self.frame,
             text="Браузер открывается отдельным управляемым окном. Встроенный Chromium запланирован на следующий этап.",
@@ -146,8 +154,13 @@ class MakerPanel(ClipboardMixin):
             panes, self.document, selected=self.select, changed=self.changed, editable=self.editable
         )
         panes.add(self.canvas.frame, weight=4)
-        properties = ttk.Frame(panes, width=255)
-        panes.add(properties, weight=0)
+        tools = ttk.Notebook(panes, width=285)
+        panes.add(tools, weight=0)
+        self.tools_notebook = tools
+        properties = ttk.Frame(tools, width=270)
+        self.properties_page = properties
+        tools.add(properties, text="Свойства")
+        self.build_tools(tools)
         ttk.Label(properties, text="Свойства кубика").pack(anchor="w")
         ttk.Label(properties, textvariable=self.selected_label, wraplength=250).pack(anchor="w")
         ttk.Label(properties, text="Название").pack(anchor="w")
@@ -195,8 +208,14 @@ class MakerPanel(ClipboardMixin):
 
     def changed(self):
         self.document.dirty = True
-        self.canvas.results = {}
-        self.status.set("Граф изменён. Связь: нажмите S/E источника, затем вход или тело следующего кубика.")
+        runner = self.active_runner()
+        if not runner or runner.state != "PAUSED":
+            self.canvas.results = {}
+        self.status.set(
+            "Параметры обновлены в остановленной сессии. Можно продолжить."
+            if runner and runner.state == "PAUSED"
+            else "Граф изменён. Связь: нажмите S/E источника, затем вход или тело следующего кубика."
+        )
         self.update_buttons()
 
     def replace(self, graph, vault=None, dirty=False):
@@ -208,6 +227,7 @@ class MakerPanel(ClipboardMixin):
         self.canvas.selected = set()
         self.canvas.selected_edge = None
         self.canvas.results = {}
+        self.refresh_variables()
         self.project_name.set(graph.name)
         self.canvas.draw()
         self.select(None)
@@ -236,6 +256,7 @@ class MakerPanel(ClipboardMixin):
         if not node_id:
             self.selected_label.set("Выберите кубик на холсте")
             self.node_title.set("")
+            self.update_buttons()
             return
         node = self.document.graph.node(node_id)
         self.selected_label.set(node.type + " · " + node.id[:7])
@@ -255,11 +276,17 @@ class MakerPanel(ClipboardMixin):
             value = node.params.get(prop.name, defaults.get(prop.name, ""))
             protected = isinstance(value, dict) and set(value) == {"secret_ref"}
             shown = (
-                "@secret:" + value["secret_ref"]
-                if protected
-                else "\n".join(value)
-                if isinstance(value, list)
-                else str(value)
+                show_value(value)
+                if prop.kind in {"json", "value"}
+                else (
+                    "@secret:" + value["secret_ref"]
+                    if protected
+                    else "\n".join(value)
+                    if isinstance(value, list)
+                    else ""
+                    if value is None
+                    else str(value)
+                )
             )
             if prop.kind == "bool":
                 shown = "Да" if value else "Нет"
@@ -286,9 +313,11 @@ class MakerPanel(ClipboardMixin):
             if prop.secret:
                 ttk.Checkbutton(self.prop_frame, text="Защищённое значение", variable=secure).pack(anchor="w")
             self.props[prop.name] = (prop, widget, secure, value)
+        self.add_output_properties(node)
+        self.update_buttons()
 
     def apply(self):
-        if not self.editable() or len(self.canvas.selected) != 1:
+        if not self.params_editable() or len(self.canvas.selected) != 1:
             return False
         node = self.document.graph.node(next(iter(self.canvas.selected)))
         try:
@@ -303,20 +332,48 @@ class MakerPanel(ClipboardMixin):
                         values[name] = self.vault.put(text)
                 elif text.startswith("@secret:"):
                     raise GraphError("PASSWORD_REF_REQUIRED")
-                elif prop.kind == "integer":
-                    values[name] = int(text)
+                elif prop.kind in {"integer", "optional_integer"}:
+                    values[name] = (
+                        text
+                        if has_reference(text)
+                        else None
+                        if not text and prop.kind == "optional_integer"
+                        else int(text)
+                    )
                 elif prop.kind == "bool":
                     values[name] = text == "Да"
                 elif prop.kind == "lines":
                     values[name] = [s for s in text.splitlines() if s]
+                elif prop.kind == "json":
+                    values[name] = json.loads(text)
+                elif prop.kind == "value":
+                    values[name] = parse_value(text)
                 else:
                     values[name] = text
             if node.type == "Browser.Input":
-                values["sensitive"] = isinstance(values.get("value"), dict)
-            values = spec.params.model_validate(values).model_dump(mode="json")
+                values["sensitive"] = isinstance(values.get("value"), dict) and set(values["value"]) == {
+                    "secret_ref"
+                }
+            values = draft_parameters(spec, values)
+            updated = Node.model_validate(
+                {
+                    **node.model_dump(),
+                    "params": values,
+                    "title": self.node_title.get()[:200],
+                    "save_as": self.output_name.get().strip() or None,
+                    "result_path": self.output_path.get().strip(),
+                    "protect_result": self.output_secret.get(),
+                }
+            )
+            candidate = self.document.graph.model_copy(deep=True)
+            candidate.nodes = [updated if n.id == node.id else n for n in candidate.nodes]
+            candidate.validate_structure()
+            runner = self.active_runner()
+            if runner and runner.state == "PAUSED":
+                runner.update_node(updated)
             self.document.checkpoint()
-            node.params = values
-            node.title = self.node_title.get()[:200]
+            for key in ("params", "title", "save_as", "result_path", "protect_result"):
+                setattr(node, key, getattr(updated, key))
             self.canvas.draw()
             self.select(node.id)
             self.changed()
@@ -409,7 +466,23 @@ class MakerPanel(ClipboardMixin):
                 self.last_error = value
                 self.status.set(MESSAGES.get(value["code"], MESSAGES["BROWSER_ERROR"]))
             elif kind == "warning":
-                self.status.set(MESSAGES.get(value, value))
+                if isinstance(value, dict):
+                    self.status.set(
+                        MESSAGES.get(value["code"], MESSAGES["RECORD_EVENT_FAILED"])
+                        + " "
+                        + value.get("action", "")
+                        + " "
+                        + value.get("selector", "")
+                    )
+                else:
+                    self.status.set(MESSAGES.get(value, value))
+            elif kind == "picked":
+                self.receive_pick(value)
+            elif kind == "selector_result":
+                self.selector_result = value
+                self.status.set(
+                    "Найдено элементов: " + str(value["count"]) + ". Совпадения подсвечены в браузере."
+                )
             elif kind == "demo":
                 self.url.set(value)
                 self.status.set("Демо-сайт готов. Нажмите «Начать запись».")
@@ -418,7 +491,15 @@ class MakerPanel(ClipboardMixin):
             elif kind == "event":
                 if value["kind"] == "node":
                     self.canvas.results[value["node_id"]] = "RUNNING"
-                else:
+                elif value["kind"] == "variables":
+                    self.runtime_values = value["values"]
+                    if hasattr(self, "refresh_variables"):
+                        self.refresh_variables()
+                elif value["kind"] == "pause":
+                    if value.get("node_id"):
+                        self.canvas.results[value["node_id"]] = "BREAKPOINT"
+                    self.status.set("Точка останова. Измените параметры или продолжите кнопкой «Запустить».")
+                elif value["kind"] == "result":
                     result = value["result"]
                     self.canvas.results[result["node_id"]] = result["status"]
                     self.trace.append(result)
@@ -427,6 +508,10 @@ class MakerPanel(ClipboardMixin):
                         "end",
                         f"{result['action']} → {result['status']} / {result['port']} {json.dumps(result['value'], ensure_ascii=False)} {result['message']}\n",
                     )
+                    if result.get("details"):
+                        self.trace_widget.insert(
+                            "end", json.dumps(result["details"], ensure_ascii=False) + "\n"
+                        )
                     self.trace_widget.see("end")
                     self.trace_widget.configure(state="disabled")
                     self.status.set(
@@ -461,6 +546,31 @@ class MakerPanel(ClipboardMixin):
             state="normal" if not self.busy and not self.recording and not self.closed else "disabled"
         )
         self.buttons["record"].configure(state="normal" if edit else "disabled")
+        self.buttons["record_resume"].configure(
+            state="normal" if edit and len(self.canvas.selected) == 1 else "disabled"
+        )
+        self.buttons["apply"].configure(state="normal" if self.params_editable() else "disabled")
+        self.buttons["breakpoint"].configure(state="normal" if self.params_editable() else "disabled")
+        runner = self.active_runner()
+        paused = runner and runner.state == "PAUSED" and not self.busy
+        self.buttons["selected_run"].configure(
+            state="normal" if self.params_editable() and len(self.canvas.selected) == 1 else "disabled"
+        )
+        for name in ("var_save", "var_delete", "example", "read_text", "read_attribute"):
+            self.buttons[name].configure(state="normal" if edit else "disabled")
+        self.buttons["var_live"].configure(state="normal" if paused else "disabled")
+        for name in (
+            "browser_open",
+            "pick",
+            "selector_check",
+            "selector_apply",
+            "tab_new",
+            "tab_switch",
+            "tab_close",
+        ):
+            self.buttons[name].configure(
+                state="normal" if not self.busy and not self.recording and not self.closed else "disabled"
+            )
         self.buttons["record_stop"].configure(
             state="normal" if self.recording and not self.busy else "disabled"
         )
@@ -539,8 +649,14 @@ class MakerPanel(ClipboardMixin):
             self.trace = []
             self.status.set("Новый граф. Добавьте кубики или начните запись.")
 
-    def start_recording(self):
-        if not self.editable() or not self.confirm_discard():
+    def start_recording(self, continued=False):
+        if not self.editable() or (not continued and not self.confirm_discard()):
+            return
+        selected = next(iter(self.canvas.selected)) if continued and len(self.canvas.selected) == 1 else None
+        if continued and (
+            not selected or self.document.graph.node(selected).type in {"End", "End.Success", "End.Failure"}
+        ):
+            self.status.set("Выберите кубик, после которого нужно продолжить запись.")
             return
         url = self.url.get().strip()
         if url and urlsplit(url).scheme not in {"http", "https"}:
@@ -549,23 +665,31 @@ class MakerPanel(ClipboardMixin):
         self.epoch += 1
         messages = self.messages
         epoch = self.epoch
-        self.vault = Vault()
-        self.path = None
+        previous = self.recorder
+        reused = previous.session if continued and previous and previous.session.page else None
+        if not continued:
+            self.vault = Vault()
+            self.path = None
         self.trace = []
         recording = ActionRecorder(
             headless=False,
             vault=self.vault,
             on_change=lambda g: messages.put((epoch, "graph", g)),
             on_warning=lambda code: messages.put((epoch, "warning", code)),
+            graph=self.document.graph if continued else None,
+            after_node=selected,
+            session=reused,
         )
         if self.demo_base and url.startswith(self.demo_base + "/"):
             recording.graph.metadata["maker_demo"] = self.demo_base
         self.recorder = recording
 
         async def work():
+            if previous and not reused:
+                await previous.close()
             await recording.start()
             messages.put((epoch, "recording", True))
-            if url:
+            if url and not reused:
                 await recording.navigate(url)
 
         self.submit("record", work)
@@ -584,14 +708,13 @@ class MakerPanel(ClipboardMixin):
             return
 
         async def work():
-            await self.recorder.stop()
-            self.recorder = None
+            await self.recorder.stop(close=False)
             self.messages.put((self.epoch, "recording", False))
 
         self.submit("record_stop", work)
 
     def prepare_secrets(self):
-        refs = secret_refs([n.params for n in self.document.graph.nodes])
+        refs = graph_secret_refs(self.document.graph)
         for ref in sorted(refs):
             try:
                 self.vault.get(ref)
@@ -614,6 +737,9 @@ class MakerPanel(ClipboardMixin):
         if fresh:
             if not self.prepare_secrets():
                 return
+            inputs = self.prepare_inputs()
+            if inputs is None:
+                return
             if not messagebox.askyesno(
                 "Выполнение графа",
                 "Выполнить действия графа в браузере? Клики могут отправлять формы и изменять данные на сайте.",
@@ -633,6 +759,12 @@ class MakerPanel(ClipboardMixin):
 
         async def work():
             if fresh:
+                if self.recorder:
+                    await self.recorder.close()
+                    self.recorder = None
+                if self.tools_context:
+                    await self.tools_context.session.close()
+                    self.tools_context = None
                 if self.runner:
                     await self.runner.close()
                 await self.ensure_demo()
@@ -641,6 +773,7 @@ class MakerPanel(ClipboardMixin):
                     vault=vault,
                     headless=False,
                     on_event=lambda event: messages.put((epoch, "event", event)),
+                    inputs=inputs,
                 )
             if step:
                 await self.runner.step()
@@ -669,6 +802,10 @@ class MakerPanel(ClipboardMixin):
         if self.runner:
             await self.runner.close()
             self.runner = None
+        if self.tools_context:
+            await self.tools_context.session.close()
+            self.tools_context = None
+        self.inspector = None
         self.messages.put((self.epoch, "recording", False))
         self.messages.put((self.epoch, "idle", None))
         self.messages.put((self.epoch, "stopped", None))
@@ -807,6 +944,9 @@ class MakerPanel(ClipboardMixin):
                 "maker_name": self.name_entry,
                 "maker_library": self.library,
                 "maker_properties": self.property_canvas,
+                "maker_variable_name": self.variable_name_entry,
+                "maker_variable_value": self.variable_value,
+                "maker_selector": self.selector_entry,
             }
         )
         widgets.update({"maker_prop_" + k: v[1] for k, v in self.props.items()})
@@ -837,6 +977,11 @@ class MakerPanel(ClipboardMixin):
             "status": self.status.get(),
             "saved_file": str(self.path) if self.path else None,
             "browser": self.browser_view,
+            "runtime_values": self.runtime_values,
+            "current_node": self.runner.current if self.runner else None,
+            "pause_reason": self.runner.pause_reason if self.runner else None,
+            "picked": self.last_pick,
+            "selector_result": getattr(self, "selector_result", None),
             "demo": {"origin": self.demo_base, "posts": self.demo_server.posts.copy()}
             if self.demo_server
             else None,

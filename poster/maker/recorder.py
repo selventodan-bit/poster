@@ -2,6 +2,7 @@
 
 import asyncio
 import re
+import time
 from urllib.parse import parse_qsl, urlsplit, urlunsplit
 
 from ..recorder.capture import Recorder
@@ -34,26 +35,46 @@ def navigation_pattern(url):
 
 
 class ActionRecorder:
-    def __init__(self, *, headless=False, on_change=None, on_warning=None, vault=None):
-        self.session = BrowserSession(headless)
-        self.graph = empty_graph()
+    def __init__(
+        self,
+        *,
+        headless=False,
+        on_change=None,
+        on_warning=None,
+        vault=None,
+        graph=None,
+        after_node=None,
+        session=None,
+    ):
+        self.session = session or BrowserSession(headless)
+        self.graph = graph.validate_structure().model_copy(deep=True) if graph else empty_graph()
         self.vault = vault or Vault()
         self.on_change = on_change or (lambda graph: None)
         self.on_warning = on_warning or (lambda code: None)
-        self.tail = self.graph.entry
-        self.end = next(n.id for n in self.graph.nodes if n.type == "End")
+        self.tail = after_node or self.graph.entry
+        if self.graph.node(self.tail).type in {"End", "End.Success", "End.Failure"}:
+            raise GraphError("INVALID_CONNECTION")
+        self.end = self.graph.successor(self.tail, "success")
+        if self.end is None:
+            end = Node(type="End")
+            self.graph.nodes.append(end)
+            self.end = end.id
         self.accepting = False
         self.pending = set()
         self.opening = 0
         self.renderer_navigation = False
+        self.renderer_intent_time = 0
         self.document_id = None
         self.last_input = None
         self.cdp = None
+        self.last_action = None
+        self.last_action_time = 0
+        self.seen_events = set()
 
     def changed(self):
         self.on_change(self.graph.model_dump(mode="json"))
 
-    def append(self, action, params):
+    def append(self, action, params, *, event_id=None):
         if len(self.graph.nodes) >= 2000:
             raise GraphError("RECORD_LIMIT")
         count = len(self.graph.nodes) - 1
@@ -66,10 +87,15 @@ class ActionRecorder:
         )
         self.graph.nodes.insert(-1, node)
         self.tail = node.id
+        if event_id:
+            node.extensions["record_event"] = event_id
+        if action in {"Browser.Click", "Browser.Input", "Browser.Select", "Browser.OpenURL"}:
+            self.last_action, self.last_action_time = node.id, time.monotonic()
         end = self.graph.node(self.end)
-        count += 1
-        end.x = 50 + (count % 3) * 220
-        end.y = 60 + (count // 3) * 125
+        if end.type in {"End", "End.Success", "End.Failure"}:
+            count += 1
+            end.x = 50 + (count % 3) * 220
+            end.y = 60 + (count // 3) * 125
         self.changed()
         return node
 
@@ -80,34 +106,31 @@ class ActionRecorder:
         return task
 
     async def start(self):
-        await self.session.start()
+        if self.session.page is None:
+            await self.session.start()
         try:
             # Reuse the existing Recorder's DOM binding mechanism, without its
             # network capture. Password POST bodies are never captured here.
-            legacy = Recorder("about:blank", None)
-            await legacy.attach_actions(
-                self.session.context, self.action, script=RECORD_JS, binding="__poster_maker_action"
-            )
-            await self.session.page.evaluate(RECORD_JS)
+            self.session.record_target = self
+            if not getattr(self.session, "record_binding", False):
+                legacy = Recorder("about:blank", None)
+                session = self.session
+                await legacy.attach_actions(
+                    session.context,
+                    lambda source, data: session.record_target.action(source, data),
+                    script=RECORD_JS,
+                    binding="__poster_maker_action",
+                )
+                session.record_binding = True
+            for frame in self.session.page.frames:
+                await frame.evaluate(RECORD_JS)
+                await frame.evaluate("window.__posterMakerStart?.()")
             self.cdp = await self.session.context.new_cdp_session(self.session.page)
             await self.cdp.send("Page.enable")
             main_id = (await self.cdp.send("Page.getFrameTree"))["frameTree"]["frame"]["id"]
             self.cdp.on(
                 "Page.frameRequestedNavigation",
-                lambda event: (
-                    setattr(self, "renderer_navigation", True)
-                    if event.get("frameId") == main_id
-                    and event.get("reason")
-                    in {
-                        "anchorClick",
-                        "formSubmissionGet",
-                        "formSubmissionPost",
-                        "scriptInitiated",
-                        "metaTagRefresh",
-                        "httpHeaderRefresh",
-                    }
-                    else None
-                ),
+                lambda event: self.navigation_intent(event, main_id),
             )
             self.session.page.on("framenavigated", self.navigation_event)
             self.accepting = True
@@ -116,6 +139,18 @@ class ActionRecorder:
         except BaseException:
             await self.close()
             raise
+
+    def navigation_intent(self, event, main_id):
+        if event.get("frameId") == main_id and event.get("reason") in {
+            "anchorClick",
+            "formSubmissionGet",
+            "formSubmissionPost",
+            "scriptInitiated",
+            "metaTagRefresh",
+            "httpHeaderRefresh",
+        }:
+            self.renderer_navigation = True
+            self.renderer_intent_time = time.monotonic()
 
     async def frame_path(self, frame):
         selectors = []
@@ -140,6 +175,10 @@ class ActionRecorder:
                 or len(selector) > 4000
             ):
                 return
+            event_id = str(data.get("document_id")) + ":" + str(data.get("sequence"))
+            if data.get("sequence") is not None and event_id in self.seen_events:
+                return
+            self.seen_events.add(event_id)
             frame = await self.frame_path(source["frame"])
             key = (tuple(frame), selector, data.get("document_id"))
             if not frame:
@@ -171,27 +210,37 @@ class ActionRecorder:
                     else str(data.get("value", ""))[:200000]
                 )
                 node = self.append(
-                    "Browser.Input", {**target, "value": value, "sensitive": bool(data.get("sensitive"))}
+                    "Browser.Input",
+                    {**target, "value": value, "sensitive": bool(data.get("sensitive"))},
+                    event_id=event_id,
                 )
                 self.last_input = (key, node.id)
             elif kind == "select":
-                self.append("Browser.Select", {**target, "values": data.get("values", [])})
+                self.append("Browser.Select", {**target, "values": data.get("values", [])}, event_id=event_id)
                 self.last_input = None
             else:
-                self.append("Browser.Click", {**target, "button": data.get("button", "left")})
+                self.append(
+                    "Browser.Click", {**target, "button": data.get("button", "left")}, event_id=event_id
+                )
                 self.last_input = None
         except Exception as exc:
-            self.on_warning(exc.code if isinstance(exc, GraphError) else "RECORD_EVENT_FAILED")
+            self.on_warning(
+                {
+                    "code": exc.code if isinstance(exc, GraphError) else "RECORD_EVENT_FAILED",
+                    "action": str(data.get("kind", ""))[:30],
+                    "selector": str(data.get("selector", ""))[:400],
+                }
+            )
 
     def navigation_event(self, frame):
         if not self.accepting or not self.session.page or frame != self.session.page.main_frame:
             return
         explicit = bool(self.opening)
-        renderer = self.renderer_navigation
+        renderer = self.renderer_navigation and time.monotonic() - self.renderer_intent_time < 2
         self.renderer_navigation = False
-        self.task(self.navigation(frame, explicit, renderer))
+        self.task(self.navigation(frame, explicit, renderer, self.last_action))
 
-    async def navigation(self, frame, explicit, renderer):
+    async def navigation(self, frame, explicit, renderer, after_node):
         try:
             document = await frame.evaluate("window.__posterMakerDocumentId||null")
             same_document = bool(document and document == self.document_id)
@@ -201,8 +250,15 @@ class ActionRecorder:
             url = frame.url
             if urlsplit(url).scheme not in {"http", "https"}:
                 return
-            if renderer or same_document:
-                self.append("Browser.WaitURL", {"url": navigation_pattern(url), "after_action": True})
+            if after_node and (renderer or (same_document and time.monotonic() - self.last_action_time < 2)):
+                if self.graph.node(self.tail).type == "Browser.WaitURL" and self.graph.node(
+                    self.tail
+                ).params.get("url") == navigation_pattern(url):
+                    return
+                self.append(
+                    "Browser.WaitURL",
+                    {"url": navigation_pattern(url), "after_action": True, "after_node": after_node},
+                )
             else:
                 value = self.vault.put(url) if sensitive_url(url) else url
                 self.append("Browser.OpenURL", {"url": value})
@@ -226,7 +282,7 @@ class ActionRecorder:
         finally:
             self.opening -= 1
 
-    async def stop(self):
+    async def stop(self, *, close=True):
         if self.session.context:
             for page in self.session.context.pages:
                 for frame in page.frames:
@@ -237,7 +293,13 @@ class ActionRecorder:
         if self.pending:
             await asyncio.gather(*list(self.pending), return_exceptions=True)
         self.accepting = False
-        await self.session.close()
+        if self.session.page:
+            self.session.page.remove_listener("framenavigated", self.navigation_event)
+        if self.cdp:
+            await self.cdp.detach()
+            self.cdp = None
+        if close:
+            await self.session.close()
         self.changed()
         return self.graph
 

@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 
 from ..auth import decrypt_bytes, encrypt_session
-from .model import Graph, GraphError, identity, secret_refs
+from .model import Graph, GraphError, identity, graph_secret_refs
 
 MAX_FILE = 10_000_000
 
@@ -72,7 +72,7 @@ def save_graph(path, graph, vault):
         except (ValueError, AttributeError) as exc:
             raise GraphError("FILE_INVALID") from exc
     saved = graph.validate_structure().model_copy(deep=True)
-    refs = secret_refs([n.params for n in saved.nodes])
+    refs = graph_secret_refs(saved)
     tokens = {k: base64.b64encode(v).decode("ascii") for k, v in vault.tokens.items() if k in refs}
     if tokens:
         raw = json.dumps(
@@ -90,6 +90,12 @@ def save_graph(path, graph, vault):
     raw = saved.model_dump_json(indent=2).encode("utf-8")
     if len(raw) > MAX_FILE:
         raise GraphError("FILE_TOO_LARGE")
+    if path.exists():
+        old = read_bounded(path)
+        if json.loads(old).get("schema_version") == 1:
+            backup = path.with_name(path.name + ".v1.bak")
+            if not backup.exists():
+                atomic(backup, old)
     atomic(path, raw)  # Commit the graph last; the previous encrypted bundle stays recoverable.
     return saved
 

@@ -1,7 +1,6 @@
 """Extensible action registry. Graph data never imports or evaluates Python/JS."""
 
 from dataclasses import dataclass
-import asyncio
 from typing import Literal
 from urllib.parse import urlsplit
 
@@ -58,6 +57,7 @@ class WaitURL(DataModel):
     url: Value = "https://example.org/**"
     timeout_ms: int = Field(default=10000, ge=50, le=120000)
     after_action: bool = False
+    after_node: str | None = None
 
 
 class If(Target):
@@ -101,10 +101,10 @@ class Registry:
         except KeyError as exc:
             raise GraphError("ACTION_UNSUPPORTED") from exc
 
-    def parameters(self, node):
+    def parameters(self, node, values=None):
         try:
             spec = self.get(node.type, node.action_version)
-            return spec, spec.params.model_validate(node.params)
+            return spec, spec.params.model_validate(node.params if values is None else values)
         except GraphError:
             raise
         except ValueError as exc:
@@ -159,21 +159,9 @@ async def wait_element(ctx, params):
 
 
 async def wait_url(ctx, params):
-    if params.after_action:
-
-        async def changed():
-            while ctx.navigation_serial <= ctx.action_serial:
-                ctx.navigation_event.clear()
-                await ctx.navigation_event.wait()
-
-        try:
-            await asyncio.wait_for(changed(), params.timeout_ms / 1000)
-        except TimeoutError as exc:
-            raise GraphError("ELEMENT_TIMEOUT") from exc
-    await (await ctx.page()).wait_for_url(
-        resolve(ctx, params.url), timeout=params.timeout_ms, wait_until="domcontentloaded"
+    return "success", await ctx.wait_url(
+        resolve(ctx, params.url), params.timeout_ms, params.after_action, params.after_node
     )
-    return "success", {"matched": True}
 
 
 async def condition(ctx, params):
@@ -264,4 +252,9 @@ def default_registry():
         ),
     ):
         registry.register(spec)
+    from .control_actions import register_control_actions
+    from .browser_actions import register_browser_actions
+
+    register_control_actions(registry)
+    register_browser_actions(registry)
     return registry

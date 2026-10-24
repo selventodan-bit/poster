@@ -29,6 +29,16 @@ class MakerHandler(Handler):
                 200,
                 """<meta charset="utf-8"><title>ProjectMaker async</title><button id="async" onclick="setTimeout(()=>location.href='/async?stage=two',250)">Next</button>""",
             )
+        elif path == "/iframe":
+            self.reply(
+                200,
+                '<meta charset="utf-8"><title>ProjectMaker iframe</title><iframe id="inner" src="/login"></iframe>',
+            )
+        elif path == "/after-nav":
+            self.reply(
+                200,
+                '<meta charset="utf-8"><title>ProjectMaker navigation</title><a id="move" href="/after-nav?stage=two">Next</a><input id="late">',
+            )
         elif path.startswith("/result/"):
             item = self.server.posts.get(path.rsplit("/", 1)[-1])
             self.reply(

@@ -34,7 +34,7 @@ def test_graph_is_versioned_separate_and_coordinates_are_roundtripped(tmp_path):
     loaded, _ = load_graph(path)
     assert loaded == graph
     invalid = graph.model_dump()
-    invalid["schema_version"] = 2
+    invalid["schema_version"] = 3
     path.write_text(json.dumps(invalid))
     with pytest.raises(GraphError, match="FILE_INVALID"):
         load_graph(path)

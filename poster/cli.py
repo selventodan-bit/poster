@@ -26,6 +26,18 @@ def parser():
     maker_run.add_argument("--headed", action="store_true")
     maker_run.add_argument("--output", type=Path)
     maker_run.add_argument(
+        "--breakpoints",
+        action="store_true",
+        help="Return PAUSED at a breakpoint; batch runs ignore them by default",
+    )
+    maker_run.add_argument(
+        "--input",
+        action="append",
+        default=[],
+        metavar="NAME=JSON_OR_TEXT",
+        help="Override a declared project input; use secret refs for protected inputs",
+    )
+    maker_run.add_argument(
         "--secret-env", action="append", default=[], help="Explicitly allow one environment secret name"
     )
     f = sub.add_parser("fixtures", help="Run the two local test sites")
@@ -157,10 +169,30 @@ def main(argv=None):
             async def execute_graph():
                 graph, vault = load_graph(a.project)
                 vault.env_allowed.update(a.secret_env)
-                runner = GraphRunner(graph, vault=vault, headless=not a.headed)
+                inputs = {}
+                for item in a.input:
+                    name, separator, value = item.partition("=")
+                    if not separator:
+                        raise ValueError("INPUT_INVALID")
+                    try:
+                        value = json.loads(value)
+                    except ValueError:
+                        pass
+                    if (
+                        name in graph.variables
+                        and graph.variables[name].secret
+                        and not (isinstance(value, dict) and set(value) == {"secret_ref"})
+                    ):
+                        raise ValueError("INPUT_SECRET_REF_REQUIRED")
+                    inputs[name] = value
+                runner = GraphRunner(graph, vault=vault, headless=not a.headed, inputs=inputs)
                 try:
-                    status = await runner.run()
-                    return {"status": status, "results": [asdict(r) for r in runner.results]}
+                    status = await runner.run(breakpoints=a.breakpoints)
+                    return {
+                        "status": status,
+                        "results": [asdict(r) for r in runner.results],
+                        "variables": runner.context.variables.snapshot(),
+                    }
                 finally:
                     await runner.close()
 

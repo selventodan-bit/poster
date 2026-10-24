@@ -66,16 +66,23 @@ class GraphCanvas:
         self.node_boxes, self.port_points = {}, {}
         for node in self.graph.nodes:
             x, y = node.x * z, node.y * z
-            self.node_boxes[node.id] = (x, y, x + self.WIDTH * z, y + self.HEIGHT * z)
+            cases = node.params.get("cases", []) if node.type == "Logic.Switch" else []
+            height = self.HEIGHT + len(cases) * 22
+            self.node_boxes[node.id] = (x, y, x + self.WIDTH * z, y + height * z)
             self.port_points[node.id, "input"] = (x, y + 42 * z)
             self.port_points[node.id, "success"] = (x + self.WIDTH * z, y + 28 * z)
             self.port_points[node.id, "error"] = (x + self.WIDTH * z, y + 65 * z)
+            for index in range(len(cases)):
+                self.port_points[node.id, "case:" + str(index)] = (
+                    x + self.WIDTH * z,
+                    y + (92 + index * 22) * z,
+                )
         for index, edge in enumerate(self.graph.edges):
             start = self.port_points.get((edge.source, edge.port))
             end = self.port_points.get((edge.target, "input"))
             if not start or not end:
                 continue
-            color = "#15803d" if edge.port == "success" else "#dc2626"
+            color = "#15803d" if edge.port == "success" else "#dc2626" if edge.port == "error" else "#4f46e5"
             middle = max(start[0] + 25, (start[0] + end[0]) / 2)
             c.create_line(
                 *start,
@@ -98,6 +105,7 @@ class GraphCanvas:
                 "SUCCEEDED": "#dcfce7",
                 "FAILED": "#fee2e2",
                 "CANCELLED": "#e2e8f0",
+                "BREAKPOINT": "#fed7aa",
             }.get(status, "white")
             tag = f"node:{node.id}"
             c.create_rectangle(
@@ -107,6 +115,16 @@ class GraphCanvas:
                 width=3 if node.id in self.selected else 1,
                 tags=(tag,),
             )
+            if node.breakpoint:
+                c.create_oval(
+                    box[0] - 5,
+                    box[1] - 5,
+                    box[0] + 8,
+                    box[1] + 8,
+                    fill="#dc2626",
+                    outline="white",
+                    tags=(tag,),
+                )
             c.create_text(
                 box[0] + 12 * z,
                 box[1] + 13 * z,
@@ -127,10 +145,14 @@ class GraphCanvas:
             )
             if node.type != "Start":
                 self.port(node.id, "input", "#64748b")
-            if node.type != "End":
+            if node.type not in {"End", "End.Success", "End.Failure"}:
                 self.port(node.id, "success", "#16a34a", "S")
                 if node.type != "Start":
                     self.port(node.id, "error", "#dc2626", "E")
+                for index, _case in enumerate(
+                    node.params.get("cases", []) if node.type == "Logic.Switch" else []
+                ):
+                    self.port(node.id, "case:" + str(index), "#4f46e5", "C" + str(index + 1))
         bounds = c.bbox("all") or (0, 0, 800, 600)
         c.configure(
             scrollregion=(
@@ -190,9 +212,9 @@ class GraphCanvas:
             self.connection = None
             self.draw()
             return
-        if target[0] == "port" and target[2] in {"success", "error"}:
+        if target[0] == "port" and target[2] != "input":
             if self.editable():
-                self.connection = (node_id, target[2])
+                self.connection = (node_id, ":".join(target[2:]))
             return
         if event.state & 0x0001:
             if node_id in self.selected:

@@ -53,21 +53,22 @@ RECORD_JS = r"""(() => {
  const flushAll=()=>Promise.all([...pending.keys()].map(flush));
  window.__posterMakerFlush=async()=>{await flushAll();await Promise.all([...sent]);};
  window.__posterMakerStop=async()=>{await window.__posterMakerFlush();active=false;};
+ window.__posterMakerStart=()=>{active=true;};
  document.addEventListener('input',event=>{
-   if(!active||!event.isTrusted)return;
+   if(!active||!event.isTrusted||window.__posterMakerPicking)return;
    const e=event.composedPath()[0];
    if(!e?.matches?.('input:not([type=hidden]):not([type=checkbox]):not([type=radio]),textarea,[contenteditable=true]'))return;
    sensitive(e);clearTimeout(pending.get(e));pending.set(e,setTimeout(()=>flush(e),150));
  },true);
  document.addEventListener('click',event=>{
-   if(!active||!event.isTrusted)return;
+   if(!active||!event.isTrusted||window.__posterMakerPicking)return;
    const original=event.composedPath()[0];if(!original?.tagName)return;
    const e=original.closest('button,a,input,textarea,select,[role=button],label')||original;
    if(e.tagName==='SELECT'||(e.tagName==='LABEL'&&e.control))return;
    flushAll();emit('click',e,{button:['left','middle','right'][event.button]||'left'});
  },true);
  document.addEventListener('change',event=>{
-   if(!active||!event.isTrusted)return;
+   if(!active||!event.isTrusted||window.__posterMakerPicking)return;
    const e=event.composedPath()[0];
    if(e?.tagName==='SELECT'){flushAll();emit('select',e,{values:[...e.selectedOptions].map(o=>o.value)});}
  },true);
