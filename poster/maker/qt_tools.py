@@ -2,7 +2,6 @@
 
 import json
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QCheckBox, QComboBox, QFormLayout, QInputDialog, QLabel, QLineEdit, QHBoxLayout
 from PySide6.QtWidgets import (
     QMessageBox,
@@ -37,6 +36,7 @@ class ToolsMixin:
         self.tools_tabs.setObjectName("tools_tabs")
         self.property_area = QScrollArea()
         self.property_area.setObjectName("property_scroll")
+        self.property_area.verticalScrollBar().setObjectName("property_scrollbar")
         self.property_area.setWidgetResizable(True)
         self.tools_tabs.addTab(self.property_area, "Кубик")
         self.property_widgets = {}
@@ -71,6 +71,8 @@ class ToolsMixin:
         self.tools_tabs.addTab(variables, "Переменные")
 
         element_area = QScrollArea()
+        element_area.setObjectName("element_scroll")
+        element_area.verticalScrollBar().setObjectName("element_scrollbar")
         element_area.setWidgetResizable(True)
         element = QWidget()
         element_area.setWidget(element)
@@ -92,11 +94,13 @@ class ToolsMixin:
         self.frames.setMaximumHeight(65)
         self.frames.setObjectName("selector_frames")
         form.addWidget(self.frames)
-        self.element_info = QLabel("Выберите элемент в браузере")
-        self.element_info.setWordWrap(True)
-        self.element_info.setTextFormat(Qt.TextFormat.PlainText)
-        form.addWidget(self.element_info)
         self.row_buttons(form, [("selector_apply", "В выбранный кубик", self.apply_selector)])
+        self.element_info = QPlainTextEdit("Выберите элемент в браузере")
+        self.element_info.setObjectName("element_attributes")
+        self.element_info.setReadOnly(True)
+        self.element_info.setMinimumHeight(65)
+        self.element_info.setMaximumHeight(100)
+        form.addWidget(self.element_info)
         self.row_buttons(
             form,
             [

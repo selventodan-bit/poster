@@ -656,7 +656,7 @@ class MakerWindow(QMainWindow, ToolsMixin):
             self.last_pick = data
             self.switch_selector()
             self.frames.setPlainText("\n".join(data["frame"]))
-            self.element_info.setText(
+            self.element_info.setPlainText(
                 json.dumps(
                     {
                         "tab": data.get("tab_id"),
@@ -796,6 +796,12 @@ class MakerWindow(QMainWindow, ToolsMixin):
                 "qt": qVersion(),
                 "frozen": bool(getattr(__import__("sys"), "frozen", False)),
                 "positions": points,
+                "main_page": self.pages.tabText(self.pages.currentIndex()),
+                "tools_page": self.tools_tabs.tabText(self.tools_tabs.currentIndex()),
+                "panel_sizes": {
+                    "window": [self.width(), self.height()],
+                    "element": [self.tools_tabs.width(), self.tools_tabs.height()],
+                },
                 "nodes": nodes,
                 "graph": self.document.graph.model_dump(mode="json"),
                 "selected": self.canvas.selection(),

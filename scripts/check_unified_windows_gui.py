@@ -108,6 +108,7 @@ def check(executable, output):
         state = wait(lambda s: any(x[0] == label for x in s.get(key, [])), "tab " + label)
         window.set_focus()
         mouse.click(coords=tuple(next(x[1] for x in state[key] if x[0] == label)))
+        wait(lambda s: s.get("tools_page" if tools else "main_page") == label, "selected tab " + label)
 
     def choose_node(node_id):
         click("fit")
@@ -116,16 +117,21 @@ def check(executable, output):
         mouse.click(coords=tuple(state["nodes"][node_id]))
         wait(lambda s: s.get("selected") == [node_id], "node selected")
 
-    def property_visible(name):
+    def ensure_visible(name, scrollbar="property_scrollbar"):
         for _ in range(20):
-            if name in snapshot().get("positions", {}):
+            state = snapshot()
+            if name in state.get("positions", {}):
                 return
-            p = point("property_scroll")
-            # Scroll the outer form, near its right scrollbar, not a text field.
-            tools = window.rectangle()
-            mouse.scroll(coords=(tools.right - 15, p[1]), wheel_dist=-3)
+            point_bar = state.get("positions", {}).get(scrollbar)
+            if point_bar is None:
+                raise AssertionError("Hidden control without a visible scrollbar: " + name)
+            window.set_focus()
+            mouse.scroll(coords=tuple(point_bar), wheel_dist=-3)
             time.sleep(0.15)
-        raise AssertionError("Property remains outside the scrollable panel")
+        raise AssertionError("Control remains outside the scrollable panel: " + name)
+
+    def property_visible(name):
+        ensure_visible(name)
 
     def browser_control(selector):
         state = wait(
@@ -201,7 +207,15 @@ def check(executable, output):
         fill("selector", "xpath=//input[@id='note']")
         click("selector_check")
         wait(lambda s: (s.get("selector_result") or {}).get("count") == 1 and not s["busy"], "XPath checked")
+        ensure_visible("selector_apply", "element_scrollbar")
         click("selector_apply")
+        wait(
+            lambda s: (
+                next(n for n in s["graph"]["nodes"] if n["id"] == input_node["id"])["params"]["selector"]
+                == "xpath=//input[@id='note']"
+            ),
+            "selector applied to selected cube",
+        )
         tab("Кубик", tools=True)
         property_visible("prop_value")
         fill("prop_value", "Правка на паузе Ж")
@@ -437,7 +451,19 @@ def check(executable, output):
         print(
             "::error::Unified state "
             + json.dumps(
-                {k: state.get(k) for k in ["busy", "recording", "run_state", "error", "status", "dialogs"]},
+                {
+                    k: state.get(k)
+                    for k in [
+                        "busy",
+                        "recording",
+                        "run_state",
+                        "error",
+                        "status",
+                        "dialogs",
+                        "panel_sizes",
+                        "tools_page",
+                    ]
+                },
                 ensure_ascii=False,
             ),
             flush=True,

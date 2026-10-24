@@ -173,6 +173,26 @@ def scenario(root):
         action("run")
         wait(lambda: window.run_state == "PAUSED" and not window.busy, "breakpoint")
         page = window.controller.runner.context.session.page
+        browser_work(
+            page.locator("#note").evaluate(
+                "e=>{for(let i=0;i<30;i++)e.setAttribute('data-long-'+i,'attribute '.repeat(20))}"
+            )
+        )
+        window.resize(1050, 650)
+        window.tools_tabs.setCurrentIndex(2)
+        action("pick")
+        wait(lambda: not window.busy, "picker enabled")
+        native_click("#note")
+        wait(lambda: bool(window.last_pick), "element picked")
+        window.selector.setText("xpath=//input[@id='note']")
+        action("selector_check")
+        wait(lambda: not window.busy, "XPath check")
+        assert window.selector_result["count"] == 1
+        assert not window.controls["selector_apply"].visibleRegion().isEmpty()
+        assert window.element_info.height() <= 100
+        action("selector_apply")
+        assert window.document.graph.node(node.id).params["selector"] == "xpath=//input[@id='note']"
+        window.tools_tabs.setCurrentIndex(0)
         window.property_widgets["value"][1].setPlainText("Edited while paused")
         action("apply")
         action("run")
