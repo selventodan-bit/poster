@@ -77,6 +77,8 @@ class QtProvider:
                 message = json.loads(line)
                 if "state" in message:
                     self.state = message["state"]
+                if message.get("event") == "closing":
+                    self.process.stdin.close()
                 future = self.pending.get(message.get("id"))
                 if future and not future.done():
                     if message.get("error"):
@@ -192,6 +194,11 @@ class QtProvider:
                     await self.request("quit")
                 except Exception:
                     pass
+                self.process.stdin.close()
+                try:
+                    await self.process.stdin.wait_closed()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
                 try:
                     await asyncio.wait_for(self.process.wait(), 8)
                 except TimeoutError:
@@ -205,6 +212,8 @@ class QtProvider:
 
 
 def make_provider(name):
+    if not isinstance(name, str):
+        return name
     if name == "chromium":
         return ChromiumProvider()
     if name == "qt":

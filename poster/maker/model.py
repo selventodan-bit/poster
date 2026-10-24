@@ -159,15 +159,24 @@ class Document:
         self.graph = graph or empty_graph()
         self.dirty = False
         self.history = []
+        self.future = []
 
     def checkpoint(self):
+        self.future.clear()
         self.history.append(self.graph.model_dump_json())
         self.history = self.history[-30:]
         self.dirty = True
 
     def undo(self):
         if self.history:
+            self.future.append(self.graph.model_dump_json())
             self.graph = Graph.model_validate_json(self.history.pop())
+            self.dirty = True
+
+    def redo(self):
+        if self.future:
+            self.history.append(self.graph.model_dump_json())
+            self.graph = Graph.model_validate_json(self.future.pop())
             self.dirty = True
 
     def add(self, action, params, x=80, y=200):
@@ -180,6 +189,7 @@ class Document:
 
     def connect(self, source, port, target):
         before = self.graph.model_copy(deep=True)
+        previous_future, previous_dirty = list(self.future), self.dirty
         self.checkpoint()
         self.graph.edges = [e for e in self.graph.edges if (e.source, e.port) != (source, port)]
         self.graph.edges.append(Edge(source=source, port=port, target=target))
@@ -188,6 +198,7 @@ class Document:
         except ValueError as exc:
             self.graph = before
             self.history.pop()
+            self.future, self.dirty = previous_future, previous_dirty
             raise GraphError("INVALID_CONNECTION") from exc
 
     def delete(self, ids, edge=None):

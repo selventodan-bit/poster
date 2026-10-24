@@ -178,7 +178,7 @@ def test_full_maker_package_has_distinct_identity_checksum_and_measured_sizes(tm
     checksum = builder.package(bundle, output, "c" * 40, embedded=True)
     with zipfile.ZipFile(output / "poster-maker-windows.zip") as archive:
         info = json.loads(archive.read("BUILD_INFO.json"))
-        assert info == {"commit": "c" * 40, "browser_bundled": True, "browser_provider": "qt"}
+        assert info == {"commit": "c" * 40, "browser_bundled": True, "browser_provider": "qt", "ui": "qt"}
         report = json.loads((output / "build-report.json").read_text())
         assert report["unpacked_bytes"] == sum(item.file_size for item in archive.infolist())
         assert report["zip_bytes"] == (output / "poster-maker-windows.zip").stat().st_size

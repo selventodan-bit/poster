@@ -17,6 +17,7 @@ def package(bundle, output, commit, *, embedded=False):
     info = {"commit": commit, "browser_bundled": embedded}
     if embedded:
         info["browser_provider"] = "qt"
+        info["ui"] = "qt"
     (bundle / "BUILD_INFO.json").write_text(json.dumps(info, indent=2), encoding="utf-8")
     shutil.copyfile(ROOT / "WINDOWS_README.txt", bundle / "WINDOWS_README.txt")
     name = "poster-maker-windows" if embedded else "poster-windows"
@@ -77,9 +78,16 @@ def main(output, *, embedded=False):
         "poster",
     ]
     if embedded:
-        command += ["--hidden-import", "poster.maker.qt_host"]
+        command += ["--hidden-import", "poster.maker.qt_host", "--hidden-import", "poster.maker.qt_app"]
     else:
-        command += ["--exclude-module", "poster.maker.qt_host", "--exclude-module", "PySide6"]
+        command += [
+            "--exclude-module",
+            "poster.maker.qt_host",
+            "--exclude-module",
+            "poster.maker.qt_app",
+            "--exclude-module",
+            "PySide6",
+        ]
     for distribution in ("playwright", "httpx", "pydantic", "cryptography", "filelock"):
         command += ["--copy-metadata", distribution]
     command.append(str(ROOT / "poster" / "desktop_entry.py"))

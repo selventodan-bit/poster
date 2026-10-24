@@ -61,6 +61,20 @@ class Profiles:
         profile = self.open(key)
         profile.commit({})
 
+    def rename(self, key, name):
+        if not name.strip() or len(name) > 100:
+            raise GraphError("PROFILE_INVALID")
+        profile = self.open(key)
+        profile.data["name"] = name.strip()
+        profile.commit(profile.data["state"])
+
+    def delete(self, key):
+        path = self.path(key)
+        with FileLock(str(path) + ".lock"):
+            if not path.is_file():
+                raise GraphError("PROFILE_MISSING")
+            path.unlink()
+
 
 class Profile:
     def __init__(self, store, key, data):

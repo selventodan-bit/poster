@@ -191,6 +191,7 @@ class App(DesktopMixin, ClipboardMixin):
                     return
                 self.last_error = {
                     "type": type(exc).__name__,
+                    "local_test": getattr(exc, "safe_details", None),
                     "frames": [
                         f"{Path(f.filename).name}:{f.lineno}:{f.name}"
                         for f in traceback.extract_tb(exc.__traceback__)[-5:]

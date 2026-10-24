@@ -1,5 +1,6 @@
 """Windowed executable entry point. It never invokes a terminal or an installer."""
 
+import json
 import multiprocessing
 import os
 from pathlib import Path
@@ -16,9 +17,16 @@ def main():
         return host_main()
     os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(Path(".poster/browsers").absolute()))
     try:
-        from poster.recorder.app import launch
+        try:
+            info = json.loads(Path("BUILD_INFO.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            info = {}
+        if info.get("ui") == "qt" or "--maker-qt" in sys.argv:
+            from poster.maker.qt_app import launch
+        else:
+            from poster.recorder.app import launch
 
-        launch()
+        return launch() or 0
     except Exception:
         import tkinter as tk
         from tkinter import messagebox

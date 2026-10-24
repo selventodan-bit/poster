@@ -107,10 +107,28 @@ class BrowserSession:
         self.context = self.browser = self.playwright = self.page = None
         self.tabs = {}
         try:
-            await self.provider.close()
-        finally:
-            if driver:
+            # Qt must not enter QApplication destruction while the Playwright
+            # driver still owns CDP connections to its pages/inspector.
+            if self.provider.name == "qt" and driver:
+                context = getattr(self.provider, "context", None)
+                for page in context.pages if context else []:
+                    if not page.is_closed():
+                        try:
+                            await page.goto("about:blank", wait_until="load", timeout=3000)
+                        except Exception:
+                            pass  # Still close a page whose renderer has already stopped.
+                browser = getattr(self.provider, "browser", None)
+                if browser:
+                    await browser.close()
+                    self.provider.browser = None
                 await driver.stop()
+                driver = None
+        finally:
+            try:
+                await self.provider.close()
+            finally:
+                if driver:
+                    await driver.stop()
 
 
 class Context:
@@ -271,6 +289,7 @@ class GraphRunner:
         self.pause_reason = None
         self.results = []
         self.stopped = False
+        self.pause_requested = False
         self._action = None
         self._busy = False
 
@@ -441,6 +460,7 @@ class GraphRunner:
         return result
 
     async def run(self, *, breakpoints=True):
+        self.pause_requested = False
         skip_breakpoint = self.state == "PAUSED" and self.pause_reason == "breakpoint"
         while self.state not in {"SUCCEEDED", "FAILED", "STOPPED"}:
             if (
@@ -455,6 +475,10 @@ class GraphRunner:
                 break
             skip_breakpoint = False
             await self.step()
+            if self.pause_requested and self.state not in {"SUCCEEDED", "FAILED", "STOPPED"}:
+                self.state, self.pause_reason = "PAUSED", "user"
+                self.event(kind="pause", reason="user", node_id=self.current)
+                break
         return self.state
 
     async def execute_selected(self, node_id):
@@ -481,6 +505,9 @@ class GraphRunner:
         self.event(kind="result", result=asdict(result), state=self.state, next_node=self.current)
         self.event(kind="variables", values=self.context.variables.snapshot())
         return result
+
+    def pause(self):
+        self.pause_requested = True
 
     async def stop(self):
         self.stopped = True
