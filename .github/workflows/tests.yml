@@ -237,7 +237,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           python -m playwright install-deps chromium
-          sudo apt-get install -y xvfb libxcb-cursor0 libxkbcommon-x11-0 libxcb-icccm4 libxcb-keysyms1 libxcb-xinerama0
+          sudo apt-get install -y xvfb libegl1 libgl1 libopengl0 libxcb-cursor0 libxkbcommon-x11-0 libxcb-icccm4 libxcb-keysyms1 libxcb-xinerama0
       - name: Real embedded Qt browser with CDP on Linux
         if: runner.os == 'Linux'
         run: xvfb-run -a python scripts/prototype_embedded_browser.py --output .poster/embedded-prototype

@@ -3,20 +3,14 @@
 import asyncio
 import re
 import time
-from urllib.parse import parse_qsl, urlsplit, urlunsplit
+from urllib.parse import urlsplit, urlunsplit
 
 from ..recorder.capture import Recorder
 from .model import Edge, GraphError, Node, empty_graph
 from .record_script import RECORD_JS, SELECTOR_EXPRESSION
 from .runtime import BrowserSession
 from .storage import Vault
-
-
-def sensitive_url(url):
-    parsed = urlsplit(url)
-    return any(
-        re.search(r"pass|token|secret|code|saml", k, re.I) for k, _ in parse_qsl(parsed.query)
-    ) or bool(re.search(r"token=|secret=|password=", parsed.fragment, re.I))
+from .navigation import sensitive_url
 
 
 def navigation_pattern(url):

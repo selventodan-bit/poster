@@ -1,10 +1,11 @@
 """Extensible action registry. Graph data never imports or evaluates Python/JS."""
 
 from dataclasses import dataclass
-from typing import Literal
+import json
+from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
-from pydantic import Field, model_validator
+from pydantic import BeforeValidator, Field, model_validator
 
 from .model import DataModel, GraphError
 
@@ -13,7 +14,13 @@ class SecretRef(DataModel):
     secret_ref: str = Field(min_length=1, max_length=200)
 
 
-Value = str | SecretRef
+def text_value(value):
+    if value is None:
+        return ""
+    return json.dumps(value) if isinstance(value, (int, float, bool)) else value
+
+
+Value = Annotated[str, BeforeValidator(text_value)] | SecretRef
 
 
 class Empty(DataModel):
@@ -143,7 +150,10 @@ async def fill(ctx, params):
     ):
         raise GraphError("PASSWORD_REF_REQUIRED")
     await ctx.before_action()
-    await locator.fill(resolve(ctx, params.value), timeout=params.timeout_ms)
+    value = text_value(resolve(ctx, params.value))
+    if not isinstance(value, str):
+        raise GraphError("VARIABLE_TYPE_INVALID")
+    await locator.fill(value, timeout=params.timeout_ms)
     return "success", {"filled": True, "protected": isinstance(params.value, SecretRef)}
 
 

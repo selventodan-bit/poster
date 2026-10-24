@@ -112,6 +112,7 @@ def check(executable, output):
         dialog = Desktop(backend="win32").window(title="Параметр проекта: prefix")
         dialog.wait("visible", timeout=10)
         dialog.set_focus()
+        keyboard.send_keys("{HOME}+{END}{BACKSPACE}", pause=0.1)
         clipboard(value)
         keyboard.send_keys("{ENTER}", pause=0.2)
 
@@ -123,7 +124,8 @@ def check(executable, output):
     def close():
         nonlocal process
         if process:
-            window.close()
+            window.set_focus()
+            keyboard.send_keys("%{F4}", pause=0.2)
             assert win32event.WaitForSingleObject(process, 30000) == win32con.WAIT_OBJECT_0
             assert win32process.GetExitCodeProcess(process) == 0
             win32api.CloseHandle(process)
@@ -494,7 +496,7 @@ def check(executable, output):
         print(
             "::error::Maker state "
             + json.dumps(
-                {k: maker.get(k) for k in ["busy", "recording", "run_state", "error", "status"]},
+                {k: maker.get(k) for k in ["busy", "recording", "dirty", "run_state", "error", "status"]},
                 ensure_ascii=False,
             ),
             flush=True,

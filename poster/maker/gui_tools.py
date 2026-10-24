@@ -83,8 +83,24 @@ class ToolsMixin:
         browser = ttk.Frame(notebook, padding=3)
         notebook.add(browser, text="Элемент")
         self.browser_page = browser
-        self.button(browser, "browser_open", "Открыть браузер / URL", self.open_tool_browser)
-        self.button(browser, "pick", "Выбрать на странице", self.pick_element)
+        self.browser_canvas = tk.Canvas(browser, width=260, height=350, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(browser, orient="vertical", command=self.browser_canvas.yview)
+        self.browser_canvas.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+        self.browser_canvas.pack(fill="both", expand=True)
+        browser = ttk.Frame(self.browser_canvas)
+        self.browser_body = browser
+        self.browser_canvas.create_window((0, 0), window=browser, anchor="nw", width=250)
+        browser.bind(
+            "<Configure>",
+            lambda _: self.browser_canvas.configure(scrollregion=self.browser_canvas.bbox("all")),
+        )
+        row = ttk.Frame(browser)
+        row.pack(fill="x")
+        self.button(row, "browser_open", "Открыть браузер / URL", self.open_tool_browser)
+        row = ttk.Frame(browser)
+        row.pack(fill="x")
+        self.button(row, "pick", "Выбрать на странице", self.pick_element)
         self.selector_mode = tk.StringVar(value="CSS")
         mode = ttk.Combobox(
             browser, textvariable=self.selector_mode, values=("CSS", "XPath"), state="readonly", width=12
@@ -118,6 +134,17 @@ class ToolsMixin:
         self.button(row, "tab_close", "Закрыть вкладку", lambda: self.manage_tab("close"))
         for widget in (self.selector_entry, self.selector_frames, self.element_details):
             self._enable_clipboard(widget)
+
+        def scroll(event):
+            self.browser_canvas.yview_scroll(-1 if event.delta > 0 else 1, "units")
+            return "break"
+
+        def bind_scroll(widget):
+            widget.bind("<MouseWheel>", scroll)
+            for child in widget.winfo_children():
+                bind_scroll(child)
+
+        bind_scroll(self.browser_canvas)
 
     def add_output_properties(self, node):
         ttk.Label(self.prop_frame, text="Результат → переменная (необязательно)").pack(anchor="w")

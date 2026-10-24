@@ -961,6 +961,7 @@ class MakerPanel(ToolsMixin, ClipboardMixin):
                 "maker_variable_name": self.variable_name_entry,
                 "maker_variable_value": self.variable_value,
                 "maker_selector": self.selector_entry,
+                "maker_element_scroll": self.browser_canvas,
             }
         )
         widgets.update({"maker_prop_" + k: v[1] for k, v in self.props.items()})
@@ -975,6 +976,15 @@ class MakerPanel(ToolsMixin, ClipboardMixin):
                 and not self.property_canvas.winfo_rooty()
                 <= y
                 <= self.property_canvas.winfo_rooty() + self.property_canvas.winfo_height()
+            ):
+                continue
+            if str(widget).startswith(str(self.browser_body)) and not (
+                self.browser_canvas.winfo_rootx()
+                <= x
+                <= self.browser_canvas.winfo_rootx() + self.browser_canvas.winfo_width()
+                and self.browser_canvas.winfo_rooty()
+                <= y
+                <= self.browser_canvas.winfo_rooty() + self.browser_canvas.winfo_height()
             ):
                 continue
             positions[key] = [x, y]
@@ -997,6 +1007,7 @@ class MakerPanel(ToolsMixin, ClipboardMixin):
             "nodes": self.canvas.positions(),
             "selected": list(self.canvas.selected),
             "recording": self.recording,
+            "dirty": self.document.dirty,
             "busy": self.busy,
             "run_state": self.runner.state if self.runner else None,
             "trace": self.trace,

@@ -6,6 +6,7 @@ from pydantic import Field
 
 from .actions import Action, Empty, OpenURL, Property, Target, open_url
 from .model import DataModel, GraphError
+from .navigation import sensitive_url
 
 
 class Attribute(Target):
@@ -28,6 +29,7 @@ async def attribute(ctx, p):
     target = await ctx.locator(p)
     value = await target.get_attribute(p.attribute, timeout=p.timeout_ms)
     sensitive = bool(re.search(r"pass|secret|token|cookie|authorization", p.attribute, re.I))
+    sensitive |= bool(value and sensitive_url(value))
     if p.attribute == "value":
         sensitive |= await target.get_attribute("type", timeout=p.timeout_ms) in {"password", "hidden"}
     if sensitive and value is not None:

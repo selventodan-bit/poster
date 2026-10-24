@@ -98,7 +98,9 @@ class Graph(DataModel):
             raise ValueError("VARIABLE_NAME_INVALID")
         nodes = {n.id: n for n in self.nodes}
         for node in self.nodes:
-            if node.type == "Logic.Switch" and not isinstance(node.params.get("cases", []), list):
+            if node.type == "Logic.Switch" and (
+                not isinstance(node.params.get("cases", []), list) or len(node.params.get("cases", [])) > 20
+            ):
                 raise ValueError("INVALID_CASE_PORT")
         if len(nodes) != len(self.nodes):
             raise ValueError("DUPLICATE_NODE")

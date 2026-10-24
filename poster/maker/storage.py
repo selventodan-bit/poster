@@ -20,6 +20,15 @@ class Vault:
     def put(self, value, ref=None):
         if not isinstance(value, str) or len(value) > 200_000:
             raise GraphError("SECRET_INVALID")
+        return self.put_value(value, ref)
+
+    def put_value(self, value, ref=None):
+        try:
+            raw = json.dumps(value, ensure_ascii=False, allow_nan=False)
+        except (TypeError, ValueError) as exc:
+            raise GraphError("SECRET_INVALID") from exc
+        if len(raw.encode("utf-8")) > 1_000_000:
+            raise GraphError("SECRET_INVALID")
         ref = ref or "secret_" + identity()
         self.tokens[ref] = encrypt_session({"value": value})
         return {"secret_ref": ref}

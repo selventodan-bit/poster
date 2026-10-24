@@ -35,7 +35,13 @@ def scenario():
     app = App(root)
     maker = app.maker
     app.notebook.select(maker.frame)
+    root.geometry("940x640")
     root.update()
+    maker.tools_notebook.select(maker.browser_page)
+    root.update()
+    assert "maker_selector_apply" in maker.observation()["positions"]
+    assert maker.buttons["selector_apply"].winfo_width() == maker.buttons["selector_apply"].winfo_reqwidth()
+    maker.tools_notebook.select(maker.properties_page)
     messagebox.askyesno = lambda *a, **k: True
 
     def wait(predicate):

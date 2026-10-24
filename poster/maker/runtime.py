@@ -4,7 +4,6 @@ import asyncio
 from dataclasses import asdict, dataclass, field
 from collections import deque
 from copy import deepcopy
-import json
 import time
 
 from ..recorder.capture import chromium_options
@@ -266,7 +265,7 @@ class GraphRunner:
         if self._busy or self.state != "PAUSED":
             raise GraphError("DEBUG_STATE_INVALID")
         if secret_refs(self.context.variables.data.get(name)) and not secret_refs(value):
-            value = self.context.vault.put(str(value))
+            value = self.context.vault.put_value(value)
         self.context.variables.set(name, value)
         self.event(kind="variables", values=self.context.variables.snapshot())
 
@@ -291,9 +290,7 @@ class GraphRunner:
                 except (KeyError, IndexError, TypeError, ValueError) as exc:
                     raise GraphError("RESULT_PATH_INVALID") from exc
                 if self.context.sensitive_action and not secret_refs(selected):
-                    selected = self.context.vault.put(
-                        selected if isinstance(selected, str) else json.dumps(selected, ensure_ascii=False)
-                    )
+                    selected = self.context.vault.put_value(selected)
                 self.context.variables.set(node.save_as, selected)
             visible = (
                 {"protected": True} if self.context.sensitive_action else self.context.variables.public(value)

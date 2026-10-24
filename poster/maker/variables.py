@@ -45,16 +45,14 @@ class Variables:
             if definition.required and definition.input and value is None:
                 raise GraphError("INPUT_MISSING")
             if definition.secret and value is not None and not secret_refs(value):
-                value = self.vault.put(
-                    json.dumps(value, ensure_ascii=False) if not isinstance(value, str) else value
-                )
+                value = self.vault.put_value(value)
             self.set(name, value)
 
     def set(self, name, value):
         if not NAME.fullmatch(name):
             raise GraphError("VARIABLE_NAME_INVALID")
         if name in self.protected and value is not None and not secret_refs(value):
-            value = self.vault.put(value if isinstance(value, str) else json.dumps(value, ensure_ascii=False))
+            value = self.vault.put_value(value)
         try:
             raw = json.dumps(value, ensure_ascii=False, allow_nan=False)
         except (ValueError, TypeError) as exc:

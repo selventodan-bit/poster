@@ -14,6 +14,7 @@ demo-output/
 *.sqlite*
 session.enc
 *.secrets.enc
+*.v1.bak
 *.key
 .env
 credentials*.json

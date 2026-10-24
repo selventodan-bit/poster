@@ -4,6 +4,7 @@ import re
 
 from .actions import Target
 from .model import GraphError
+from .navigation import safe_url
 from .record_script import SELECTOR_EXPRESSION, SELECTOR_FUNCTION
 
 PICKER_JS = r"""(() => {
@@ -66,6 +67,9 @@ class Inspector:
             else str(v)[:300]
             for k, v in data.get("attributes", {}).items()
         }
+        for key in ("href", "src", "action", "formaction"):
+            if key in data["attributes"]:
+                data["attributes"][key] = safe_url(data["attributes"][key])
         await self.disable()
         self.on_pick(data)
 

@@ -89,7 +89,7 @@ async def increment(ctx, p):
     if isinstance(value, int) and float(p.amount).is_integer():
         result = int(result)
     ctx.sensitive_action |= protected
-    ctx.variables.set(p.name, ctx.vault.put(str(result)) if protected else result)
+    ctx.variables.set(p.name, ctx.vault.put_value(result) if protected else result)
     return "success", {"value": result}
 
 

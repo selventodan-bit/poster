@@ -62,6 +62,50 @@ async def test_same_document_navigation_requires_real_action_causality(mode):
             await runner.close()
 
 
+async def test_api_key_urls_and_extracted_links_stay_protected():
+    with serve_maker() as (_, base):
+        private = "private-api-key-Ж"
+        url = base + "/spa?api_key=" + private
+        recorder = ActionRecorder(headless=True)
+        try:
+            await recorder.start()
+            await recorder.navigate(url)
+            graph = await recorder.stop()
+        finally:
+            await recorder.close()
+        assert private not in graph.model_dump_json()
+        assert isinstance(next(n for n in graph.nodes if n.type == "Browser.OpenURL").params["url"], dict)
+        runner = GraphRunner(graph, vault=recorder.vault)
+        try:
+            assert await runner.run() == "SUCCEEDED"
+            page = await runner.context.page()
+            await page.locator("#hash").evaluate("(e,url)=>e.setAttribute('href',url)", url)
+            snapshot = runner.graph.model_copy(deep=True)
+            read = Node(
+                type="Browser.ReadAttribute",
+                params={"selector": "#hash", "attribute": "href"},
+                save_as="link",
+                result_path="value",
+            )
+            snapshot.nodes.append(read)
+            runner.update_graph(snapshot)
+            result = await runner.execute_selected(read.id)
+            assert result.status == "SUCCEEDED" and result.value == {"protected": True}
+            assert runner.context.variables.reveal(runner.context.variables.get("link")) == url
+            selected = []
+            inspector = Inspector(runner.context.session, on_pick=selected.append)
+            await inspector.enable()
+            await page.locator("#hash").click()
+            for _ in range(100):
+                if selected:
+                    break
+                await asyncio.sleep(0.02)
+            assert selected and private not in json.dumps(selected, ensure_ascii=False)
+            assert private not in json.dumps([asdict(r) for r in runner.results], ensure_ascii=False)
+        finally:
+            await runner.close()
+
+
 def test_v1_migration_does_not_write_until_explicit_save(tmp_path):
     path = tmp_path / "old.postergraph.json"
     raw = {
@@ -451,6 +495,7 @@ async def test_wait_url_uses_trigger_anchor_even_when_input_followed_navigation(
             assert (await runner.context.page()).url.endswith("?stage=two")
         finally:
             await runner.close()
+
         # The v1 last-action fallback is deliberately conservative: it cannot
         # claim a navigation after the later input when none actually occurred.
         graph.nodes[-2].params.pop("after_node")
@@ -463,3 +508,47 @@ async def test_wait_url_uses_trigger_anchor_even_when_input_followed_navigation(
             assert "stage=two" in failure.details["actual_url"]
         finally:
             await runner.close()
+
+
+@pytest.mark.parametrize(
+    "value,protected,expected", [(3, False, "3"), (3, True, "3"), (False, True, "false")]
+)
+async def test_numeric_and_protected_variables_can_fill_browser_fields(value, protected, expected):
+    with serve_maker() as (server, base):
+        vault = Vault()
+        stored = vault.put_value(value) if protected else value
+        graph = sequence(
+            Node(type="Start"),
+            Node(type="Browser.OpenURL", params={"url": base + "/"}),
+            Node(type="Browser.Click", params={"selector": "#show"}),
+            Node(type="Browser.Input", params={"selector": "#note", "value": "{{number}}"}),
+            Node(type="Browser.Click", params={"selector": "#continue"}),
+            Node(type="End"),
+            variables={"number": Variable(value=stored, secret=protected)},
+        )
+        runner = GraphRunner(graph, vault=vault)
+        try:
+            assert await runner.run() == "SUCCEEDED"
+            assert server.posts["1"]["note"] == expected
+            if protected:
+                assert runner.context.variables.reveal(runner.context.variables.get("number")) == value
+        finally:
+            await runner.close()
+
+
+async def test_protected_action_results_preserve_json_types_for_later_comparisons():
+    first = Node(
+        type="Variables.Compare",
+        params={"left": 3, "right": 3},
+        save_as="ok",
+        result_path="value",
+        protect_result=True,
+    )
+    second = Node(type="Variables.Compare", params={"left": "{{ok}}", "right": True})
+    runner = GraphRunner(sequence(Node(type="Start"), first, second, Node(type="End.Success")))
+    try:
+        assert await runner.run() == "SUCCEEDED"
+        assert runner.context.variables.reveal(runner.context.variables.get("ok")) is True
+        assert runner.context.variables.snapshot()["ok"] == "••••"
+    finally:
+        await runner.close()
