@@ -67,13 +67,18 @@ class Variables:
             raise GraphError("VARIABLE_MISSING")
         return deepcopy(self.data[name])
 
-    def reveal(self, value):
+    def reveal(self, value, _refs=frozenset(), _depth=0):
+        if _depth > 64:
+            raise GraphError("VARIABLE_TYPE_INVALID")
         if isinstance(value, dict):
             if set(value) == {"secret_ref"}:
-                return self.vault.get(value["secret_ref"])
-            return {key: self.reveal(v) for key, v in value.items()}
+                ref = value["secret_ref"]
+                if ref in _refs:
+                    raise GraphError("SECRET_MISSING")
+                return self.reveal(self.vault.get(ref), _refs | {ref}, _depth + 1)
+            return {key: self.reveal(v, _refs, _depth + 1) for key, v in value.items()}
         if isinstance(value, list):
-            return [self.reveal(v) for v in value]
+            return [self.reveal(v, _refs, _depth + 1) for v in value]
         return value
 
     def resolve(self, value):

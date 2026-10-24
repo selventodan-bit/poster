@@ -80,6 +80,7 @@ class Property:
     kind: str = "text"
     choices: tuple = ()
     secret: bool = False
+    help: str = ""
 
 
 @dataclass(frozen=True)
@@ -90,6 +91,7 @@ class Action:
     execute: object
     properties: tuple = ()
     version: int = 1
+    reveal_parameters: bool = False
 
 
 class Registry:
@@ -274,4 +276,7 @@ def default_registry():
 
     register_control_actions(registry)
     register_browser_actions(registry)
+    from .http_actions import register_http_actions
+
+    register_http_actions(registry)
     return registry

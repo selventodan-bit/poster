@@ -231,12 +231,12 @@ class Runtime:
                     # Stream with a cap: an untrusted project cannot download arbitrary-sized responses.
                     async with self.host_limits[urlsplit(url).hostname]:
                         async with client.stream(method, url, headers=current_headers, **kwargs) as response:
-                            chunks, size = [], 0
-                            async for chunk in response.aiter_bytes():
-                                size += len(chunk)
-                                if size > 5_000_000:
-                                    raise WorkflowError("Response exceeds 5 MB")
-                                chunks.append(chunk)
+                            from .network import bounded_body, ResponseTooLarge
+
+                            try:
+                                body = await bounded_body(response, 5_000_000)
+                            except ResponseTooLarge as exc:
+                                raise WorkflowError("Response exceeds 5 MB") from exc
                             decoded_headers = {
                                 k: v
                                 for k, v in response.headers.items()
@@ -245,7 +245,7 @@ class Runtime:
                             response = httpx.Response(
                                 response.status_code,
                                 headers=decoded_headers,
-                                content=b"".join(chunks),
+                                content=body,
                                 request=response.request,
                             )
                     if response.status_code in {429, 502, 503, 504} and attempt + 1 < attempts:

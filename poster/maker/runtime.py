@@ -5,6 +5,8 @@ from dataclasses import asdict, dataclass, field
 from collections import deque
 from copy import deepcopy
 import time
+import json
+from pathlib import Path
 
 from .providers import make_provider
 from .actions import default_registry
@@ -12,8 +14,11 @@ from .model import GraphError, secret_refs
 from .navigation import matches, safe_url
 from .variables import Variables, draft_parameters
 from .storage import Vault
+from .resources import Budget, FileSandbox, MAX_DATA
+from .data_errors import ERRORS as DATA_ERRORS
 
 ERRORS = {
+    **DATA_ERRORS,
     "POPUP_TIMEOUT": "После указанного действия новое окно не открылось. Проверьте кубик и политику popup сайта. Действие автоматически не повторялось.",
     "PROFILE_MISSING": "Этот локальный профиль отсутствует на компьютере. Выберите другой профиль или новую сессию.",
     "PROFILE_INVALID": "Профиль повреждён или содержит недопустимый путь. Остальные профили не изменены.",
@@ -133,7 +138,16 @@ class BrowserSession:
 
 class Context:
     def __init__(
-        self, vault, headless=True, *, definitions=None, inputs=None, provider="chromium", profile=None
+        self,
+        vault,
+        headless=True,
+        *,
+        definitions=None,
+        inputs=None,
+        provider="chromium",
+        profile=None,
+        workdir=None,
+        allow_external_files=False,
     ):
         self.vault = vault
         self.variables = Variables(definitions or {}, vault, inputs)
@@ -150,6 +164,8 @@ class Context:
         self.sensitive_action = False
         self.loops = []
         self.control = None
+        self.http = None
+        self.files = FileSandbox(workdir, allow_external=allow_external_files)
 
     def use_page(self, page):
         self.session.page = page
@@ -271,8 +287,16 @@ class GraphRunner:
         inputs=None,
         provider="chromium",
         profile=None,
+        workdir=None,
+        allow_external_files=False,
+        project_path=None,
+        max_seconds=300,
+        budget=None,
+        ancestry=(),
+        project_root=None,
     ):
         self.graph = graph.validate_structure().model_copy(deep=True)
+        self.owns_budget = budget is None
         self.registry = registry or default_registry()
         self.context = Context(
             vault or Vault(),
@@ -281,8 +305,19 @@ class GraphRunner:
             inputs=inputs,
             provider=provider,
             profile=profile,
+            workdir=workdir,
+            allow_external_files=allow_external_files,
         )
         self.context.graph = self.graph
+        self.context.budget = budget or Budget(self.graph.max_steps, max_seconds)
+        self.context.registry = self.registry
+        self.context.project_path = Path(project_path).absolute().resolve() if project_path else None
+        self.context.project_root = (
+            Path(project_root).resolve()
+            if project_root
+            else (self.context.project_path.parent if self.context.project_path else self.context.files.root)
+        )
+        self.context.ancestry = (*ancestry, self.context.project_path or self.graph.id)
         self.on_event = on_event or (lambda event: None)
         self.current = self.graph.entry
         self.state = "READY"
@@ -353,6 +388,7 @@ class GraphRunner:
         self.context.control = None
         self.event(kind="node", node_id=node.id, status="RUNNING")
         try:
+            self.context.budget.consume()
             if len(self.results) >= self.graph.max_steps:
                 raise GraphError("STEP_LIMIT")
             if node.type.startswith("Browser.") and node.extensions.get("browser_tab"):
@@ -360,9 +396,19 @@ class GraphRunner:
                 self.context.use_page(await self.context.session.select_tab(node.extensions["browser_tab"]))
             values = self.context.variables.resolve(node.params)
             self.context.sensitive_action = node.protect_result or bool(secret_refs(values))
-            spec, params = self.registry.parameters(node, values)
+            spec = self.registry.get(node.type, node.action_version)
+            spec, params = self.registry.parameters(
+                node, self.context.variables.reveal(values) if spec.reveal_parameters else values
+            )
             self._action = asyncio.create_task(spec.execute(self.context, params))
-            port, value = await self._action
+            try:
+                port, value = await asyncio.wait_for(self._action, self.context.budget.remaining())
+            except TimeoutError as exc:
+                raise GraphError("RUN_TIMEOUT") from exc
+            size = len(json.dumps(value, ensure_ascii=False, allow_nan=False).encode())
+            self.context.budget.result_bytes += size
+            if size > MAX_DATA or self.context.budget.result_bytes > 16_000_000:
+                raise GraphError("DATA_LIMIT")
             if node.save_as:
                 selected = value
                 try:
@@ -370,7 +416,9 @@ class GraphRunner:
                         selected = selected[int(key)] if isinstance(selected, list) else selected[key]
                 except (KeyError, IndexError, TypeError, ValueError) as exc:
                     raise GraphError("RESULT_PATH_INVALID") from exc
-                if self.context.sensitive_action and not secret_refs(selected):
+                if self.context.sensitive_action and not (
+                    isinstance(selected, dict) and set(selected) == {"secret_ref"}
+                ):
                     selected = self.context.vault.put_value(selected)
                 self.context.variables.set(node.save_as, selected)
             visible = (
@@ -437,7 +485,7 @@ class GraphRunner:
             result = await self.execute(node)
         finally:
             self._busy = False
-        if result.error_code == "STEP_LIMIT":
+        if result.error_code in {"STEP_LIMIT", "RUN_TIMEOUT", "RUN_STOPPED", "DATA_LIMIT"}:
             self.state, self.current = "FAILED", None
         elif self.stopped:
             self.state = "STOPPED"
@@ -511,6 +559,8 @@ class GraphRunner:
 
     async def stop(self):
         self.stopped = True
+        if self.owns_budget:
+            self.context.budget.stopped = True
         if self._action and not self._action.done() and not self._action.cancelling():
             self._action.cancel()
         if self.state not in {"SUCCEEDED", "FAILED"}:
@@ -518,4 +568,8 @@ class GraphRunner:
 
     async def close(self):
         await self.stop()
-        await self.context.session.close()
+        try:
+            if self.context.http:
+                await self.context.http.close()
+        finally:
+            await self.context.session.close()

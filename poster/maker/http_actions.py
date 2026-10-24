@@ -1,0 +1,280 @@
+"""Universal HTTP actions using the existing httpx stack, never a browser."""
+
+import asyncio
+import json
+import logging
+import re
+from typing import Any, Literal
+from urllib.parse import urljoin, urlsplit
+
+import httpx
+from pydantic import Field
+
+from ..network import bounded_body, ResponseTooLarge
+from .actions import Action, Empty
+from .action_fields import properties
+from .model import DataModel, GraphError
+from .resources import MAX_DATA, MAX_FILE
+
+SENSITIVE = re.compile(r"authorization|cookie|pass|secret|token|api.?key|session", re.I)
+
+
+class Request(DataModel):
+    url: str = Field(default="https://example.org", description="HTTP(S) URL; допускается {{переменная}}")
+    method: Literal["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"] = "GET"
+    query: dict[str, Any] = Field(default_factory=dict, description="Query-параметры: JSON-объект")
+    headers: dict[str, str] = Field(
+        default_factory=dict, description="Заголовки: JSON-объект; секреты защищайте"
+    )
+    cookies: dict[str, str] = Field(default_factory=dict, description="Cookies только этого запроса")
+    body_type: Literal["none", "json", "form", "multipart", "text"] = "none"
+    body: Any = Field(default=None, description="JSON, поля формы либо текст; файлы задаются отдельно")
+    files: dict[str, str] = Field(
+        default_factory=dict, description="Multipart: имя поля → путь внутри рабочего каталога"
+    )
+    timeout_ms: int = Field(default=30000, ge=10, le=120000, description="Общий таймаут запроса, мс")
+    follow_redirects: bool = True
+    expected_status: list[int] = Field(
+        default_factory=lambda: list(range(200, 300)),
+        max_length=600,
+        description="Допустимые статусы; [] разрешает любой статус",
+    )
+    response_type: Literal["text", "json", "auto", "binary"] = "auto"
+    max_response_bytes: int = Field(default=MAX_DATA // 2, ge=1, le=MAX_FILE)
+    download_path: str = Field(
+        default="", description="Путь для бинарного ответа; относительно рабочего каталога"
+    )
+    overwrite: bool = False
+    protect_response: bool = Field(
+        default=True, description="Защитить тело ответа; отключайте для доверенных открытых данных"
+    )
+
+
+class Header(DataModel):
+    name: str = "User-Agent"
+    value: str = "Poster/3"
+
+
+class Cookie(DataModel):
+    name: str = "session"
+    value: str = ""
+    url: str = "https://example.org/"
+    path: str = "/"
+    secure: bool = True
+
+
+def valid_url(url):
+    p = urlsplit(url)
+    if p.scheme not in {"http", "https"} or not p.hostname or p.username or p.password:
+        raise GraphError("URL_INVALID")
+    return p
+
+
+def origin(url):
+    p = valid_url(url)
+    return p.scheme, p.hostname, p.port or (443 if p.scheme == "https" else 80)
+
+
+class HTTPState:
+    def __init__(self):
+        self.client = httpx.AsyncClient(
+            trust_env=False, follow_redirects=False, transport=httpx.AsyncHTTPTransport(retries=0)
+        )
+        self.tainted = False
+        self.headers = {}
+        for name in ("httpx", "httpcore"):
+            logging.getLogger(name).setLevel(logging.WARNING)
+
+    async def close(self):
+        await self.client.aclose()
+
+
+def session(ctx):
+    if ctx.http is None:
+        ctx.http = HTTPState()
+    return ctx.http
+
+
+def protect(ctx, value):
+    if isinstance(value, dict):
+        return {
+            k: ctx.vault.put_value(v) if SENSITIVE.search(k) else protect(ctx, v) for k, v in value.items()
+        }
+    if isinstance(value, list):
+        return [protect(ctx, v) for v in value]
+    return value
+
+
+async def request(ctx, p, method=None, download=False):
+    state = session(ctx)
+    method, url = method or p.method, p.url
+    valid_url(url)
+    if download and not p.download_path:
+        raise GraphError("FILE_PATH_INVALID")
+    headers = {**state.headers, **p.headers}
+    sensitive = (
+        ctx.sensitive_action or state.tainted or any(SENSITIVE.search(k) for k in headers) or bool(p.cookies)
+    )
+    kwargs = {"params": p.query}
+    if p.cookies:
+        # Request-local cookies are never installed as unscoped session cookies.
+        if "cookie" in {k.lower() for k in headers}:
+            raise GraphError("PARAMETERS_INVALID")
+        req = httpx.Request("GET", url)
+        httpx.Cookies(p.cookies).set_cookie_header(req)
+        headers["Cookie"] = req.headers.get("cookie", "")
+    if p.body_type == "json":
+        kwargs["json"] = p.body
+    elif p.body_type in {"form", "multipart"}:
+        if not isinstance(p.body, dict):
+            raise GraphError("HTTP_BODY_INVALID")
+        if p.body_type == "form":
+            kwargs["data"] = p.body
+        else:
+            kwargs["files"] = {k: (None, str(v)) for k, v in p.body.items()}
+            total = 0
+            for name, path in p.files.items():
+                raw = ctx.files.read(path)
+                total += len(raw)
+                if total > MAX_FILE:
+                    raise GraphError("FILE_LIMIT")
+                kwargs["files"][name] = (ctx.files.path(path).name, raw)
+    elif p.body_type == "text":
+        if not isinstance(p.body, str):
+            raise GraphError("HTTP_BODY_INVALID")
+        kwargs["content"] = p.body.encode("utf-8")
+    if p.body_type != "multipart" and p.files:
+        raise GraphError("HTTP_BODY_INVALID")
+    if len(json.dumps(p.body, ensure_ascii=False).encode()) > MAX_DATA:
+        raise GraphError("DATA_LIMIT")
+    try:
+        async with asyncio.timeout(p.timeout_ms / 1000):
+            for redirect in range(11):
+                async with state.client.stream(
+                    method, url, headers=headers, timeout=p.timeout_ms / 1000, **kwargs
+                ) as r:
+                    raw = await bounded_body(r, p.max_response_bytes)
+                    status, response_headers = r.status_code, dict(r.headers)
+                    encoding = r.encoding or "utf-8"
+                    cookies = {c.name: ctx.vault.put_value(c.value) for c in r.cookies.jar}
+                if 300 <= status < 400 and "location" in response_headers and p.follow_redirects:
+                    if redirect == 10:
+                        raise GraphError("HTTP_REDIRECT_LIMIT")
+                    target = urljoin(url, response_headers["location"])
+                    if urlsplit(url).scheme == "https" and urlsplit(target).scheme != "https":
+                        raise GraphError("HTTP_REDIRECT_UNSAFE")
+                    if status in {307, 308} and method not in {"GET", "HEAD"}:
+                        raise GraphError("HTTP_WRITE_UNKNOWN")
+                    if origin(target) != origin(url):
+                        # Do not forward any caller/session custom headers across origins.
+                        headers = {}
+                    if status == 303 or (status in {301, 302} and method == "POST"):
+                        method = "GET"
+                        kwargs = {}
+                    kwargs.pop("params", None)
+                    url = target
+                    continue
+                break
+    except ResponseTooLarge as exc:
+        raise GraphError("HTTP_RESPONSE_LIMIT") from exc
+    except (TimeoutError, httpx.TimeoutException) as exc:
+        raise GraphError(
+            "HTTP_TIMEOUT", details={"write_outcome_unknown": method not in {"GET", "HEAD"}, "retried": False}
+        ) from exc
+    except httpx.ConnectError as exc:
+        raise GraphError("HTTP_CONNECT") from exc
+    except httpx.HTTPError as exc:
+        raise GraphError("HTTP_WRITE_UNKNOWN" if method not in {"GET", "HEAD"} else "HTTP_NETWORK") from exc
+    if p.expected_status and status not in p.expected_status:
+        raise GraphError("HTTP_STATUS", details={"status": status, "retried": False})
+    state.tainted |= sensitive or bool(cookies)
+    ctx.sensitive_action |= sensitive or p.protect_response
+    result = {
+        "status": status,
+        "headers": protect(ctx, response_headers),
+        "cookies": cookies,
+        "bytes": len(raw),
+        "text": None,
+        "json": None,
+    }
+    if p.download_path:
+        result["path"] = ctx.files.write(p.download_path, raw, overwrite=p.overwrite)
+    if p.response_type != "binary" and not download:
+        try:
+            result["text"] = raw.decode(encoding)
+            is_json = p.response_type == "json" or (
+                p.response_type == "auto" and "json" in response_headers.get("content-type", "")
+            )
+            if is_json and raw and method != "HEAD":
+                result["json"] = protect(ctx, json.loads(result["text"]))
+        except (ValueError, LookupError, UnicodeError) as exc:
+            raise GraphError("HTTP_DECODE") from exc
+    return "success", result
+
+
+async def set_header(ctx, p):
+    if p.name.lower() in {"host", "content-length", "cookie"}:
+        raise GraphError("PARAMETERS_INVALID")
+    state = session(ctx)
+    state.headers[p.name] = p.value
+    state.tainted |= ctx.sensitive_action or bool(SENSITIVE.search(p.name))
+    return "success", {"updated": True}
+
+
+async def set_cookie(ctx, p):
+    from http.cookiejar import Cookie as JarCookie
+
+    parsed = valid_url(p.url)
+    state = session(ctx)
+    state.client.cookies.jar.set_cookie(
+        JarCookie(
+            0,
+            p.name,
+            p.value,
+            None,
+            False,
+            parsed.hostname,
+            False,
+            False,
+            p.path,
+            True,
+            p.secure,
+            None,
+            True,
+            None,
+            None,
+            {},
+            False,
+        )
+    )
+    state.tainted = True
+    return "success", {"updated": True}
+
+
+async def clear_cookies(ctx, p):
+    session(ctx).client.cookies.clear()
+    return "success", {"cleared": True}
+
+
+def register_http_actions(registry):
+    from functools import partial
+
+    for name, label, execute, model in (
+        ("Request", "Запрос", request, Request),
+        ("Get", "GET", partial(request, method="GET"), Request),
+        ("Post", "POST", partial(request, method="POST"), Request),
+        ("Download", "Скачать файл", partial(request, method="GET", download=True), Request),
+        ("SetHeader", "Задать заголовок", set_header, Header),
+        ("SetCookie", "Задать cookie", set_cookie, Cookie),
+        ("ClearCookies", "Очистить cookies", clear_cookies, Empty),
+    ):
+        registry.register(
+            Action(
+                "HTTP." + name,
+                "HTTP · " + label,
+                model,
+                execute,
+                properties(model, paths=("download_path",), secrets=("headers", "cookies", "body", "value")),
+                reveal_parameters=True,
+            )
+        )
