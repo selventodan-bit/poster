@@ -86,11 +86,34 @@ def check(executable, output):
         click(name)
         clipboard(value)
 
-    def confirm():
-        dialog = Desktop(backend="win32").window(title="Выполнение графа")
+    def confirm(title="Выполнение графа"):
+        dialog = Desktop(backend="win32").window(title=title)
         dialog.wait("visible", timeout=10)
         dialog.set_focus()
         dialog.child_window(control_id=6).click_input()
+
+    def choose_node(node_id):
+        click("maker_fit")
+        time.sleep(0.3)
+        state = wait(lambda s: node_id in s["maker"]["nodes"], "visible node " + node_id)
+        window.set_focus()
+        mouse.click(coords=tuple(state["maker"]["nodes"][node_id]))
+        wait(lambda s: s["maker"]["selected"] == [node_id], "selected node")
+
+    def show_property(name):
+        for _ in range(20):
+            if name in snapshot().get("maker", {}).get("positions", {}):
+                return
+            mouse.scroll(coords=tuple(point("maker_properties")), wheel_dist=-3)
+            time.sleep(0.15)
+        raise AssertionError("Property is not visible")
+
+    def project_input(value):
+        dialog = Desktop(backend="win32").window(title="Параметр проекта: prefix")
+        dialog.wait("visible", timeout=10)
+        dialog.set_focus()
+        clipboard(value)
+        keyboard.send_keys("{ENTER}", pause=0.2)
 
     def picture(name):
         window.set_focus()
@@ -282,6 +305,166 @@ def check(executable, output):
         with socket.socket() as probe:
             assert probe.connect_ex(("127.0.0.1", port)) != 0
         completed.append("owned_demo_server_stops_and_restarts_with_saved_graph")
+        # Continue a stopped recording at a selected node in the same browser.
+        start()
+        click("maker_demo")
+        wait(lambda s: bool(s["maker"].get("demo")) and not s["maker"]["busy"], "continuation demo ready")
+        click("maker_record")
+        wait(lambda s: s["maker"]["recording"] and not s["maker"]["busy"], "first fragment recording")
+        browser_control("#show")
+        browser_control("#note")
+        clipboard("Первый фрагмент")
+        browser_control("#continue")
+        wait(
+            lambda s: s["maker"].get("browser", {}).get("title") == "ProjectMaker result",
+            "first fragment navigation",
+        )
+        click("maker_record_stop")
+        first = wait(
+            lambda s: not s["maker"]["recording"] and not s["maker"]["busy"], "first fragment stopped"
+        )["maker"]
+        old_ids = {n["id"] for n in first["graph"]["nodes"]}
+        end = next(n["id"] for n in first["graph"]["nodes"] if n["type"] == "End")
+        tail = next(e["source"] for e in first["graph"]["edges"] if e["target"] == end)
+        choose_node(tail)
+        click("maker_record_resume")
+        wait(lambda s: s["maker"]["recording"] and not s["maker"]["busy"], "continued recording")
+        click("maker_navigate")
+        browser_control("#show")
+        browser_control("#note")
+        clipboard("Второй фрагмент")
+        browser_control("#continue")
+        wait(
+            lambda s: (
+                s["maker"].get("browser", {}).get("title") == "ProjectMaker result"
+                and len(s["maker"]["demo"]["posts"]) == 2
+            ),
+            "second fragment navigation",
+        )
+        click("maker_record_stop")
+        continued = wait(
+            lambda s: not s["maker"]["recording"] and not s["maker"]["busy"], "continued recording stopped"
+        )["maker"]
+        assert old_ids <= {n["id"] for n in continued["graph"]["nodes"]}
+        assert len(continued["graph"]["nodes"]) > len(old_ids)
+        click("maker_save")
+        wait(lambda s: bool(s["maker"]["saved_file"]), "continued graph saved")
+        click("maker_run")
+        confirm()
+        continued = wait(
+            lambda s: s["maker"]["run_state"] == "SUCCEEDED" and not s["maker"]["busy"],
+            "continued graph replay",
+        )["maker"]
+        assert len(continued["demo"]["posts"]) == 4
+        assert continued["demo"]["posts"]["3"]["note"] == "Первый фрагмент"
+        assert continued["demo"]["posts"]["4"]["note"] == "Второй фрагмент"
+        picture("07-continued-recording.png")
+        close()
+        completed.append("continue_recording_in_existing_graph_and_browser")
+
+        # A nontrivial project uses the same portable GUI, no command channel.
+        start()
+        click("maker_demo")
+        wait(lambda s: bool(s["maker"].get("demo")) and not s["maker"]["busy"], "stage2 demo ready")
+        click("maker_example")
+        wait(
+            lambda s: any(n["type"] == "Logic.ForEach" for n in s["maker"]["graph"]["nodes"]),
+            "loop example created",
+        )
+        choose_node("input")
+        click("maker_breakpoint")
+        click("maker_run")
+        project_input("Windows GUI")
+        confirm()
+        paused = wait(
+            lambda s: s["maker"]["pause_reason"] == "breakpoint" and not s["maker"]["busy"],
+            "real graph breakpoint",
+        )["maker"]
+        assert paused["current_node"] == "input" and paused["runtime_values"]["counter"] == 0
+        show_property("maker_prop_value")
+        fill("maker_prop_value", "Изменено: {{note}}")
+        click("maker_apply")
+        wait(
+            lambda s: (
+                next(n for n in s["maker"]["graph"]["nodes"] if n["id"] == "input")["params"]["value"]
+                == "Изменено: {{note}}"
+            ),
+            "paused parameter edit",
+        )
+        choose_node("show")
+        click("maker_selected_run")
+        confirm("Выполнить кубик")
+        wait(
+            lambda s: any(r.get("isolated") for r in s["maker"]["trace"]) and not s["maker"]["busy"],
+            "selected cube in existing browser",
+        )
+        assert snapshot()["maker"]["current_node"] == "input"
+        choose_node("input")
+        click("maker_tab_variables")
+        fill("maker_variable_name", "debug_marker")
+        fill("maker_variable_value", "live marker")
+        click("maker_var_live")
+        wait(
+            lambda s: (
+                s["maker"]["runtime_values"].get("debug_marker") == "live marker" and not s["maker"]["busy"]
+            ),
+            "live variable update",
+        )
+        picture("08-breakpoint-variables.png")
+        click("maker_tab_element")
+        click("maker_pick")
+        browser_control("#note")
+        wait(lambda s: (s["maker"].get("picked") or {}).get("css") == "#note", "real browser element picked")
+        fill("maker_selector", "xpath=//input[@id='note']")
+        click("maker_selector_check")
+        wait(
+            lambda s: (s["maker"].get("selector_result") or {}).get("count") == 1 and not s["maker"]["busy"],
+            "XPath selector checked",
+        )
+        click("maker_selector_apply")
+        wait(
+            lambda s: next(n for n in s["maker"]["graph"]["nodes"] if n["id"] == "input")["params"][
+                "selector"
+            ].startswith("xpath="),
+            "picked selector applied to cube",
+        )
+        picture("09-element-constructor.png")
+        click("maker_breakpoint")
+        click("maker_run")
+        finished = wait(
+            lambda s: s["maker"]["run_state"] == "SUCCEEDED" and not s["maker"]["busy"],
+            "stage2 loop completed",
+        )["maker"]
+        assert finished["runtime_values"]["counter"] == 2
+        assert finished["runtime_values"]["last_text"] == "Изменено: Windows GUI · two"
+        assert len(finished["demo"]["posts"]) == 2
+        click("maker_tab_variables")
+        picture("10-stage2-loop-results.png")
+        click("maker_save")
+        saved_stage2 = wait(lambda s: bool(s["maker"]["saved_file"]), "stage2 graph saved")["maker"]["graph"][
+            "id"
+        ]
+        close()
+        start()
+        wait(lambda s: s["maker"]["graph"]["id"] == saved_stage2, "stage2 graph reopened")
+        click("maker_run")
+        project_input("Повтор")
+        confirm()
+        reopened = wait(
+            lambda s: s["maker"]["run_state"] == "SUCCEEDED" and not s["maker"]["busy"],
+            "stage2 replay after restart",
+        )["maker"]
+        assert reopened["runtime_values"]["last_text"] == "Изменено: Повтор · two"
+        assert reopened["runtime_values"]["counter"] == 2 and "debug_marker" not in reopened["runtime_values"]
+        picture("11-stage2-reopened.png")
+        close()
+        completed.extend(
+            [
+                "variables_loops_breakpoints_live_edit_and_selected_action",
+                "real_element_picker_xpath_and_readback_variables",
+                "saved_stage2_graph_reopens_with_isolated_inputs",
+            ]
+        )
         report = {
             "status": "PASSED",
             "commit": info["commit"],

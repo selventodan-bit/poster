@@ -8,11 +8,13 @@ import asyncio
 import importlib.metadata
 import json
 import os
+import re
 from pathlib import Path
 import socket
 import subprocess
 import sys
 import time
+import traceback
 
 from poster.maker.fixtures import serve_maker
 
@@ -24,14 +26,19 @@ def host(port, url, directory):
     )
     os.environ["QTWEBENGINE_DISABLE_SANDBOX"] = "1"
     os.environ["QT_QUICK_BACKEND"] = "software"
+    os.environ["XDG_CACHE_HOME"] = str(directory / "cache")
     from PySide6.QtCore import QTimer, QUrl
     from PySide6.QtWidgets import QApplication, QMainWindow
     from PySide6.QtWebEngineWidgets import QWebEngineView
+    from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
 
     app = QApplication([])
     window = QMainWindow()
     window.setWindowTitle("Poster embedded browser compatibility prototype")
     view = QWebEngineView(window)
+    profile = QWebEngineProfile(view)
+    profile.setHttpCacheType(QWebEngineProfile.HttpCacheType.MemoryHttpCache)
+    view.setPage(QWebEnginePage(profile, view))
     window.setCentralWidget(view)
     window.resize(1000, 700)
     view.setUrl(QUrl(url))
@@ -129,7 +136,11 @@ async def check(directory):
                         break
                     await asyncio.sleep(0.1)
                 assert (directory / "embedded.png").is_file()
-                browser_version = version_data.get("Browser", browser.version)
+                user_agent = await page.evaluate("navigator.userAgent")
+                chrome_version = re.search(r"Chrome/([^\s]+)", user_agent)
+                browser_version = (
+                    chrome_version[1] if chrome_version else version_data.get("Browser", browser.version)
+                )
                 await browser.close()
             sizes = {}
             for name in ["PySide6", "PySide6_Addons", "PySide6_Essentials", "shiboken6"]:
@@ -180,5 +191,17 @@ if __name__ == "__main__":
         try:
             asyncio.run(check(arguments.output))
         except Exception as error:
-            print("::error::Embedded prototype " + type(error).__name__, flush=True)
+            frames = " > ".join(
+                f"{Path(frame.filename).name}:{frame.lineno}"
+                for frame in traceback.extract_tb(error.__traceback__)[-4:]
+            )
+            print("::error::Embedded prototype " + type(error).__name__ + " at " + frames, flush=True)
+            log = arguments.output / "host-private.log"
+            if log.exists():
+                for line in log.read_text(errors="replace").splitlines()[-12:]:
+                    print(
+                        "::notice title=Embedded host diagnostic::"
+                        + re.sub(r"(?:https?|wss?)://\S+", "[local endpoint]", line),
+                        flush=True,
+                    )
             raise

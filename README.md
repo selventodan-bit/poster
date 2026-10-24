@@ -1,6 +1,10 @@
-# Poster 3.0 — ProjectMaker, этап 1
+# Poster 3.0 — ProjectMaker, этап 2
 
-**Новый визуальный конструктор:** запись обычных действий браузера → соединённые кубики → редактирование параметров → шаг/запуск → сохранение и повтор. [Инструкция и ограничения](docs/PROJECTMAKER_3_STAGE1.md). Переносимый Windows-пакет открывает Maker двойным щелчком `Poster.exe`; встроенного браузера на этом этапе нет.
+**Визуальный конструктор с Python Runtime:** запись и продолжение записи, переменные и входы, условия/Switch, циклы/For Each/Break/Continue, breakpoint и правка при паузе, CSS/XPath-конструктор. [Инструкция этапа 2](docs/PROJECTMAKER_3_STAGE2.md) · [Матрица возможностей](docs/ZENNO_PARITY_MATRIX.md) · [Компоненты и Qt/CDP-прототип](docs/PROJECTMAKER_COMPONENT_REVIEW.md).
+
+Windows: распакуйте portable ZIP, дважды щёлкните `Poster.exe`, нажмите **«Демо-сайт» → «Пример с циклом»**. Терминал и Python пользователю не нужны. Браузер продукта пока открывается отдельным окном; Qt-прототип не включён в пользовательский пакет. Новый формат v2 загружает графы v1; старый HTTP Workflow v1 не меняется.
+
+Linux без GUI: `python -m poster maker-run project.postergraph.json --input prefix=Linux --output report.json`. Контролируемая сквозная проверка: `python scripts/check_maker_stage2.py --output .poster/stage2-check`.
 
 Старый Poster 2.0 сохранён в соседних вкладках. Его документация и команды ниже остаются применимыми.
 
@@ -141,6 +145,6 @@ ruff check .
 ruff format --check .
 ```
 
-Тесты: настоящий Chromium capture → hot load → словари → HTTP → проверка обеих форм; CSRF, таймаут после записи, редиректы/cookies, dry-run без сети, атомарные обновления, Drive pagination/backoff, SQLite recovery/backup. Drive проверяется контролируемым транспортом. Настоящий аккаунт Google, графический Windows и размещённые Colab/Molab здесь не тестировались.
+Тесты: настоящий Chromium capture → hot load → словари → HTTP → проверка обеих форм; CSRF, таймаут после записи, редиректы/cookies, dry-run без сети, атомарные обновления, Drive pagination/backoff, SQLite recovery/backup. Drive проверяется контролируемым транспортом. Графический Windows и portable EXE проверяются в CI через OS mouse/keyboard; настоящий аккаунт Google и размещённые Colab/Molab не использовались.
 
 Автообучение 2.0 поддерживает URL-encoded, JSON, текстовый multipart и цепочки с доказанной зависимостью через JSON-ID. Неизвестные токены, вычисляемые подписи, непонятные связи и отсутствие независимого подтверждения требуют обучения/проверки. Бинарные uploads, повторяющиеся поля, cross-origin iframe/SSO, произвольные цепочки JS, CAPTCHA и универсальная поддержка всех CMS не заявляются. Legacy-проекты без `recognition` остаются совместимыми; новый непроверенный кандидат имеет REVIEW и блокируется очередью. HTTP 200 отдельно не считается успехом.

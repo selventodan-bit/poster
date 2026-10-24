@@ -1,0 +1,406 @@
+{
+  "format": "poster.maker.graph",
+  "schema_version": 2,
+  "id": "d44356e937e940e2bc9b4a34e384db48",
+  "name": "Цикл, переменные и отладка",
+  "entry": "start",
+  "nodes": [
+    {
+      "id": "start",
+      "type": "Start",
+      "action_version": 1,
+      "title": "",
+      "x": 40.0,
+      "y": 45.0,
+      "params": {},
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    },
+    {
+      "id": "loop",
+      "type": "Logic.ForEach",
+      "action_version": 1,
+      "title": "",
+      "x": 280.0,
+      "y": 45.0,
+      "params": {
+        "items": "{{words}}",
+        "item": "word",
+        "index": "i",
+        "max_iterations": 5
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    },
+    {
+      "id": "delay",
+      "type": "Logic.Delay",
+      "action_version": 1,
+      "title": "",
+      "x": 520.0,
+      "y": 45.0,
+      "params": {
+        "milliseconds": 10
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    },
+    {
+      "id": "compose",
+      "type": "Strings.Transform",
+      "action_version": 1,
+      "title": "",
+      "x": 760.0,
+      "y": 45.0,
+      "params": {
+        "operation": "concat",
+        "value": "{{prefix}}",
+        "other": " · {{word}}"
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": "note",
+      "result_path": "value",
+      "protect_result": false
+    },
+    {
+      "id": "open",
+      "type": "Browser.OpenURL",
+      "action_version": 1,
+      "title": "",
+      "x": 40.0,
+      "y": 190.0,
+      "params": {
+        "url": "http://127.0.0.1:8766/"
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    },
+    {
+      "id": "show",
+      "type": "Browser.Click",
+      "action_version": 1,
+      "title": "",
+      "x": 280.0,
+      "y": 190.0,
+      "params": {
+        "selector": "#show"
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    },
+    {
+      "id": "input",
+      "type": "Browser.Input",
+      "action_version": 1,
+      "title": "",
+      "x": 520.0,
+      "y": 190.0,
+      "params": {
+        "selector": "#note",
+        "value": "{{note}}"
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    },
+    {
+      "id": "post",
+      "type": "Browser.Click",
+      "action_version": 1,
+      "title": "",
+      "x": 760.0,
+      "y": 190.0,
+      "params": {
+        "selector": "#continue"
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    },
+    {
+      "id": "wait",
+      "type": "Browser.WaitURL",
+      "action_version": 1,
+      "title": "",
+      "x": 40.0,
+      "y": 335.0,
+      "params": {
+        "url": "http://127.0.0.1:8766/result/*",
+        "after_action": true,
+        "after_node": "post"
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    },
+    {
+      "id": "read",
+      "type": "Browser.ReadText",
+      "action_version": 1,
+      "title": "",
+      "x": 280.0,
+      "y": 335.0,
+      "params": {
+        "selector": "#result"
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": "last_text",
+      "result_path": "value",
+      "protect_result": false
+    },
+    {
+      "id": "increment",
+      "type": "Variables.Increment",
+      "action_version": 1,
+      "title": "",
+      "x": 520.0,
+      "y": 335.0,
+      "params": {
+        "name": "counter",
+        "amount": 1
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    },
+    {
+      "id": "compare",
+      "type": "Variables.Compare",
+      "action_version": 1,
+      "title": "",
+      "x": 760.0,
+      "y": 335.0,
+      "params": {
+        "left": "{{counter}}",
+        "right": 2,
+        "operator": "ge"
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    },
+    {
+      "id": "break",
+      "type": "Logic.Break",
+      "action_version": 1,
+      "title": "",
+      "x": 40.0,
+      "y": 480.0,
+      "params": {},
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    },
+    {
+      "id": "continue",
+      "type": "Logic.Continue",
+      "action_version": 1,
+      "title": "",
+      "x": 280.0,
+      "y": 480.0,
+      "params": {},
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    },
+    {
+      "id": "switch",
+      "type": "Logic.Switch",
+      "action_version": 1,
+      "title": "",
+      "x": 520.0,
+      "y": 480.0,
+      "params": {
+        "value": "{{counter}}",
+        "cases": [
+          2
+        ]
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    },
+    {
+      "id": "success",
+      "type": "End.Success",
+      "action_version": 1,
+      "title": "",
+      "x": 760.0,
+      "y": 480.0,
+      "params": {},
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    },
+    {
+      "id": "failure",
+      "type": "End.Failure",
+      "action_version": 1,
+      "title": "",
+      "x": 40.0,
+      "y": 625.0,
+      "params": {},
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    }
+  ],
+  "edges": [
+    {
+      "source": "start",
+      "port": "success",
+      "target": "loop"
+    },
+    {
+      "source": "loop",
+      "port": "success",
+      "target": "delay"
+    },
+    {
+      "source": "delay",
+      "port": "success",
+      "target": "compose"
+    },
+    {
+      "source": "compose",
+      "port": "success",
+      "target": "open"
+    },
+    {
+      "source": "open",
+      "port": "success",
+      "target": "show"
+    },
+    {
+      "source": "show",
+      "port": "success",
+      "target": "input"
+    },
+    {
+      "source": "input",
+      "port": "success",
+      "target": "post"
+    },
+    {
+      "source": "post",
+      "port": "success",
+      "target": "wait"
+    },
+    {
+      "source": "wait",
+      "port": "success",
+      "target": "read"
+    },
+    {
+      "source": "read",
+      "port": "success",
+      "target": "increment"
+    },
+    {
+      "source": "increment",
+      "port": "success",
+      "target": "compare"
+    },
+    {
+      "source": "compare",
+      "port": "success",
+      "target": "break"
+    },
+    {
+      "source": "compare",
+      "port": "error",
+      "target": "continue"
+    },
+    {
+      "source": "loop",
+      "port": "error",
+      "target": "switch"
+    },
+    {
+      "source": "switch",
+      "port": "case:0",
+      "target": "success"
+    },
+    {
+      "source": "switch",
+      "port": "success",
+      "target": "failure"
+    },
+    {
+      "source": "switch",
+      "port": "error",
+      "target": "failure"
+    }
+  ],
+  "view": {
+    "zoom": 1.0
+  },
+  "max_steps": 500,
+  "metadata": {
+    "maker_demo": "http://127.0.0.1:8766"
+  },
+  "extensions": {},
+  "secret_file": null,
+  "secret_sha256": null,
+  "variables": {
+    "prefix": {
+      "value": "Maker Ж",
+      "input": true,
+      "required": true,
+      "secret": false
+    },
+    "words": {
+      "value": [
+        "one",
+        "two",
+        "three"
+      ],
+      "input": false,
+      "required": false,
+      "secret": false
+    },
+    "counter": {
+      "value": 0,
+      "input": false,
+      "required": false,
+      "secret": false
+    }
+  }
+}

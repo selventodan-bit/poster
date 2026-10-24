@@ -231,6 +231,7 @@ def default_registry():
                 Property("url", "URL / маска", secret=True),
                 timeout,
                 Property("after_action", "Требовать переход после действия", "bool"),
+                Property("after_node", "Переход после кубика (необязательно)", "node"),
             ),
         ),
         Action(

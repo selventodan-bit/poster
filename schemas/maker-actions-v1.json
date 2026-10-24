@@ -314,6 +314,18 @@
             "default": false,
             "title": "After Action",
             "type": "boolean"
+          },
+          "after_node": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "After Node"
           }
         },
         "title": "WaitURL",
@@ -405,6 +417,466 @@
           }
         },
         "title": "If",
+        "type": "object"
+      }
+    },
+    {
+      "type": "Variables.Set",
+      "action_version": 1,
+      "label": "Переменные · Set",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "default": "value",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,79}$",
+            "title": "Name",
+            "type": "string"
+          },
+          "value": {
+            "default": "",
+            "title": "Value"
+          }
+        },
+        "title": "Set",
+        "type": "object"
+      }
+    },
+    {
+      "type": "Variables.Get",
+      "action_version": 1,
+      "label": "Переменные · Get",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "default": "value",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,79}$",
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "title": "Named",
+        "type": "object"
+      }
+    },
+    {
+      "type": "Variables.Delete",
+      "action_version": 1,
+      "label": "Переменные · Delete",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "default": "value",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,79}$",
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "title": "Named",
+        "type": "object"
+      }
+    },
+    {
+      "type": "Variables.Increment",
+      "action_version": 1,
+      "label": "Переменные · Increment",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "default": "value",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,79}$",
+            "title": "Name",
+            "type": "string"
+          },
+          "amount": {
+            "default": 1.0,
+            "title": "Amount",
+            "type": "number"
+          }
+        },
+        "title": "Increment",
+        "type": "object"
+      }
+    },
+    {
+      "type": "Variables.Compare",
+      "action_version": 1,
+      "label": "Переменные · Compare / If",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "left": {
+            "default": 0,
+            "title": "Left"
+          },
+          "right": {
+            "default": 0,
+            "title": "Right"
+          },
+          "operator": {
+            "default": "equals",
+            "enum": [
+              "equals",
+              "not_equals",
+              "lt",
+              "le",
+              "gt",
+              "ge",
+              "contains",
+              "starts_with",
+              "ends_with"
+            ],
+            "title": "Operator",
+            "type": "string"
+          }
+        },
+        "title": "Compare",
+        "type": "object"
+      }
+    },
+    {
+      "type": "Strings.Transform",
+      "action_version": 1,
+      "label": "Строки · Операция",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "operation": {
+            "default": "concat",
+            "enum": [
+              "concat",
+              "replace",
+              "lower",
+              "upper",
+              "strip",
+              "split",
+              "join",
+              "length",
+              "substring"
+            ],
+            "title": "Operation",
+            "type": "string"
+          },
+          "value": {
+            "default": "",
+            "title": "Value"
+          },
+          "other": {
+            "default": "",
+            "title": "Other"
+          },
+          "replacement": {
+            "default": "",
+            "title": "Replacement",
+            "type": "string"
+          },
+          "separator": {
+            "default": ",",
+            "title": "Separator",
+            "type": "string"
+          },
+          "start": {
+            "default": 0,
+            "maximum": 1000000,
+            "minimum": 0,
+            "title": "Start",
+            "type": "integer"
+          },
+          "end": {
+            "anyOf": [
+              {
+                "maximum": 1000000,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "End"
+          }
+        },
+        "title": "String",
+        "type": "object"
+      }
+    },
+    {
+      "type": "Logic.Switch",
+      "action_version": 1,
+      "label": "Логика · Switch",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "value": {
+            "default": "",
+            "title": "Value"
+          },
+          "cases": {
+            "items": {},
+            "maxItems": 20,
+            "title": "Cases",
+            "type": "array"
+          }
+        },
+        "title": "Switch",
+        "type": "object"
+      }
+    },
+    {
+      "type": "Logic.Loop",
+      "action_version": 1,
+      "label": "Логика · Цикл N раз",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "default": 3,
+            "maximum": 10000,
+            "minimum": 0,
+            "title": "Count",
+            "type": "integer"
+          },
+          "index": {
+            "default": "i",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,79}$",
+            "title": "Index",
+            "type": "string"
+          },
+          "max_iterations": {
+            "default": 1000,
+            "maximum": 10000,
+            "minimum": 1,
+            "title": "Max Iterations",
+            "type": "integer"
+          }
+        },
+        "title": "Loop",
+        "type": "object"
+      }
+    },
+    {
+      "type": "Logic.ForEach",
+      "action_version": 1,
+      "label": "Логика · For Each",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {},
+            "maxItems": 10000,
+            "title": "Items",
+            "type": "array"
+          },
+          "item": {
+            "default": "item",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,79}$",
+            "title": "Item",
+            "type": "string"
+          },
+          "index": {
+            "default": "i",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,79}$",
+            "title": "Index",
+            "type": "string"
+          },
+          "max_iterations": {
+            "default": 1000,
+            "maximum": 10000,
+            "minimum": 1,
+            "title": "Max Iterations",
+            "type": "integer"
+          }
+        },
+        "title": "ForEach",
+        "type": "object"
+      }
+    },
+    {
+      "type": "Logic.Delay",
+      "action_version": 1,
+      "label": "Логика · Пауза",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "milliseconds": {
+            "default": 500,
+            "maximum": 120000,
+            "minimum": 0,
+            "title": "Milliseconds",
+            "type": "integer"
+          }
+        },
+        "title": "Delay",
+        "type": "object"
+      }
+    },
+    {
+      "type": "Logic.Break",
+      "action_version": 1,
+      "label": "Логика · Break",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {},
+        "title": "Empty",
+        "type": "object"
+      }
+    },
+    {
+      "type": "Logic.Continue",
+      "action_version": 1,
+      "label": "Логика · Continue",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {},
+        "title": "Empty",
+        "type": "object"
+      }
+    },
+    {
+      "type": "End.Success",
+      "action_version": 1,
+      "label": "Завершить успешно",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {},
+        "title": "Empty",
+        "type": "object"
+      }
+    },
+    {
+      "type": "End.Failure",
+      "action_version": 1,
+      "label": "Завершить с ошибкой",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {},
+        "title": "Empty",
+        "type": "object"
+      }
+    },
+    {
+      "type": "Browser.ReadText",
+      "action_version": 1,
+      "label": "Браузер · Читать текст",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "selector": {
+            "default": "body",
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Selector",
+            "type": "string"
+          },
+          "frame": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Frame",
+            "type": "array"
+          },
+          "timeout_ms": {
+            "default": 10000,
+            "maximum": 120000,
+            "minimum": 50,
+            "title": "Timeout Ms",
+            "type": "integer"
+          }
+        },
+        "title": "Target",
+        "type": "object"
+      }
+    },
+    {
+      "type": "Browser.ReadAttribute",
+      "action_version": 1,
+      "label": "Браузер · Читать атрибут",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "selector": {
+            "default": "body",
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Selector",
+            "type": "string"
+          },
+          "frame": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Frame",
+            "type": "array"
+          },
+          "timeout_ms": {
+            "default": 10000,
+            "maximum": 120000,
+            "minimum": 50,
+            "title": "Timeout Ms",
+            "type": "integer"
+          },
+          "attribute": {
+            "default": "href",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Attribute",
+            "type": "string"
+          }
+        },
+        "title": "Attribute",
+        "type": "object"
+      }
+    },
+    {
+      "type": "Browser.NewTab",
+      "action_version": 1,
+      "label": "Вкладки · Открыть",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "url": {
+            "default": "",
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "title": "NewTab",
+        "type": "object"
+      }
+    },
+    {
+      "type": "Browser.SwitchTab",
+      "action_version": 1,
+      "label": "Вкладки · Переключить",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "index": {
+            "default": 0,
+            "maximum": 100,
+            "minimum": 0,
+            "title": "Index",
+            "type": "integer"
+          }
+        },
+        "title": "Tab",
+        "type": "object"
+      }
+    },
+    {
+      "type": "Browser.CloseTab",
+      "action_version": 1,
+      "label": "Вкладки · Закрыть текущую",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {},
+        "title": "Empty",
         "type": "object"
       }
     }

@@ -39,6 +39,11 @@ class MakerHandler(Handler):
                 200,
                 '<meta charset="utf-8"><title>ProjectMaker navigation</title><a id="move" href="/after-nav?stage=two">Next</a><input id="late">',
             )
+        elif path == "/spa":
+            self.reply(
+                200,
+                '<meta charset="utf-8"><title>ProjectMaker SPA</title><input id="spa-input"><button id="route" onclick="history.pushState({},\'\',\'/spa?step=two\')">Route</button><a id="hash" href="#part">Hash</a>',
+            )
         elif path.startswith("/result/"):
             item = self.server.posts.get(path.rsplit("/", 1)[-1])
             self.reply(

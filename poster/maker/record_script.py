@@ -29,7 +29,7 @@ RECORD_JS = r"""(() => {
  window.__posterMakerInstalled=true;
  window.__posterMakerDocumentId=globalThis.crypto?.randomUUID?.()||Date.now().toString(36)+Math.random().toString(36);
  const selector=SELECTOR_FUNCTION;
- let active=true, sequence=0;
+ let active=true, sequence=0, lastUserSequence=0;
  const pending=new Map(), protectedFields=new WeakSet(), sent=new Set();
  function sensitive(e) {
    const yes=e.type==='password'||protectedFields.has(e)||/password|passwd|pwd|secret|token|one.time.code/i.test([e.name,e.id,e.autocomplete].join(' '));
@@ -43,6 +43,11 @@ RECORD_JS = r"""(() => {
  function emit(kind,e,more={}) {
    if(!active) return Promise.resolve();
    const data={kind,selector:e?selector(e):'',document_id:window.__posterMakerDocumentId,sequence:++sequence,...more};
+   if(['click','input','select'].includes(kind)){
+     lastUserSequence=sequence;
+     const before=location.href, cause=sequence;
+     setTimeout(()=>{if(location.href!==before)window.__posterMakerNavigationIntent={cause,url:location.href};},0);
+   }
    const p=window.__poster_maker_action(data).catch(()=>{});sent.add(p);p.finally(()=>sent.delete(p));return p;
  }
  function flush(e) {
@@ -51,6 +56,14 @@ RECORD_JS = r"""(() => {
    return emit('input',e,{value:e.isContentEditable?e.textContent:e.value,sensitive:sensitive(e)});
  }
  const flushAll=()=>Promise.all([...pending.keys()].map(flush));
+ for(const name of ['pushState','replaceState']){
+   const original=history[name];
+   history[name]=function(...args){
+     flushAll();
+     if(lastUserSequence&&args[2]!=null)window.__posterMakerNavigationIntent={cause:lastUserSequence,url:new URL(args[2],location.href).href};
+     return original.apply(this,args);
+   };
+ }
  window.__posterMakerFlush=async()=>{await flushAll();await Promise.all([...sent]);};
  window.__posterMakerStop=async()=>{await window.__posterMakerFlush();active=false;};
  window.__posterMakerStart=()=>{active=true;};

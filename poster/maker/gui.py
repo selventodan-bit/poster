@@ -253,6 +253,7 @@ class MakerPanel(ToolsMixin, ClipboardMixin):
         for child in self.prop_frame.winfo_children():
             child.destroy()
         self.props.clear()
+        self.node_choices = {}
         if not node_id:
             self.selected_label.set("Выберите кубик на холсте")
             self.node_title.set("")
@@ -295,10 +296,21 @@ class MakerPanel(ToolsMixin, ClipboardMixin):
                     self.prop_frame, height=3 if prop.kind == "multiline" else 2, width=28, wrap="word"
                 )
                 widget.insert("1.0", shown)
-            elif prop.kind in {"choice", "bool"}:
+            elif prop.kind in {"choice", "bool", "node"}:
+                if prop.kind == "node":
+                    self.node_choices = {
+                        f"{n.title or n.type} · {n.id}": n.id
+                        for n in self.document.graph.nodes
+                        if n.type in {"Browser.OpenURL", "Browser.Click", "Browser.Input", "Browser.Select"}
+                    }
+                    shown = next((label for label, key in self.node_choices.items() if key == value), "")
                 widget = ttk.Combobox(
                     self.prop_frame,
-                    values=("Нет", "Да") if prop.kind == "bool" else prop.choices,
+                    values=("Нет", "Да")
+                    if prop.kind == "bool"
+                    else ("", *self.node_choices)
+                    if prop.kind == "node"
+                    else prop.choices,
                     state="readonly",
                     width=27,
                 )
@@ -342,6 +354,8 @@ class MakerPanel(ToolsMixin, ClipboardMixin):
                     )
                 elif prop.kind == "bool":
                     values[name] = text == "Да"
+                elif prop.kind == "node":
+                    values[name] = self.node_choices.get(text)
                 elif prop.kind == "lines":
                     values[name] = [s for s in text.splitlines() if s]
                 elif prop.kind == "json":
@@ -964,6 +978,19 @@ class MakerPanel(ToolsMixin, ClipboardMixin):
             ):
                 continue
             positions[key] = [x, y]
+        for index, name in enumerate(("properties", "variables", "element")):
+            points = []
+            for x in range(2, self.tools_notebook.winfo_width(), 4):
+                try:
+                    if self.tools_notebook.index(f"@{x},10") == index:
+                        points.append(x)
+                except tk.TclError:
+                    pass
+            if points:
+                positions["maker_tab_" + name] = [
+                    self.tools_notebook.winfo_rootx() + (min(points) + max(points)) // 2,
+                    self.tools_notebook.winfo_rooty() + 10,
+                ]
         return {
             "positions": positions,
             "graph": self.document.graph.model_dump(mode="json"),

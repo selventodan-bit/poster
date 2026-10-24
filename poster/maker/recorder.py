@@ -250,7 +250,17 @@ class ActionRecorder:
             url = frame.url
             if urlsplit(url).scheme not in {"http", "https"}:
                 return
-            if after_node and (renderer or (same_document and time.monotonic() - self.last_action_time < 2)):
+            if same_document and not renderer:
+                await asyncio.sleep(0.03)
+                intent = await frame.evaluate("window.__posterMakerNavigationIntent||null")
+                if intent and intent.get("url") == url:
+                    event_id = str(document) + ":" + str(intent.get("cause"))
+                    cause = next(
+                        (n.id for n in self.graph.nodes if n.extensions.get("record_event") == event_id), None
+                    )
+                    if cause:
+                        after_node, renderer = cause, True
+            if after_node and renderer:
                 if self.graph.node(self.tail).type == "Browser.WaitURL" and self.graph.node(
                     self.tail
                 ).params.get("url") == navigation_pattern(url):

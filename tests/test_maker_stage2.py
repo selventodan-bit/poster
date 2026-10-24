@@ -26,6 +26,42 @@ def sequence(*nodes, variables=None):
     )
 
 
+@pytest.mark.parametrize("mode", ["history", "anchor", "addressbar"])
+async def test_same_document_navigation_requires_real_action_causality(mode):
+    with serve_maker() as (_, base):
+        recorder = ActionRecorder(headless=True)
+        try:
+            await recorder.start()
+            await recorder.navigate(base + "/spa")
+            page = recorder.session.page
+            await page.locator("#spa-input").fill("text")
+            if mode == "history":
+                await page.locator("#route").click()
+                await page.wait_for_url("**step=two")
+            elif mode == "anchor":
+                await page.locator("#hash").click()
+                await page.wait_for_url("**#part")
+            else:
+                await page.goto(base + "/spa#manual")
+            await asyncio.sleep(0.08)
+            graph = await recorder.stop()
+        finally:
+            await recorder.close()
+        if mode == "addressbar":
+            assert sum(n.type == "Browser.OpenURL" for n in graph.nodes) == 2
+            assert not any(n.type == "Browser.WaitURL" for n in graph.nodes)
+        else:
+            assert sum(n.type == "Browser.OpenURL" for n in graph.nodes) == 1
+            assert any(n.type == "Browser.WaitURL" and n.params.get("after_node") for n in graph.nodes)
+        runner = GraphRunner(graph)
+        try:
+            assert await runner.run() == "SUCCEEDED", [
+                (r.action, r.error_code, r.details) for r in runner.results
+            ]
+        finally:
+            await runner.close()
+
+
 def test_v1_migration_does_not_write_until_explicit_save(tmp_path):
     path = tmp_path / "old.postergraph.json"
     raw = {

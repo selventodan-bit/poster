@@ -121,10 +121,13 @@ def scenario():
         assert maker.runner.context.variables.get("counter") == 0
         assert maker.runner.current == increment.id
         fill(maker.props["amount"][1], "2")
+        maker.output_name.set("last_increment")
+        maker.output_path.set("value")
         assert maker.apply(), maker.status.get()
         maker.buttons["run"].invoke()
         wait(lambda: maker.runner.state == "SUCCEEDED" and not maker.busy)
         assert maker.runtime_values["counter"] == 2
+        assert maker.runtime_values["last_increment"] == 2
         assert maker.runner.context.session.browser is None
         assert maker.save()
         path = maker.path

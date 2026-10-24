@@ -33,6 +33,22 @@ async def check(directory, case="topic"):
             assert result.state == "DETECTED", result.summary()
             title = "Windows Ж 日本語" if case not in {"reply", "comment"} else ""
             await session.test_publish(title, "Браузер & <literal>\nسطر 日本語", "acceptance", confirmed=True)
+            if session.result.state != "HTTP_CANDIDATE":
+                print(
+                    "::error title=Windows acceptance state::"
+                    + json.dumps(
+                        {
+                            "state": str(session.result.state),
+                            "outcome": session.result.outcome,
+                            "diagnostic_codes": session.result.diagnostics,
+                            "write_admitted": session.write_admitted,
+                            "server_writes": len(server.writes),
+                            "captured_requests": len(session.recorder.capture.requests),
+                            "captured_responses": len(session.recorder.capture.responses),
+                        }
+                    ),
+                    flush=True,
+                )
             assert session.result.state == "HTTP_CANDIDATE", session.result.summary()
             # The HTTP verifier must not use a living browser.
             await session.context.close()
