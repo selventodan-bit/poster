@@ -310,6 +310,8 @@ def check(executable, output):
                     lambda s: bool(s["maker"]["graph"]["metadata"].get("browser_profile")),
                     "local profile selected",
                 )
+                click("maker_save")
+                wait(lambda s: not s["maker"]["dirty"], "profile preference saved")
                 fill("maker_url", base + "/tabs")
                 click("maker_record")
                 wait(lambda s: s["maker"]["recording"] and not s["maker"]["busy"], "Qt tabs recording")
