@@ -426,24 +426,20 @@ class RecognitionSession:
 
     def diagnose(self, code, exc=None):
         self.result.diagnostics.append(code)
+        self.last_diagnostic = {
+            "code": code,
+            "exception": type(exc).__name__ if exc else None,
+            "write_admitted": self.write_admitted,
+            "read_only": self.read_only,
+            "phase_hint": self.click_failure_hint(exc) if code == "CLICK_FAILED" else None,
+        }
         # Never serialize exception messages: Playwright/httpx include URLs,
         # payloads and page text. The class and stage suffice for local triage.
         try:
             self.profile.parent.mkdir(parents=True, exist_ok=True)
             path = self.profile.parent / "diagnostics.jsonl"
             with path.open("a", encoding="utf-8") as stream:
-                stream.write(
-                    json.dumps(
-                        {
-                            "code": code,
-                            "exception": type(exc).__name__ if exc else None,
-                            "write_admitted": self.write_admitted,
-                            "read_only": self.read_only,
-                            "phase_hint": self.click_failure_hint(exc) if code == "CLICK_FAILED" else None,
-                        }
-                    )
-                    + "\n"
-                )
+                stream.write(json.dumps(self.last_diagnostic) + "\n")
         except OSError:
             self.result.diagnostics.append("DIAGNOSTIC_UNAVAILABLE")
 

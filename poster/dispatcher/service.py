@@ -11,7 +11,7 @@ from ..maker.model import Graph, secret_refs
 from ..maker.variables import Variables
 from ..maker.storage import Vault
 from .models import ACTIVE, DispatcherError, Status
-from .processes import WorkerProcess, terminate_tree
+from .processes import WorkerProcess, terminate_tree, reap_detached
 from .security import key_setup, plain_path, seal
 from .snapshots import Snapshots, digest
 
@@ -157,6 +157,7 @@ class Dispatcher:
                 continue
             if execution["pid"]:
                 terminate_tree(execution["pid"], execution["birth"], group=True)
+                reap_detached(execution["run_id"], execution["birth"])
             self.store.complete(execution["run_id"], Status.UNKNOWN, code="DISPATCHER_LOST")
 
     def reconcile(self):

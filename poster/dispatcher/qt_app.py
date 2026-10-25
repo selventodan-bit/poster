@@ -665,6 +665,9 @@ class DispatcherWindow(QMainWindow):
             if report.get("node_error_code") in {
                 "FILE_MISSING",
                 "FILE_NOT_FOUND",
+                "FILE_OUTSIDE_WORKDIR",
+                "FILE_LINK_FORBIDDEN",
+                "FILE_PATH_INVALID",
                 "PATH_INVALID",
                 "PATH_FORBIDDEN",
             }:

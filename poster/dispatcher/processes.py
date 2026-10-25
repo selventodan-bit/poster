@@ -3,6 +3,7 @@
 import os
 import signal
 import subprocess
+import sys
 import time
 
 import psutil
@@ -92,6 +93,30 @@ def clean_descendants():
     return not [p for p in alive if p.is_running() and p.status() != psutil.STATUS_ZOMBIE]
 
 
+def reap_detached(run_id, birth=0):
+    """Linux Chromium creates its own session; killpg(worker) cannot own it.
+
+    A launch-only run marker survives reparenting and is not graph-controlled.
+    Restrict discovery to this UID, then recheck exact process birth before
+    signalling. Never inspect/publish command lines or environment contents.
+    Windows uses the existing kernel Job Object instead.
+    """
+    if sys.platform != "linux" or not run_id:
+        return
+    targets = []
+    for process in psutil.process_iter():
+        try:
+            if process.pid == os.getpid() or process.uids().real != os.getuid():
+                continue
+            created = process.create_time()
+            if created >= birth and process.environ().get("POSTER_DISPATCHER_RUN") == run_id:
+                targets.append((process.pid, created))
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    for pid, created in reversed(targets):
+        terminate_tree(pid, created)
+
+
 class WindowsJob:
     def __init__(self, pid):
         import ctypes
@@ -175,7 +200,7 @@ class WorkerProcess:
                     execution["owner"],
                 ),
                 cwd=store.root,
-                env=environment(),
+                env={**environment(), "POSTER_DISPATCHER_RUN": execution["run_id"]},
                 stdin=subprocess.PIPE,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -219,6 +244,7 @@ class WorkerProcess:
                 terminate_tree(self.process.pid, getattr(self, "birth", None), group=True)
             if self.job:
                 self.job.close()
+            reap_detached(self.execution["run_id"], getattr(self, "birth", 0))
             if self.process.stdin:
                 self.process.stdin.close()
             try:

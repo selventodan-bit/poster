@@ -14,7 +14,7 @@ import time
 from filelock import FileLock, Timeout
 
 from .models import MESSAGES, DispatcherError, Status
-from .processes import clean_descendants, terminate_tree
+from .processes import clean_descendants, terminate_tree, reap_detached
 from .security import private_dir, safe_json, seal, unseal
 from .snapshots import Snapshots, digest
 from .store import Store
@@ -68,6 +68,7 @@ class Controls:
         if not self.finished.wait(5):
             import psutil
 
+            reap_detached(os.environ.get("POSTER_DISPATCHER_RUN"), psutil.Process().create_time())
             terminate_tree(os.getpid(), psutil.Process().create_time(), group=True)
 
 

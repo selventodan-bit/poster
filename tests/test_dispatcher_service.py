@@ -405,20 +405,39 @@ def test_explicit_profile_is_serialized_across_independent_queues(tmp_path):
                 store.close()
 
 
-def test_worker_browser_crash_reaps_owned_browser_descendants(tmp_path):
+@pytest.mark.parametrize("independent", [False, True])
+def test_worker_browser_crash_reaps_owned_browser_descendants(tmp_path, independent):
+    descendants = []
     with controlled_server() as (server, base):
         source = graph_file(tmp_path, [("Browser.OpenURL", {"url": base + "/hold/0"})])
         store = Store(tmp_path / "q.sqlite")
         job = enqueue(store, source)
+        second_job = None
+        if independent:
+            other = graph_file(tmp_path, [("Browser.OpenURL", {"url": base + "/hold/1"})], name="other")
+            second_job = enqueue(store, other)
         process = launch(store)
         try:
             wait(lambda: any(c["path"] == "/hold/0" for c in server.calls))
+            if independent:
+                wait(lambda: any(c["path"] == "/hold/1" for c in server.calls))
             worker = psutil.Process(store.history(job)[0]["pid"])
             descendants = [(child.pid, child.create_time()) for child in worker.children(recursive=True)]
             assert descendants  # Real Chromium / Playwright processes, no mock provider.
+            # Deterministically prevent Playwright's driver from doing graceful
+            # EOF cleanup. The dispatcher itself must reap detached Chromium.
+            driver = next(child for child in worker.children() if Path(child.exe()).stem.lower() == "node")
+            driver.suspend()
             worker.kill()
+            if independent:
+                wait(lambda: store.show(job)["status"] == "UNKNOWN")
+                assert store.show(second_job)["status"] == "RUNNING"
+                assert psutil.Process(store.history(second_job)[0]["pid"]).is_running()
+                server.gates["1"].set()
             finish(process)
             assert store.show(job)["status"] == "UNKNOWN"
+            if independent:
+                assert store.show(second_job)["status"] == "SUCCEEDED"
 
             def gone():
                 for pid, birth in descendants:
@@ -436,6 +455,11 @@ def test_worker_browser_crash_reaps_owned_browser_descendants(tmp_path):
             wait(gone)
         finally:
             server.gates["0"].set()
+            server.gates["1"].set()
+            from poster.dispatcher.processes import terminate_tree
+
+            for pid, birth in reversed(descendants):
+                terminate_tree(pid, birth)
             if process.poll() is None:
                 process.kill()
                 process.wait()

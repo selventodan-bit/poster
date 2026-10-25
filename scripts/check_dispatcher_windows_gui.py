@@ -98,8 +98,38 @@ def check(executable, output):
     windows = Path(os.environ["SystemRoot"])
     process = window = service = None
     owned, workers_seen, scenarios, proofs = {}, {}, [], {}
+    observed_workers, unexpected_children = {}, []
+    monitor_done = threading.Event()
     phase, safe_error = "start", None
     canary = "PRIVATE_MAKER_DISPATCHER_4B1_CANARY"
+
+    def monitor():
+        while not monitor_done.wait(0.02):
+            current = service
+            if not current:
+                continue
+            try:
+                parent = psutil.Process(current["pid"])
+                if parent.create_time() != current["birth"]:
+                    continue
+                for child in parent.children():
+                    try:
+                        path = Path(child.exe()).resolve()
+                        if path != (executable.parent / "PosterWorker.exe").resolve():
+                            unexpected_children.append(path.name)
+                        else:
+                            observed_workers[child.pid] = {
+                                "executable": str(path),
+                                "parent_pid": parent.pid,
+                                "birth": child.create_time(),
+                            }
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+
+    monitor_thread = threading.Thread(target=monitor, name="frozen-process-evidence", daemon=True)
+    monitor_thread.start()
 
     def snapshot(path=observer):
         try:
@@ -236,6 +266,11 @@ def check(executable, output):
             raw = Path(row["report"]).read_bytes()
             assert hashlib.sha256(raw).hexdigest() == row["report_sha256"]
             row["public_report"] = json.loads(raw)
+            assert row["public_report"]["worker_frozen"]
+            assert (
+                Path(row["public_report"]["worker_executable"]).resolve()
+                == (executable.parent / "PosterWorker.exe").resolve()
+            )
         return row
 
     def select_job(job):
@@ -589,6 +624,11 @@ def check(executable, output):
             moved.rename(previous)
             executable = previous / executable.name
             scenarios.append("move_bundle_stable_queue_and_key")
+            monitor_done.set()
+            monitor_thread.join(3)
+            assert not unexpected_children
+            assert set(workers_seen) <= set(observed_workers)
+            proofs["os_process_observations"] = observed_workers
             for pid, birth in workers_seen.items():
                 try:
                     p = psutil.Process(pid)
@@ -640,6 +680,8 @@ def check(executable, output):
                 pass
         raise AssertionError("Frozen Dispatcher failure: " + phase) from None
     finally:
+        monitor_done.set()
+        monitor_thread.join(3)
         # Never upload private queue/snapshot/key files or observer files.
         for path in [observer, maker_observer]:
             path.unlink(missing_ok=True)

@@ -311,7 +311,7 @@ class EngineBridge:
 class LocalTestFailure(ValueError):
     """Only bounded state/codes leave a failed local test, never page/request data."""
 
-    def __init__(self, stage, result):
+    def __init__(self, stage, result, diagnostic=None):
         import re
 
         super().__init__(stage)
@@ -324,6 +324,8 @@ class LocalTestFailure(ValueError):
                 if isinstance(code, str) and re.fullmatch(r"[A-Z0-9_]{1,80}", code)
             ][:30],
         }
+        if diagnostic:
+            self.safe_details["publication"] = diagnostic
 
 
 async def local_test(workspace, progress):
@@ -341,13 +343,17 @@ async def local_test(workspace, progress):
             await session.start()
             await session.recognize()
             if session.result.state != "DETECTED":
-                raise LocalTestFailure("LOCAL_RECOGNITION_FAILED", session.result)
+                raise LocalTestFailure(
+                    "LOCAL_RECOGNITION_FAILED", session.result, getattr(session, "last_diagnostic", None)
+                )
             progress("Форма найдена. Проверяю браузерную публикацию…")
             await session.test_publish(
                 "Локальная проверка Ж", "Текст & <literal>\n日本語", "local-test", confirmed=True
             )
             if session.result.state != "HTTP_CANDIDATE":
-                raise LocalTestFailure("LOCAL_BROWSER_FAILED", session.result)
+                raise LocalTestFailure(
+                    "LOCAL_BROWSER_FAILED", session.result, getattr(session, "last_diagnostic", None)
+                )
             await session.close()
             progress("Браузер закрыт. Проверяю отдельный HTTP…")
             result = await session.verify_http("Локальная HTTP Ж", "HTTP & <literal>\n日本語", confirmed=True)
