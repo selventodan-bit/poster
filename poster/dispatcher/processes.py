@@ -4,6 +4,7 @@ import os
 import signal
 import subprocess
 import sys
+import time
 
 import psutil
 
@@ -25,9 +26,23 @@ def terminate_tree(pid, birth, *, group=False):
             children = process.children(recursive=True)
         except psutil.Error:
             children = []
-        targets = [(p.pid, p.create_time()) for p in children if p.is_running()]
+        targets = []
+        for child in children:
+            try:
+                targets.append((child.pid, child.create_time()))
+            except psutil.NoSuchProcess:
+                pass
     else:
         targets = []
+    signalled = []
+    for child_pid, child_birth in reversed(targets):
+        child = same_process(child_pid, child_birth)
+        if child:
+            try:
+                child.kill()
+                signalled.append(child)
+            except psutil.NoSuchProcess:
+                pass
     if group and os.name != "nt":
         # A surviving group keeps its original leader ID reserved. Do not signal
         # a new leader which has reused an old PID after that group disappeared.
@@ -36,18 +51,28 @@ def terminate_tree(pid, birth, *, group=False):
                 os.killpg(pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
-    for child_pid, child_birth in reversed(targets):
-        child = same_process(child_pid, child_birth)
-        if child:
-            try:
-                child.kill()
-            except psutil.NoSuchProcess:
-                pass
     if process:
         try:
             process.kill()
+            signalled.append(process)
         except psutil.NoSuchProcess:
             pass
+    # Observe exit without waitpid: Popen owns and must reap its child's actual
+    # exit code. A SIGKILL request alone is not proof that the process has exited.
+    deadline = time.monotonic() + 3
+
+    def alive(item):
+        try:
+            return item.is_running() and item.status() != psutil.STATUS_ZOMBIE
+        except psutil.NoSuchProcess:
+            return False
+
+    while signalled and time.monotonic() < deadline:
+        signalled = [p for p in signalled if alive(p)]
+        if signalled:
+            time.sleep(0.025)
+    if signalled:
+        raise DispatcherError("PROCESS_CONTROL_FAILED")
 
 
 def clean_descendants():
@@ -136,6 +161,7 @@ class WorkerProcess:
         if getattr(sys, "frozen", False):
             raise DispatcherError("PROCESS_CONTROL_FAILED")
         self.execution = execution
+        self.created = time.monotonic()
         self.process = self.job = None
         self.cancelled_at = self.reason = None
         self.started = False

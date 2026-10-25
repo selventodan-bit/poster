@@ -339,3 +339,27 @@ class Store:
 
     def stopping(self):
         return bool(self.db.execute("SELECT stop FROM control WHERE id=1").fetchone()[0])
+
+    def set_exit_code(self, run_id, code):
+        with self.transaction():
+            self.db.execute("UPDATE executions SET exit_code=? WHERE run_id=?", (code, run_id))
+
+    def invalidate_report(self, run_id):
+        with self.transaction():
+            execution = self.execution(run_id)
+            if execution["status"] == Status.SUCCEEDED:
+                self.db.execute(
+                    "UPDATE executions SET status='UNKNOWN',code='REPORT_INVALID' WHERE run_id=?", (run_id,)
+                )
+                self.db.execute(
+                    "UPDATE jobs SET status='UNKNOWN',updated=? WHERE id=? AND status='SUCCEEDED'",
+                    (time.time(), execution["job_id"]),
+                )
+                self.event(execution["job_id"], Status.UNKNOWN, "REPORT_INVALID")
+
+    def end_service(self, owner):
+        with self.transaction():
+            self.db.execute("UPDATE control SET owner=NULL WHERE id=1 AND owner=?", (owner,))
+
+    def counts(self):
+        return {r[0]: r[1] for r in self.db.execute("SELECT status,count(*) FROM jobs GROUP BY status")}
