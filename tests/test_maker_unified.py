@@ -67,6 +67,9 @@ def test_unified_native_record_edit_debug_profiles_and_linux_format(tmp_path):
         timeout=180,
     )
     if process.returncode:
+        for line in process.stdout.splitlines():
+            if line.startswith("::error title=Native Qt wait state::"):
+                print(line, flush=True)
         frames = re.findall(r'File "([^"]+)", line (\d+)', process.stderr)
         print(
             "::error::Native Qt failure at "
@@ -133,6 +136,22 @@ def scenario(root):
             if predicate():
                 return
             QTest.qWait(10)
+        print(
+            "::error title=Native Qt wait state::"
+            + json.dumps(
+                {
+                    "label": label,
+                    "busy": window.busy,
+                    "run_state": window.run_state,
+                    "last_results": [
+                        {k: r.get(k) for k in ("node_id", "action", "status", "error_code", "details")}
+                        for r in window.trace[-4:]
+                    ],
+                    "tools_bar": window.tools_tabs.tabBar().rect().getRect(),
+                }
+            ),
+            flush=True,
+        )
         raise AssertionError("Unified UI timeout: " + label)
 
     def action(name):

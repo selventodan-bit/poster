@@ -23,6 +23,7 @@ def check(executable, output):
     window = process = None
     phase = "start"
     completed = []
+    tab_scrolls = []
 
     def snapshot():
         # File sharing can briefly prevent an atomic snapshot from being read on Windows.
@@ -99,8 +100,20 @@ def check(executable, output):
                 continue
             visible = [titles.index(x[0]) for x in state.get("tools_tabs", [])]
             right = not visible or titles.index(label) > max(visible)
-            click("tools_scroll_right" if right else "tools_scroll_left")
+            name = "tools_scroll_right" if right else "tools_scroll_left"
+            before = state.get("tools_bar", {})
+            click(name)
             time.sleep(0.15)
+            after = snapshot()
+            tab_scrolls.append(
+                {
+                    "target": label,
+                    "button": name,
+                    "point": after.get("positions", {}).get(name),
+                    "before": [t["rect"][0] for t in before.get("tabs", [])],
+                    "after": [t["rect"][0] for t in after.get("tools_bar", {}).get("tabs", [])],
+                }
+            )
         s = wait(lambda s: any(x[0] == label for x in s.get("tools_tabs", [])), "tools " + label)
         mouse.click(coords=tuple(next(x[1] for x in s["tools_tabs"] if x[0] == label)))
         wait(lambda s: s.get("tools_page") == label, "tab " + label)
@@ -288,6 +301,10 @@ def check(executable, output):
             pass
         print("::error::Stage3B2 data GUI phase=" + phase, flush=True)
         state = snapshot()
+        print(
+            "::error title=Data GUI tab scrolls::" + json.dumps(tab_scrolls[-12:]),
+            flush=True,
+        )
         print(
             "::error title=Data GUI geometry::"
             + json.dumps(
