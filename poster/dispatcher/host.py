@@ -145,6 +145,32 @@ class Host:
     def running(self):
         return bool(self.thread and self.thread.is_alive())
 
+    def trace(self, phase):
+        """Payload-free lifecycle evidence, independent of SQLite's owner thread."""
+        try:
+            safe_json(
+                self.root / "service.json",
+                {
+                    "pid": os.getpid(),
+                    "birth": psutil.Process().create_time(),
+                    "phase": phase,
+                    "at": time.monotonic(),
+                    "commit": build_info()["commit"],
+                    "threads": [
+                        {
+                            "name": t.name
+                            if t.name in {"MainThread", "poster-rpc", "poster-scheduler"}
+                            else "background",
+                            "daemon": t.daemon,
+                            "alive": t.is_alive(),
+                        }
+                        for t in threading.enumerate()
+                    ],
+                },
+            )
+        except (OSError, DispatcherError):
+            pass  # Evidence failure must not prevent an explicit shutdown.
+
     def set_settings(self, settings):
         workers, per, timeout = (settings[k] for k in ["max_workers", "max_per_project", "timeout"])
         if (
@@ -373,6 +399,7 @@ class Host:
             return Dispatcher(self.store).reconcile()
         if op == "shutdown":
             self.store.request_stop()
+            self.trace("shutdown_requested")
             self.done.set()
             return True
         raise DispatcherError("PARAMETERS_INVALID")
@@ -382,7 +409,7 @@ class Host:
         if family == "AF_UNIX":
             Path(address).unlink(missing_ok=True)  # Only under the singleton host lock.
         listener = Listener(address, family=family, authkey=auth_key(self.root, create=True))
-        safe_json(self.root / "service.json", self.dispatch({"op": "ping"}))
+        self.trace("listening")
 
         def clients():
             while not self.done.is_set():
@@ -421,6 +448,7 @@ class Host:
                 clients()
             finally:
                 self.store.close()
+                self.trace("rpc_closed")
 
         thread = threading.Thread(target=manager, name="poster-rpc", daemon=True)
         thread.start()
@@ -428,10 +456,14 @@ class Host:
         # Finish the shutdown reply and close the RPC-owned SQLite connection
         # before Python tears down modules/daemon threads. In particular there
         # may be no scheduler thread to give the command thread time to finish.
+        self.trace("joining_rpc")
         thread.join()
         if self.thread:
+            self.trace("joining_scheduler")
             self.thread.join()  # Drain admitted jobs; do not tie this to GUI lifetime.
+        self.trace("closing_listener")
         listener.close()
+        self.trace("stopped")
 
 
 def main():
@@ -442,7 +474,13 @@ def main():
     try:
         with FileLock(str(root / "service.lock"), timeout=0):
             (root / "startup-error.json").unlink(missing_ok=True)
-            Host(root).serve()
+            host = Host(root)
+            import atexit
+
+            atexit.register(host.trace, "finalizing")
+            host.serve()
+            host.trace("releasing_host_lock")
+        host.trace("main_returning")
     except Exception as exc:
         from filelock import Timeout
 

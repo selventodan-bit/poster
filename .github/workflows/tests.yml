@@ -382,6 +382,35 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
 
+  dispatcher-frozen-lifecycle:
+    needs: windows-package
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install . -c requirements-recorder.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: poster-windows
+          path: release
+      - run: Expand-Archive release/poster-windows.zip 'Runtime Проверка'
+        shell: pwsh
+      - name: Frozen service idle, missing worker, and completed data job shutdown
+        run: python scripts/check_dispatcher_frozen_shutdown.py --bundle 'Runtime Проверка' --output .poster/frozen-lifecycle
+        env:
+          EXPECTED_POSTER_COMMIT: '${{ github.sha }}'
+          PYTHONUTF8: '1'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dispatcher-frozen-lifecycle
+          path: .poster/frozen-lifecycle/report.json
+          include-hidden-files: true
+          if-no-files-found: warn
+
   dispatcher-windows-package:
     needs: maker-windows-package
     runs-on: windows-latest

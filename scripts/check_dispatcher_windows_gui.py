@@ -710,6 +710,15 @@ def check(executable, output):
             print("\n::notice title=Frozen Dispatcher GUI evidence::" + json.dumps(report), flush=True)
     except Exception as exc:
         safe_error = type(exc).__name__
+        service_trace = {}
+        try:
+            service_trace = json.loads((root / "service.json").read_bytes())
+            candidate = psutil.Process(service["pid"])
+            service_trace["os_birth_matches"] = candidate.create_time() == service["birth"]
+            service_trace["os_threads"] = candidate.num_threads()
+            service_trace["os_state"] = candidate.status()
+        except (OSError, ValueError, psutil.Error, TypeError):
+            pass
         print(
             "\n::error title=Frozen Dispatcher GUI failure::"
             + json.dumps(
@@ -721,6 +730,7 @@ def check(executable, output):
                     "connected": snapshot().get("connected"),
                     "service": snapshot().get("service"),
                     "job_states": [r["status"] for r in all_jobs().values()],
+                    "service_trace": service_trace,
                 }
             ),
             flush=True,
