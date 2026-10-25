@@ -241,6 +241,11 @@ def check(executable, output):
         )
     except Exception as exc:
         report = dict(status="FAILED", phase=phase, exception_type=type(exc).__name__, commit=build["commit"])
+        report.update(
+            service_code=snapshot().get("error"),
+            visible_controls=sorted(snapshot().get("widgets", {})),
+            jobs=[{"status": r["status"], "attempt": r["attempt"]} for r in rows("jobs")],
+        )
         print("::error title=Scheduler frozen GUI::" + json.dumps(report), flush=True)
         if window:
             try:

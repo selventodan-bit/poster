@@ -5,6 +5,9 @@ on:
 jobs:
   frozen-gui-diagnosis:
     runs-on: windows-latest
+    permissions:
+      contents: read
+      actions: read
     timeout-minutes: 10
     env:
       EXPECTED_POSTER_COMMIT: '9b5b68f18760dcfc31880d4a415b14f65b0e10f6'
