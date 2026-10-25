@@ -28,6 +28,23 @@ def queue(store, source, key=None):
     return store.enqueue(project_id, version, source, seal({"inputs": {}}), key=key)
 
 
+def test_batch_cancel_is_atomic_and_retains_active_cancellation_contract(tmp_path):
+    source = tmp_path / "batch.postergraph.json"
+    project(source)
+    store = Store(tmp_path / "batch.sqlite")
+    try:
+        jobs = [queue(store, source) for _ in range(3)]
+        execution = store.claim("owner", 1, 1)
+        with pytest.raises(DispatcherError):
+            store.cancel_many([jobs[1], "not-a-job"])
+        assert store.show(jobs[1])["status"] == "PENDING"
+        assert store.cancel_many(jobs) == ["LEASED", "CANCELLED", "CANCELLED"]
+        assert store.show(jobs[0])["cancel_requested"]
+        assert store.execution(execution["run_id"])["status"] == "LEASED"
+    finally:
+        store.close()
+
+
 def test_store_migration_dedup_transitions_history_and_legacy_separation(tmp_path):
     source = tmp_path / "project.postergraph.json"
     project(source)

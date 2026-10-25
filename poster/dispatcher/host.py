@@ -387,7 +387,7 @@ class Host:
                 result["report"] = json.loads(plain_path(execution["report"]).read_bytes())
             return result
         if op == "cancel":
-            return [self.store.cancel(item)["status"] for item in value["ids"]]
+            return self.store.cancel_many(value["ids"])
         if op == "start":
             self.start()
             return True

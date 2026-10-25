@@ -99,7 +99,7 @@ def check(executable, output):
     windows = Path(os.environ["SystemRoot"])
     process = window = service = None
     owned, workers_seen, scenarios, proofs = {}, {}, [], {}
-    observed_workers, unexpected_children = {}, []
+    observed_workers, unexpected_children, console_helpers = {}, [], {}
     monitor_done = threading.Event()
     phase, safe_error = "start", None
     canary = "PRIVATE_MAKER_DISPATCHER_4B1_CANARY"
@@ -118,7 +118,9 @@ def check(executable, output):
                 for child in parent.children():
                     try:
                         path = Path(child.exe()).resolve()
-                        if path != (executable.parent / "PosterWorker.exe").resolve():
+                        if path == (windows / "System32/conhost.exe").resolve():
+                            console_helpers[child.pid] = str(path)
+                        elif path != (executable.parent / "PosterWorker.exe").resolve():
                             unexpected_children.append(path.name)
                         else:
                             observed_workers[child.pid] = {
@@ -543,12 +545,11 @@ def check(executable, output):
                 maker_click("variable_secret")
             maker_click("var_save")
             wait(
-                lambda s: bool(
-                    s.get("graph", {})
-                    .get("variables", {})
-                    .get("credential", {})
-                    .get("value", {})
-                    .get("secret_ref")
+                lambda s: (
+                    isinstance(
+                        s.get("graph", {}).get("variables", {}).get("credential", {}).get("value"), dict
+                    )
+                    and bool(s["graph"]["variables"]["credential"]["value"].get("secret_ref"))
                 ),
                 "Maker protected",
                 path=maker_observer,
@@ -685,6 +686,7 @@ def check(executable, output):
             phase = "verify every worker was observed through OS information"
             assert set(workers_seen) <= set(observed_workers)
             proofs["os_process_observations"] = observed_workers
+            proofs["windows_console_helpers"] = console_helpers
             phase = "verify all worker processes exited"
             for pid, birth in workers_seen.items():
                 try:

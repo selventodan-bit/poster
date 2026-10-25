@@ -312,18 +312,28 @@ class Store:
 
     def cancel(self, job_id):
         with self.transaction():
-            job = self.payload(job_id)
-            if job["status"] == Status.PENDING:
-                self.db.execute(
-                    "UPDATE jobs SET status='CANCELLED',cancel_requested=1,updated=? WHERE id=?",
-                    (time.time(), job_id),
-                )
-                self.event(job_id, Status.CANCELLED, "CANCEL_REQUESTED")
-            elif job["status"] in ACTIVE:
-                self.db.execute(
-                    "UPDATE jobs SET cancel_requested=1,updated=? WHERE id=?", (time.time(), job_id)
-                )
+            self._cancel(job_id)
         return self.show(job_id)
+
+    def _cancel(self, job_id):
+        job = self.payload(job_id, private=False)
+        if job["status"] == Status.PENDING:
+            self.db.execute(
+                "UPDATE jobs SET status='CANCELLED',cancel_requested=1,updated=? WHERE id=?",
+                (time.time(), job_id),
+            )
+            self.event(job_id, Status.CANCELLED, "CANCEL_REQUESTED")
+        elif job["status"] in ACTIVE:
+            self.db.execute("UPDATE jobs SET cancel_requested=1,updated=? WHERE id=?", (time.time(), job_id))
+
+    def cancel_many(self, ids):
+        """One durable transaction for a UI selection, retaining single-job semantics."""
+        if not isinstance(ids, list) or len(ids) > 1000:
+            raise DispatcherError("PARAMETERS_INVALID")
+        with self.transaction():
+            for job_id in ids:
+                self._cancel(job_id)
+        return [self.payload(job_id, private=False)["status"] for job_id in ids]
 
     def active(self):
         return [
