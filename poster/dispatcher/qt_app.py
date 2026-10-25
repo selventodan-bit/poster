@@ -121,6 +121,27 @@ class InputsDialog(QDialog):
         self.timeout.setRange(1, 86400)
         self.timeout.setValue(parent.timeout.value())
         form.addRow("Время этого задания, с", self.timeout)
+        self.profile_path, self.profile_key = QLineEdit(), QLineEdit()
+        self.profile_path.setObjectName("job_profile")
+        self.profile_key.setObjectName("job_profile_key")
+        self.profile_path.setPlaceholderText("Необязательно: profile_….enc; иначе новая сессия")
+        self.profile_key.setPlaceholderText("session.key Maker для этого профиля")
+        if item.get("browser"):
+            for title, edit, pattern in [
+                ("Профиль Chrome", self.profile_path, "Профиль (profile_*.enc)"),
+                ("Ключ профиля", self.profile_key, "Ключ (session.key *.key)"),
+            ]:
+                row = QWidget()
+                row_layout = QHBoxLayout(row)
+                row_layout.addWidget(edit)
+                browse = QPushButton("Выбрать…")
+                browse.clicked.connect(
+                    lambda checked=False, edit=edit, title=title, pattern=pattern: edit.setText(
+                        QFileDialog.getOpenFileName(self, title, "", pattern)[0]
+                    )
+                )
+                row_layout.addWidget(browse)
+                form.addRow(title, row)
         for definition in item["inputs"]:
             row = QWidget()
             line = QHBoxLayout(row)
@@ -568,7 +589,19 @@ class DispatcherWindow(QMainWindow):
                 return
             inputs, secrets = dialog.values()
             batch.append(
-                {"id": item["id"], "inputs": inputs, "secrets": secrets, "timeout": dialog.timeout.value()}
+                {
+                    "id": item["id"],
+                    "inputs": inputs,
+                    "secrets": secrets,
+                    "timeout": dialog.timeout.value(),
+                    "profile_root": str(Path(dialog.profile_path.text()).parent)
+                    if dialog.profile_path.text()
+                    else None,
+                    "profile_id": Path(dialog.profile_path.text()).stem
+                    if dialog.profile_path.text()
+                    else None,
+                    "profile_key_file": dialog.profile_key.text() or None,
+                }
             )
             dialog.deleteLater()
         if batch:

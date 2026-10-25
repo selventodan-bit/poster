@@ -338,6 +338,7 @@ def main(argv=None):
                     store.root / "runs" / args.run / "worker-failure.json",
                     {
                         "type": type(exc).__name__,
+                        "system_error": getattr(exc, "system_error", None),
                         "frames": [
                             Path(f.filename).name + ":" + str(f.lineno)
                             for f in traceback.extract_tb(exc.__traceback__)[-6:]

@@ -317,6 +317,9 @@ class Host:
                             timeout=item.get("timeout", self.settings["timeout"]),
                             inputs=item.get("inputs"),
                             secrets=item.get("secrets"),
+                            profile_root=item.get("profile_root"),
+                            profile_id=item.get("profile_id"),
+                            profile_key_file=item.get("profile_key_file"),
                             key=value["request_id"] + ":" + item["id"],
                         )
                     )

@@ -28,6 +28,7 @@ def enqueue(
     profile_id=None,
     key_file=None,
     project_key=None,
+    profile_key_file=None,
 ):
     if key is not None and (previous := store.find_key(key)):
         return previous
@@ -46,6 +47,7 @@ def enqueue(
         profile_root=profile_root,
         profile_id=profile_id,
         project_key=project_key,
+        profile_key_file=profile_key_file,
     )
 
 
@@ -62,6 +64,7 @@ def enqueue_snapshot(
     profile_root=None,
     profile_id=None,
     project_key=None,
+    profile_key_file=None,
 ):
     """Admit the inspected immutable version, never recapture a moving source."""
     if key is not None and (previous := store.find_key(key)):
@@ -103,7 +106,20 @@ def enqueue_snapshot(
         from ..maker.profiles import Profiles
 
         profiles = Profiles(plain_path(profile_root))
-        profile = profiles.open(profile_id)
+        if profile_key_file:
+            from cryptography.fernet import Fernet
+            from ..maker.profiles import Profile
+            from ..maker.storage import read_bounded
+
+            try:
+                cipher = Fernet(plain_path(profile_key_file).read_bytes().strip())
+                profile = Profile(
+                    profiles, profile_id, json.loads(cipher.decrypt(read_bounded(profiles.path(profile_id))))
+                )
+            except Exception as exc:
+                raise DispatcherError("PROJECT_KEY_REQUIRED") from exc
+        else:
+            profile = profiles.open(profile_id)
         envelope["profile"] = {
             "key": profile_id,
             "data": profile.data,

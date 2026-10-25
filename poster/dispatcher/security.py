@@ -4,7 +4,6 @@ import json
 import os
 from pathlib import Path
 import stat
-import subprocess
 
 from filelock import FileLock
 
@@ -75,17 +74,74 @@ def windows_sid():
 def restrict(path, directory=False):
     path = plain_path(path)
     if os.name == "nt":
-        grant = "*" + windows_sid() + (":(OI)(CI)F" if directory else ":F")
-        result = subprocess.run(
-            ["icacls", str(path), "/inheritance:r", "/grant:r", grant],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
-        if result.returncode:
-            raise DispatcherError("PATH_FORBIDDEN")
+        windows_dacl(path, directory=directory)
     else:
         path.chmod(0o700 if directory else 0o600)
+
+
+def windows_dacl(path, *, directory=False):
+    """Set the same owner-only protected ACL without spawning console utilities.
+
+    Workers clean their entire process tree before confirming a report; ACL
+    enforcement must not recreate console descendants after that cleanup.
+    """
+    import ctypes
+    from ctypes import wintypes as w
+
+    advapi = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes = [
+        w.LPCWSTR,
+        w.DWORD,
+        ctypes.POINTER(ctypes.c_void_p),
+        ctypes.POINTER(w.ULONG),
+    ]
+    advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW.restype = w.BOOL
+    advapi.GetSecurityDescriptorDacl.argtypes = [
+        ctypes.c_void_p,
+        ctypes.POINTER(w.BOOL),
+        ctypes.POINTER(ctypes.c_void_p),
+        ctypes.POINTER(w.BOOL),
+    ]
+    advapi.GetSecurityDescriptorDacl.restype = w.BOOL
+    advapi.SetNamedSecurityInfoW.argtypes = [
+        w.LPWSTR,
+        w.DWORD,
+        w.DWORD,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+    ]
+    advapi.SetNamedSecurityInfoW.restype = w.DWORD
+    kernel.LocalFree.argtypes = [ctypes.c_void_p]
+    kernel.LocalFree.restype = ctypes.c_void_p
+    descriptor, acl = ctypes.c_void_p(), ctypes.c_void_p()
+    present, defaulted = w.BOOL(), w.BOOL()
+    sddl = "D:P(A;" + ("OICI" if directory else "") + ";FA;;;" + windows_sid() + ")"
+
+    def failed(number):
+        error = DispatcherError("PATH_FORBIDDEN")
+        error.system_error = int(number)
+        return error
+
+    if not advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+        sddl, 1, ctypes.byref(descriptor), None
+    ):
+        raise failed(ctypes.get_last_error())
+    try:
+        if (
+            not advapi.GetSecurityDescriptorDacl(
+                descriptor, ctypes.byref(present), ctypes.byref(acl), ctypes.byref(defaulted)
+            )
+            or not present
+        ):
+            raise failed(ctypes.get_last_error())
+        result = advapi.SetNamedSecurityInfoW(str(path), 1, 0x80000004, None, None, acl, None)
+        if result:
+            raise failed(result)
+    finally:
+        kernel.LocalFree(descriptor)
 
 
 def private_dir(path):
