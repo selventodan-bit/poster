@@ -1,0 +1,341 @@
+"""Separate WAL SQLite queue with checked, transactional state transitions."""
+
+from contextlib import contextmanager
+import hashlib
+import json
+from pathlib import Path
+import sqlite3
+import time
+import uuid
+
+from .models import ACTIVE, MESSAGES, TERMINAL, TRANSITIONS, DispatcherError, Status
+from .security import plain_path, private_dir, restrict
+
+APPLICATION_ID = 0x50445350
+SCHEMA_VERSION = 1
+
+SCHEMA = """
+CREATE TABLE projects(
+ project_id TEXT NOT NULL, version TEXT NOT NULL, source TEXT NOT NULL, registered REAL NOT NULL,
+ PRIMARY KEY(project_id,version));
+CREATE TABLE jobs(
+ id TEXT PRIMARY KEY, project_id TEXT NOT NULL, version TEXT NOT NULL,
+ inputs_cipher BLOB NOT NULL, input_names TEXT NOT NULL, dedup_hash TEXT UNIQUE,
+ status TEXT NOT NULL, attempt INTEGER NOT NULL DEFAULT 0, timeout REAL NOT NULL CHECK(timeout>0),
+ cancel_requested INTEGER NOT NULL DEFAULT 0 CHECK(cancel_requested IN (0,1)),
+ owner TEXT, created REAL NOT NULL, updated REAL NOT NULL,
+ FOREIGN KEY(project_id,version) REFERENCES projects(project_id,version));
+CREATE TABLE executions(
+ run_id TEXT PRIMARY KEY, job_id TEXT NOT NULL REFERENCES jobs(id), attempt INTEGER NOT NULL,
+ owner TEXT NOT NULL, status TEXT NOT NULL, leased REAL NOT NULL, started REAL, finished REAL,
+ pid INTEGER, birth REAL, exit_code INTEGER, code TEXT, report TEXT, report_sha256 TEXT,
+ last_confirmed_step TEXT, effects_possible INTEGER NOT NULL DEFAULT 0,
+ UNIQUE(job_id,attempt));
+CREATE TABLE events(
+ id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT NOT NULL REFERENCES jobs(id),
+ status TEXT NOT NULL, code TEXT NOT NULL, at REAL NOT NULL);
+CREATE TABLE control(id INTEGER PRIMARY KEY CHECK(id=1), owner TEXT, stop INTEGER NOT NULL DEFAULT 0);
+INSERT INTO control(id) VALUES(1);
+CREATE INDEX jobs_queue ON jobs(status,created);
+CREATE INDEX executions_job ON executions(job_id,attempt);
+CREATE INDEX events_job ON events(job_id,id);
+"""
+
+
+def dedup_hash(value):
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value or len(value) > 1000:
+        raise DispatcherError("PARAMETERS_INVALID")
+    return hashlib.sha256(value.encode()).hexdigest()
+
+
+class Store:
+    def __init__(self, path):
+        self.path = plain_path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.root = private_dir(self.path.with_name(self.path.name + ".data"))
+        if not self.path.exists():
+            self.path.touch(mode=0o600, exist_ok=False)
+            restrict(self.path)
+        self.db = sqlite3.connect(self.path, timeout=30, isolation_level=None)
+        self.db.row_factory = sqlite3.Row
+        try:
+            self.db.execute("PRAGMA busy_timeout=30000")
+            tables = {r[0] for r in self.db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            app = self.db.execute("PRAGMA application_id").fetchone()[0]
+            version = self.db.execute("PRAGMA user_version").fetchone()[0]
+            if tables and (app != APPLICATION_ID or version != SCHEMA_VERSION):
+                raise DispatcherError("STORE_INVALID")
+            self.db.execute("PRAGMA foreign_keys=ON")
+            self.db.execute("PRAGMA journal_mode=WAL")
+            self.db.execute("PRAGMA synchronous=FULL")
+            with self.transaction():
+                # Recheck under the write lock: concurrent first opens are harmless.
+                if self.db.execute("PRAGMA user_version").fetchone()[0] == 0:
+                    for statement in SCHEMA.split(";"):
+                        if statement.strip():
+                            self.db.execute(statement)
+                    states = ",".join("'" + s.value + "'" for s in Status)
+                    allowed = " OR ".join(
+                        "(OLD.status='"
+                        + old.value
+                        + "' AND NEW.status IN ("
+                        + ",".join("'" + s.value + "'" for s in targets)
+                        + "))"
+                        for old, targets in TRANSITIONS.items()
+                    )
+                    self.db.execute(
+                        f"CREATE TRIGGER jobs_insert BEFORE INSERT ON jobs WHEN NEW.status NOT IN ({states}) BEGIN SELECT RAISE(ABORT,'INVALID_STATE'); END"
+                    )
+                    self.db.execute(
+                        f"CREATE TRIGGER jobs_transition BEFORE UPDATE OF status ON jobs WHEN OLD.status!=NEW.status AND NOT ({allowed}) BEGIN SELECT RAISE(ABORT,'INVALID_TRANSITION'); END"
+                    )
+                    self.db.execute(f"PRAGMA application_id={APPLICATION_ID}")
+                    self.db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+            for suffix in ("", "-wal", "-shm"):
+                item = Path(str(self.path) + suffix)
+                if item.exists():
+                    restrict(item)
+        except Exception:
+            self.db.close()
+            raise
+
+    def close(self):
+        self.db.close()
+
+    @contextmanager
+    def transaction(self):
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            yield
+        except BaseException:
+            self.db.rollback()
+            raise
+        else:
+            self.db.commit()
+
+    def event(self, job_id, status, code=""):
+        self.db.execute(
+            "INSERT INTO events(job_id,status,code,at) VALUES(?,?,?,?)", (job_id, status, code, time.time())
+        )
+        self.db.execute(
+            "DELETE FROM events WHERE job_id=? AND id NOT IN (SELECT id FROM events WHERE job_id=? ORDER BY id DESC LIMIT 200)",
+            (job_id, job_id),
+        )
+        self.db.execute(
+            "DELETE FROM events WHERE id NOT IN (SELECT id FROM events ORDER BY id DESC LIMIT 10000)"
+        )
+
+    def find_key(self, key):
+        row = self.db.execute("SELECT id FROM jobs WHERE dedup_hash=?", (dedup_hash(key),)).fetchone()
+        return row[0] if row else None
+
+    def enqueue(self, project_id, version, source, inputs_cipher, input_names=(), *, key=None, timeout=300):
+        if not 0.05 <= timeout <= 3600:
+            raise DispatcherError("PARAMETERS_INVALID")
+        now, job_id = time.time(), uuid.uuid4().hex
+        hashed = dedup_hash(key)
+        with self.transaction():
+            if hashed:
+                previous = self.db.execute("SELECT id FROM jobs WHERE dedup_hash=?", (hashed,)).fetchone()
+                if previous:
+                    return previous[0]
+            self.db.execute(
+                "INSERT OR IGNORE INTO projects VALUES(?,?,?,?)", (project_id, version, str(source), now)
+            )
+            self.db.execute(
+                "INSERT INTO jobs(id,project_id,version,inputs_cipher,input_names,dedup_hash,status,timeout,created,updated) VALUES(?,?,?,?,?,?,'PENDING',?,?,?)",
+                (
+                    job_id,
+                    project_id,
+                    version,
+                    inputs_cipher,
+                    json.dumps(sorted(input_names)),
+                    hashed,
+                    timeout,
+                    now,
+                    now,
+                ),
+            )
+            self.event(job_id, Status.PENDING)
+        return job_id
+
+    def payload(self, job_id):
+        row = self.db.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+        if row is None:
+            raise DispatcherError("JOB_MISSING")
+        return dict(row)
+
+    def show(self, job_id):
+        value = self.payload(job_id)
+        value.pop("inputs_cipher")
+        value.pop("dedup_hash")
+        value["input_names"] = json.loads(value["input_names"])
+        value["history"] = self.history(job_id)
+        value["events"] = [
+            dict(r)
+            for r in self.db.execute(
+                "SELECT status,code,at FROM events WHERE job_id=? ORDER BY id DESC LIMIT 200", (job_id,)
+            )
+        ]
+        return value
+
+    def rows(self, limit=100):
+        return [
+            dict(r)
+            for r in self.db.execute(
+                "SELECT id,project_id,version,status,attempt,timeout,cancel_requested,created,updated FROM jobs ORDER BY created LIMIT ?",
+                (max(1, min(limit, 1000)),),
+            )
+        ]
+
+    def history(self, job_id):
+        return [
+            dict(r)
+            for r in self.db.execute(
+                "SELECT * FROM executions WHERE job_id=? ORDER BY attempt DESC LIMIT 1000", (job_id,)
+            )
+        ]
+
+    def execution(self, run_id):
+        row = self.db.execute("SELECT * FROM executions WHERE run_id=?", (run_id,)).fetchone()
+        if row is None:
+            raise DispatcherError("JOB_MISSING")
+        return dict(row)
+
+    def claim(self, owner, max_workers, max_per_project):
+        with self.transaction():
+            if (
+                self.db.execute("SELECT count(*) FROM jobs WHERE status IN ('LEASED','RUNNING')").fetchone()[
+                    0
+                ]
+                >= max_workers
+            ):
+                return None
+            row = self.db.execute(
+                "SELECT * FROM jobs j WHERE status='PENDING' AND (SELECT count(*) FROM jobs a WHERE a.project_id=j.project_id AND a.status IN ('LEASED','RUNNING'))<? ORDER BY created LIMIT 1",
+                (max_per_project,),
+            ).fetchone()
+            if row is None:
+                return None
+            now, run_id = time.time(), uuid.uuid4().hex
+            self.db.execute(
+                "UPDATE jobs SET status='LEASED',attempt=attempt+1,owner=?,updated=? WHERE id=? AND status='PENDING'",
+                (owner, now, row["id"]),
+            )
+            self.db.execute(
+                "INSERT INTO executions(run_id,job_id,attempt,owner,status,leased) VALUES(?,?,?,?,'LEASED',?)",
+                (run_id, row["id"], row["attempt"] + 1, owner, now),
+            )
+            self.event(row["id"], Status.LEASED)
+        return self.execution(run_id)
+
+    def record_process(self, run_id, owner, pid, birth):
+        with self.transaction():
+            return bool(
+                self.db.execute(
+                    "UPDATE executions SET pid=?,birth=? WHERE run_id=? AND owner=? AND status='LEASED' AND pid IS NULL",
+                    (pid, birth, run_id, owner),
+                ).rowcount
+            )
+
+    def start(self, run_id, owner, pid):
+        with self.transaction():
+            execution = self.execution(run_id)
+            job = self.payload(execution["job_id"])
+            if (
+                execution["owner"] != owner
+                or execution["pid"] != pid
+                or job["status"] != "LEASED"
+                or job["cancel_requested"]
+            ):
+                return False
+            now = time.time()
+            self.db.execute("UPDATE executions SET status='RUNNING',started=? WHERE run_id=?", (now, run_id))
+            self.db.execute("UPDATE jobs SET status='RUNNING',updated=? WHERE id=?", (now, job["id"]))
+            self.event(job["id"], Status.RUNNING)
+        return True
+
+    def progress(self, run_id, *, confirmed=None, effects=False):
+        with self.transaction():
+            self.db.execute(
+                "UPDATE executions SET last_confirmed_step=coalesce(?,last_confirmed_step),effects_possible=max(effects_possible,?) WHERE run_id=? AND status='RUNNING'",
+                (confirmed, int(effects), run_id),
+            )
+
+    def complete(self, run_id, status, *, code="", exit_code=None, report=None, report_sha256=None):
+        status = Status(status)
+        if status not in TERMINAL or (code and code not in MESSAGES):
+            raise DispatcherError("PARAMETERS_INVALID")
+        with self.transaction():
+            execution = self.execution(run_id)
+            job = self.payload(execution["job_id"])
+            if job["owner"] != execution["owner"] or job["status"] not in ACTIVE:
+                return False
+            now = time.time()
+            self.db.execute(
+                "UPDATE executions SET status=?,finished=?,code=?,exit_code=?,report=?,report_sha256=? WHERE run_id=?",
+                (status, now, code, exit_code, str(report) if report else None, report_sha256, run_id),
+            )
+            self.db.execute("UPDATE jobs SET status=?,updated=? WHERE id=?", (status, now, job["id"]))
+            self.event(job["id"], status, code)
+        return True
+
+    def cancel(self, job_id):
+        with self.transaction():
+            job = self.payload(job_id)
+            if job["status"] == Status.PENDING:
+                self.db.execute(
+                    "UPDATE jobs SET status='CANCELLED',cancel_requested=1,updated=? WHERE id=?",
+                    (time.time(), job_id),
+                )
+                self.event(job_id, Status.CANCELLED, "CANCEL_REQUESTED")
+            elif job["status"] in ACTIVE:
+                self.db.execute(
+                    "UPDATE jobs SET cancel_requested=1,updated=? WHERE id=?", (time.time(), job_id)
+                )
+        return self.show(job_id)
+
+    def active(self):
+        return [
+            dict(r)
+            for r in self.db.execute(
+                "SELECT e.* FROM executions e JOIN jobs j ON j.id=e.job_id WHERE j.status IN ('LEASED','RUNNING') AND e.attempt=j.attempt"
+            )
+        ]
+
+    def recover_unstarted(self, run_id):
+        with self.transaction():
+            execution = self.execution(run_id)
+            if execution["status"] != Status.LEASED or execution["pid"] is not None:
+                return False
+            self.db.execute(
+                "UPDATE jobs SET status='PENDING',owner=NULL,updated=? WHERE id=? AND status='LEASED'",
+                (time.time(), execution["job_id"]),
+            )
+            self.db.execute(
+                "UPDATE executions SET status='FAILED',finished=?,code='NOT_STARTED' WHERE run_id=?",
+                (time.time(), run_id),
+            )
+            self.event(execution["job_id"], Status.PENDING, "NOT_STARTED")
+        return True
+
+    def review(self, job_id):
+        with self.transaction():
+            if self.db.execute(
+                "UPDATE jobs SET status='REVIEW_REQUIRED',updated=? WHERE id=? AND status='UNKNOWN'",
+                (time.time(), job_id),
+            ).rowcount:
+                self.event(job_id, Status.REVIEW_REQUIRED, "REVIEW_REQUIRED")
+
+    def request_stop(self):
+        with self.transaction():
+            self.db.execute("UPDATE control SET stop=1 WHERE id=1")
+
+    def begin_service(self, owner):
+        with self.transaction():
+            self.db.execute("UPDATE control SET owner=?,stop=0 WHERE id=1", (owner,))
+
+    def stopping(self):
+        return bool(self.db.execute("SELECT stop FROM control WHERE id=1").fetchone()[0])
