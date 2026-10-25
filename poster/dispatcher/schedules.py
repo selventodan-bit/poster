@@ -114,7 +114,7 @@ class Schedules:
         rows = [
             self.public(dict(r))
             for r in self.db.execute(
-                "SELECT * FROM schedules WHERE "
+                "SELECT id,project_id,version,name,spec,timeout,enabled,deleted,paused_code,next_due,created,updated FROM schedules WHERE "
                 + where
                 + " ORDER BY "
                 + order
@@ -178,7 +178,7 @@ class Scheduler:
         # Pauses also cover manual jobs with an uncertain external effect.
         with self.store.transaction():
             self.db.execute(
-                "UPDATE schedules SET paused_code='SCHEDULE_REVIEW' WHERE deleted=0 AND project_id IN (SELECT j.project_id FROM jobs j LEFT JOIN schedule_reviews r ON r.job_id=j.id WHERE j.status IN ('UNKNOWN','REVIEW_REQUIRED') AND r.job_id IS NULL)"
+                "UPDATE schedules SET paused_code='SCHEDULE_REVIEW' WHERE deleted=0 AND paused_code!='SCHEDULE_REVIEW' AND project_id IN (SELECT j.project_id FROM jobs j LEFT JOIN schedule_reviews r ON r.job_id=j.id WHERE j.status IN ('UNKNOWN','REVIEW_REQUIRED') AND r.job_id IS NULL)"
             )
         ids = [
             r[0]

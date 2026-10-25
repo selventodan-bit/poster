@@ -60,6 +60,7 @@ def check(executable, output):
 
     def click(name):
         state = wait(lambda s: s.get("widgets", {}).get(name, {}).get("enabled"), name)
+        window.set_focus()
         point = state["widgets"][name]
         mouse.click(coords=(point["x"], point["y"]))
 
@@ -79,6 +80,7 @@ def check(executable, output):
 
     def tab(index):
         state = wait(lambda s: s.get("connected") and not s.get("busy"), "idle")
+        window.set_focus()
         point = state["tabs"][index]
         mouse.click(coords=(point["x"], point["y"]))
 
@@ -88,6 +90,7 @@ def check(executable, output):
         open_portable(executable)
         window = Desktop(backend="win32").window(title="Poster Dispatcher — очередь проектов")
         window.wait("visible", timeout=40)
+        window.set_focus()
         process = psutil.Process(window.process_id())
         owned[process.pid] = process.create_time()
         state = wait(lambda s: s.get("connected") and not s.get("busy"), "connected")
