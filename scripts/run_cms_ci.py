@@ -380,6 +380,34 @@ class Installation:
             subprocess.run(["docker", "network", "rm", self.network], stdout=subprocess.DEVNULL, check=False)
 
 
+async def publication_window(install):
+    if install.engine != "smf":
+        return None
+    # Pinned SMF Sources/Security.php::spamProtection uses integer time() and
+    # DELETE ... WHERE log_time < time()-2 for this installer-created admin.
+    # A 2.1-second sleep can leave a gap of exactly 2: the strict comparison
+    # retains the row and the next POST is rejected. Observe the real gate.
+    query = """require 'Settings.php';
+$connection = new mysqli($db_server, $db_user, $db_passwd, $db_name);
+$last = (int) $connection->query("SELECT MAX(log_time) FROM " . $db_prefix . "log_floodcontrol WHERE log_type='post'")->fetch_row()[0];
+$now = time();
+echo json_encode(['ready'=>$last < $now - 2, 'gap'=>$now-$last, 'limit'=>2]);"""
+    deadline = time.monotonic() + 10
+    observed_closed_at_two = False
+    while time.monotonic() < deadline:
+        result = await asyncio.to_thread(install.exec, ["php", "-r", query])
+        state = json.loads(result.stdout)
+        observed_closed_at_two |= state["gap"] == 2 and not state["ready"]
+        if state["ready"]:
+            return {
+                "integer_gap": state["gap"],
+                "limit": state["limit"],
+                "strict_boundary_at_two_observed": observed_closed_at_two,
+            }
+        await asyncio.sleep(0.1)
+    raise AssertionError("Original SMF publication window did not open")
+
+
 async def publication(install, directory, kb_path):
     engine, base = install.engine, install.base
     knowledge = KnowledgeBase(kb_path)
@@ -432,9 +460,8 @@ async def publication(install, directory, kb_path):
             assert transfer.get("applied") and transfer.get("bindings", 0) > 0, transfer
             assert preflight.get("writes") == 0 and not preflight.get("http_verified"), preflight
         await session.close()
-        # Respect original server flood intervals. Never disable or retry them.
-        delay = 2.1 if engine == "smf" else 0
-        await asyncio.sleep(delay)
+        # Observe readiness before a single write; never disable or retry flood control.
+        flood_windows = [await publication_window(install)]
         trial = await session.verify_http(
             "HTTP " + unique, "Independent HTTP Unicode Ж & body " + unique, confirmed=True
         )
@@ -467,7 +494,7 @@ async def publication(install, directory, kb_path):
         assert trial.status == "SUCCEEDED", (trial.status, trial.reason, trial.operations)
         project_path = directory / "project"
         session.save(project_path)
-        await asyncio.sleep(delay)
+        flood_windows.append(await publication_window(install))
         # Load from disk into the normal HTTP runtime after Recorder has closed.
         replay = await Runtime(load_project(project_path)).run(
             {
@@ -493,6 +520,7 @@ async def publication(install, directory, kb_path):
             "http_operations": trial.operations,
             "result_url": replay.result_url,
             "navigation_actions": len(session.result.navigation),
+            "publication_windows": flood_windows,
         }
     finally:
         await session.close()

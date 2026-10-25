@@ -102,3 +102,19 @@ def test_real_saved_examples_in_a_fresh_worker(tmp_path, name):
     finally:
         worker.close(force=True)
         store.close()
+
+
+def test_unrelated_browser_dependency_never_weakens_data_only_worker(tmp_path):
+    directory = tmp_path / "source"
+    directory.mkdir()
+    browser = chain("unused browser", [("Browser.OpenURL", {"url": "https://never-open.invalid/"})])
+    save_graph(directory / "unrelated.postergraph.json", browser, Vault())
+    graph = chain("data only", [("Files.WriteText", {"path": "result.txt", "text": "data"})])
+    store, job, execution, worker = start_worker(tmp_path, graph)
+    try:
+        assert worker.process.wait(timeout=15) == 0
+        report = json.loads(Path(store.history(job)[0]["report"]).read_text())
+        assert report["browser_imports_forbidden"] and report["gui_imports_forbidden"]
+    finally:
+        worker.close(force=True)
+        store.close()

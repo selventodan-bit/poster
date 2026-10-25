@@ -101,9 +101,11 @@ class Dispatcher:
         try:
             with self.lock():
                 self.recover()
-                for job in self.store.rows(1000):
-                    if job["status"] == Status.UNKNOWN:
-                        self.store.review(job["id"])
+                jobs = self.store.db.execute(
+                    "SELECT id FROM jobs WHERE status='UNKNOWN' ORDER BY created LIMIT 1000"
+                ).fetchall()
+                for job in jobs:
+                    self.store.review(job["id"])
                 return {"status": "RECONCILED", "counts": self.store.counts(), "executed": 0}
         except Timeout as exc:
             raise DispatcherError("DISPATCHER_BUSY") from exc

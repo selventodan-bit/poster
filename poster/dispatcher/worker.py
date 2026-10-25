@@ -92,11 +92,13 @@ async def execute(store, execution, owner, controls):
     try:
         snapshots = Snapshots(store.root)
         manifest, files = snapshots.read(job["version"])
-        graphs = [Graph.model_validate_json(raw) for name, raw in files.items() if name.endswith(".json")]
+        # Child Browser.* is rejected by the existing Project.Run contract.
+        # Unrelated browser graphs captured for dynamic dependency lookup must
+        # not weaken the HTTP/data-only main graph's import restriction.
+        main_graph = Graph.model_validate_json(files[manifest["main"]])
         browser = any(
             n.type.startswith("Browser.") or n.type == "Logic.If" and n.params.get("condition") != "equals"
-            for g in graphs
-            for n in g.nodes
+            for n in main_graph.nodes
         )
         sys.meta_path.insert(0, HeadlessGuard(browser))
         source = snapshots.materialize(job["version"], run_dir / "project")
