@@ -163,9 +163,10 @@ class InputsDialog(QDialog):
             boolean.setObjectName("input_bool_" + definition["name"])
             boolean.hide()
             kind.currentIndexChanged.connect(
-                lambda index, edit=edit, boolean=boolean: (
-                    edit.setVisible(index != 2),
-                    boolean.setVisible(index == 2),
+                lambda index, edit=edit, boolean=boolean, protected=definition["secret"]: (
+                    edit.setVisible(index != 2 or protected),
+                    boolean.setVisible(index == 2 and not protected),
+                    edit.setPlaceholderText("true / false" if index == 2 and protected else ""),
                 )
             )
             if definition["type"] in {"int", "float"}:
@@ -213,7 +214,12 @@ class InputsDialog(QDialog):
             if enabled.isChecked():
                 raw = edit.text()
                 if kind.currentIndex() == 2:
-                    value = bool(boolean.currentIndex())
+                    if definition["secret"]:
+                        if raw.strip().lower() not in {"true", "false"}:
+                            raise ValueError()
+                        value = raw.strip().lower() == "true"
+                    else:
+                        value = bool(boolean.currentIndex())
                 elif kind.currentIndex():
                     value = json.loads(raw)
                     if kind.currentIndex() == 1 and (type(value) not in {int, float}):

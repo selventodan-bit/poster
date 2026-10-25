@@ -906,6 +906,11 @@ class MakerWindow(QMainWindow, ToolsMixin):
                 "pause_reason": self.pause_reason,
                 "current_node": self.current_node,
                 "values": self.live_values,
+                "variable_flags": {
+                    "secret": self.variable_secret.isChecked(),
+                    "input": self.variable_input.isChecked(),
+                    "required": self.variable_required.isChecked(),
+                },
                 "trace": self.trace,
                 "workdir": self.execution_workdir.text(),
                 "runner_browser_started": bool(

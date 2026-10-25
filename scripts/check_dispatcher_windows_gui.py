@@ -11,6 +11,7 @@ import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
+import re
 from pathlib import Path
 import sqlite3
 import threading
@@ -268,6 +269,16 @@ def check(executable, output):
         assert child.pid != service["pid"] and child.pid != process.pid
         assert not any("python.exe" in arg.lower() or "pythonw.exe" in arg.lower() for arg in child.cmdline())
         assert canary not in " ".join(child.cmdline())
+        runtime = [
+            m.path
+            for m in child.memory_maps()
+            if re.fullmatch(r"python\d{2,3}\.dll", Path(m.path).name.lower())
+        ]
+        assert len(runtime) == 1 and Path(runtime[0]).resolve().is_relative_to(
+            (executable.parent / "_internal").resolve()
+        )
+        proofs.setdefault("worker_executables", {})[str(child.pid)] = child.exe()
+        proofs["shared_python_library"] = runtime[0]
         return child
 
     try:
@@ -474,7 +485,8 @@ def check(executable, output):
                 maker_click(name)
                 keyboard.send_keys("^a")
                 paste(value)
-            maker_click("variable_secret")
+            if not snapshot(maker_observer).get("variable_flags", {}).get("secret"):
+                maker_click("variable_secret")
             maker_click("var_save")
             wait(
                 lambda s: bool(

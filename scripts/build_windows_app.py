@@ -100,7 +100,7 @@ def package(bundle, output, commit, *, embedded=False):
         "browser_bundled": embedded,
         "launcher_bytes": {name: (bundle / name).stat().st_size for name in launchers.values()},
         "python_runtime_files": [str(p.relative_to(bundle)) for p in bundle.rglob("python3*.dll")],
-        "shared_runtime": "_internal (one Python DLL and one Qt tree; independent OS processes)",
+        "shared_runtime": "_internal (one shared Python runtime and Qt tree; independent OS processes)",
     }
     if embedded and sys.platform == "win32":
         from PySide6.QtCore import qVersion

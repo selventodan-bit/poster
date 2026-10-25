@@ -149,7 +149,7 @@ remote API. Защита графов не является OS-песочниц�
 GUI и headless. У headless исключены PySide6/Tkinter и их runtime hooks.
 Один COLLECT помещает DLL Python, Qt, Playwright driver и остальные зависимости
 в общий `_internal`. EXE/PYZ отдельных ролей занимают дополнительное место, но
-Python DLL, Qt WebEngine и node driver не копируются в отдельные runtime-папки.
+Runtime Python (DLL версии и ABI-stub), Qt WebEngine и node driver не копируются в отдельные runtime-папки.
 Изоляция сохраняется на уровне OS-процессов.
 
 `BUILD_INFO.json` содержит SHA сборки, роли и SHA256 EXE. В каждом executable
