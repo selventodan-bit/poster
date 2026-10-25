@@ -83,6 +83,8 @@ def check(executable, output):
         window.set_focus()
         point = state["tabs"][index]
         mouse.click(coords=(point["x"], point["y"]))
+        table = {0: "projects_table", 1: "jobs_table", 2: "schedules_table"}[index]
+        wait(lambda s: table in s.get("widgets", {}), "tab visible " + str(index))
 
     def open_gui():
         nonlocal process, window, service
@@ -141,8 +143,12 @@ def check(executable, output):
 
     def select_schedule():
         tab(2)
-        state = wait(lambda s: len(s.get("schedules", [])) == 1, "schedule visible")
+        state = wait(
+            lambda s: len(s.get("schedules", [])) == 1 and s["schedules"][0]["visible"] and not s.get("busy"),
+            "schedule visible",
+        )
         row = state["schedules"][0]
+        window.set_focus()
         mouse.click(coords=(row["x"], row["y"]))
         wait(lambda s: s["schedules"][0]["selected"], "schedule selected")
 
