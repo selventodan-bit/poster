@@ -22,7 +22,9 @@ from .store import Store
 
 class HeadlessGuard(importlib.abc.MetaPathFinder):
     def __init__(self, browser):
-        self.forbidden = {"tkinter", "PySide6"} | (set() if browser else {"playwright"})
+        self.forbidden = {"tkinter", "_tkinter", "PySide6"} | (set() if browser else {"playwright"})
+        if any(name.split(".")[0] in self.forbidden for name in sys.modules):
+            raise ImportError("Dispatcher dependency imported before the headless guard")
 
     def find_spec(self, fullname, path=None, target=None):
         if fullname.split(".")[0] in self.forbidden:
@@ -244,7 +246,8 @@ async def execute(store, execution, owner, controls):
         "node_error_code": node_code,
         "node_message": ERRORS.get(node_code, ""),
         "last_confirmed_step": current["last_confirmed_step"],
-        "effects_may_have_occurred": bool(current["effects_possible"]),
+        "external_effects_may_have_occurred": bool(current["effects_possible"]),
+        "outputs_may_be_partial": state != Status.SUCCEEDED,
         "workdir": str(workdir),
         "encrypted_results": str(run_dir / "results.enc"),
         "gui_imports_forbidden": True,

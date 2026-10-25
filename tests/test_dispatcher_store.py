@@ -183,3 +183,41 @@ def test_stop_prevents_atomic_admission_and_cancelled_lease_never_requeues(tmp_p
     assert store.recover_unstarted(run["run_id"])
     assert store.show(job)["status"] == "CANCELLED" and store.claim("owner", 1, 1) is None
     store.close()
+
+
+def test_interrupted_snapshot_publication_never_exposes_an_incomplete_version(tmp_path, monkeypatch):
+    from poster.dispatcher import snapshots as module
+
+    source = tmp_path / "source" / "main.postergraph.json"
+    source.parent.mkdir()
+    project(source)
+    store = Store(tmp_path / "q.sqlite")
+    key_setup(store.root)
+    snapshots = Snapshots(store.root)
+    original = module.atomic
+
+    def failed_manifest(path, raw):
+        if path.name == "manifest.json":
+            raise OSError("controlled interrupted write")
+        return original(path, raw)
+
+    monkeypatch.setattr(module, "atomic", failed_manifest)
+    with pytest.raises(OSError):
+        snapshots.create(source)
+    assert not any(p.is_dir() for p in snapshots.root.iterdir())
+    monkeypatch.setattr(module, "atomic", original)
+    _, version = snapshots.create(source)
+    assert snapshots.read(version)[0]["main"] == source.name
+    store.close()
+
+
+def test_imported_graph_cannot_register_or_execute_python(tmp_path):
+    source = tmp_path / "untrusted.postergraph.json"
+    graph = chain("untrusted", [("Python.Run", {"code": "__import__('pathlib').Path('executed').touch()"})])
+    save_graph(source, graph, Vault())
+    store = Store(tmp_path / "q.sqlite")
+    key_setup(store.root)
+    with pytest.raises(DispatcherError):
+        Snapshots(store.root).create(source)
+    assert store.counts() == {} and not (tmp_path / "executed").exists()
+    store.close()

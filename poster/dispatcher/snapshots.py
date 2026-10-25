@@ -5,6 +5,8 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
+import uuid
 
 from filelock import FileLock
 
@@ -109,14 +111,19 @@ class Snapshots:
         target = self.root / version
         with FileLock(str(self.root / ".publication.lock")):
             if not target.exists():
-                private_dir(target)
-                atomic(
-                    target / "bundle.enc",
-                    seal({"files": {n: base64.b64encode(v).decode() for n, v in files.items()}}),
-                )
-                atomic(target / "manifest.json", canonical(manifest))
-                restrict(target / "bundle.enc")
-                restrict(target / "manifest.json")
+                staging = private_dir(self.root / (".pending_" + uuid.uuid4().hex))
+                try:
+                    atomic(
+                        staging / "bundle.enc",
+                        seal({"files": {n: base64.b64encode(v).decode() for n, v in files.items()}}),
+                    )
+                    atomic(staging / "manifest.json", canonical(manifest))
+                    restrict(staging / "bundle.enc")
+                    restrict(staging / "manifest.json")
+                    staging.rename(target)  # Publish the complete immutable tree together.
+                finally:
+                    if staging.exists():
+                        shutil.rmtree(staging)
             self.read(version)
         return manifest["project_id"], version
 

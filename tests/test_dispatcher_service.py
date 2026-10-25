@@ -14,6 +14,7 @@ from poster.dispatcher.models import DispatcherError
 from poster.dispatcher.service import Dispatcher, enqueue
 from poster.dispatcher.store import Store
 from poster.maker.example_projects import chain
+from poster.maker.model import Variable
 from poster.maker.storage import Vault, save_graph
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -59,13 +60,14 @@ def finish(process):
     assert process.returncode == 0, (out.decode(errors="replace"), err.decode(errors="replace"))
 
 
-def graph_file(tmp_path, actions, name="main", same_id=None):
+def graph_file(tmp_path, actions, name="main", same_id=None, variables=None):
     directory = tmp_path / name
     directory.mkdir(exist_ok=True)
     path = directory / (name + ".postergraph.json")
     graph = chain(name, actions)
     if same_id:
         graph.id = same_id
+    graph.variables.update(variables or {})
     save_graph(path, graph, Vault())
     return path
 
@@ -116,7 +118,7 @@ def controlled_server():
 
 @pytest.mark.parametrize(
     "workers,per_project,same_project,parallel",
-    [(1, 2, False, False), (2, 2, False, True), (2, 1, True, False)],
+    [(1, 2, False, False), (2, 2, False, True), (2, 1, True, False), (2, 2, True, True)],
 )
 def test_real_process_concurrency_limits_and_isolation(
     tmp_path, workers, per_project, same_project, parallel
@@ -128,14 +130,18 @@ def test_real_process_concurrency_limits_and_isolation(
             path = graph_file(
                 tmp_path,
                 [
-                    ("HTTP.SetCookie", {"name": "sid", "value": str(i), "url": base, "secure": False}),
-                    ("HTTP.Get", {"url": base + "/hold/" + str(i), "protect_response": False}),
-                    ("Files.WriteText", {"path": "same.txt", "text": str(i)}),
+                    (
+                        "HTTP.SetCookie",
+                        {"name": "sid", "value": "{{job_label}}", "url": base, "secure": False},
+                    ),
+                    ("HTTP.Get", {"url": base + "/hold/{{job_label}}", "protect_response": False}),
+                    ("Files.WriteText", {"path": "same.txt", "text": "{{job_label}}"}),
                 ],
                 name=str(i),
                 same_id="same" if same_project else None,
+                variables={"job_label": Variable(value=None, input=True, required=True)},
             )
-            jobs.append(enqueue(store, path))
+            jobs.append(enqueue(store, path, inputs={"job_label": str(i)}))
         process = launch(store, workers, per_project)
         try:
             wait(lambda: len(server.calls) >= 1)
@@ -239,7 +245,13 @@ def test_post_admitted_without_ack_never_repeats_after_recovery(tmp_path, operat
 
 
 def test_timeout_and_cancel_without_external_effects(tmp_path):
-    source = graph_file(tmp_path, [("Logic.Delay", {"milliseconds": 10000})])
+    source = graph_file(
+        tmp_path,
+        [
+            ("Files.WriteText", {"path": "kept.txt", "text": "already written"}),
+            ("Logic.Delay", {"milliseconds": 10000}),
+        ],
+    )
     store = Store(tmp_path / "q.sqlite")
     job = enqueue(store, source, timeout=0.6)
     Dispatcher(store).run(once=True)
@@ -247,10 +259,13 @@ def test_timeout_and_cancel_without_external_effects(tmp_path):
     job = enqueue(store, source, timeout=15)
     process = launch(store)
     try:
-        wait(lambda: store.show(job)["status"] == "RUNNING")
+        wait(lambda: bool(store.history(job)) and store.history(job)[0]["last_confirmed_step"] == "n0")
         store.cancel(job)
         finish(process)
         assert store.show(job)["status"] == "CANCELLED"
+        report = json.loads(Path(store.history(job)[0]["report"]).read_text())
+        assert report["outputs_may_be_partial"] and not report["external_effects_may_have_occurred"]
+        assert (Path(report["workdir"]) / "kept.txt").read_text() == "already written"
     finally:
         if process.poll() is None:
             process.kill()
@@ -398,3 +413,56 @@ def test_worker_browser_crash_reaps_owned_browser_descendants(tmp_path):
                 process.kill()
                 process.wait()
             store.close()
+
+
+def test_snapshot_secret_sidecars_and_typed_inputs_survive_project_run(tmp_path):
+    from poster.maker.model import Variable
+
+    directory = tmp_path / "source"
+    directory.mkdir()
+    child = chain(
+        "child",
+        [
+            ("Variables.Compare", {"left": "{{child_secret}}", "right": {"flag": True}}),
+            (
+                "JSON.Get",
+                {"value": "{{argument}}", "path": "/number"},
+                {"save_as": "result", "result_path": "value"},
+            ),
+        ],
+    )
+    child_vault = Vault()
+    child.variables["child_secret"] = Variable(secret=True, value=child_vault.put_value({"flag": True}))
+    child.variables["argument"] = Variable(secret=True, input=True, required=True, value=None)
+    child.extensions["outputs"] = ["result"]
+    save_graph(directory / "child.postergraph.json", child, child_vault)
+    parent = chain(
+        "parent",
+        [
+            (
+                "Project.Run",
+                {"path": "child.postergraph.json", "inputs": {"argument": "{{payload}}"}},
+                {"save_as": "child", "result_path": "outputs"},
+            ),
+            (
+                "JSON.Get",
+                {"value": "{{child}}", "path": "/result"},
+                {"save_as": "number", "result_path": "value"},
+            ),
+            ("Variables.Compare", {"left": "{{number}}", "right": 7}),
+        ],
+    )
+    parent_vault = Vault()
+    parent.variables["payload"] = Variable(
+        secret=True, value=parent_vault.put_value({"number": 7, "flag": True})
+    )
+    source = directory / "parent.postergraph.json"
+    save_graph(source, parent, parent_vault)
+    store = Store(tmp_path / "q.sqlite")
+    try:
+        job = enqueue(store, source)
+        Dispatcher(store).run(once=True)
+        assert store.show(job)["status"] == "SUCCEEDED"
+        assert store.history(job)[0]["last_confirmed_step"] == "end"
+    finally:
+        store.close()

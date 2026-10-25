@@ -14,7 +14,7 @@ from .models import DispatcherError
 def same_process(pid, birth):
     try:
         process = psutil.Process(pid)
-        return process if abs(process.create_time() - birth) < 0.01 else None
+        return process if process.create_time() == birth else None
     except (psutil.NoSuchProcess, psutil.AccessDenied, TypeError):
         return None
 
