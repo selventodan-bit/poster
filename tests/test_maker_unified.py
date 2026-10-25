@@ -136,6 +136,8 @@ def scenario(root):
             if predicate():
                 return
             QTest.qWait(10)
+        import traceback
+
         print(
             "::error title=Native Qt wait state::"
             + json.dumps(
@@ -148,6 +150,13 @@ def scenario(root):
                         for r in window.trace[-4:]
                     ],
                     "tools_bar": window.tools_tabs.tabBar().rect().getRect(),
+                    "threads": [
+                        [
+                            Path(f.filename).name + ":" + str(f.lineno) + ":" + f.name
+                            for f in traceback.extract_stack(frame)[-12:]
+                        ]
+                        for frame in sys._current_frames().values()
+                    ],
                 }
             ),
             flush=True,

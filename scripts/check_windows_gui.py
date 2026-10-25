@@ -58,7 +58,9 @@ def check(executable, output):
     def start():
         nonlocal window, handle, process
         observation.unlink(missing_ok=True)
-        os.startfile(str(executable))  # ShellExecute: the same opening path as a double click.
+        from windows_gui_launch import open_portable
+
+        open_portable(executable)
         desktop = Desktop(backend="win32")
         window = desktop.window(title="Poster 3.0 — ProjectMaker")
         window.wait("visible", timeout=40)
@@ -216,6 +218,7 @@ def check(executable, output):
             "packaged_executable": True,
             "os_mouse_keyboard": True,
             "dialogs_mocked": False,
+            "system_only_launch_path": True,
             "scenarios": completed,
             "status": "PASSED",
         }

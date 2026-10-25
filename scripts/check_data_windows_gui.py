@@ -8,6 +8,8 @@ from pathlib import Path
 import shutil
 import time
 
+from windows_gui_launch import open_portable
+
 
 def check(executable, output):
     import psutil
@@ -54,7 +56,7 @@ def check(executable, output):
     def start():
         nonlocal process, window
         observer.unlink(missing_ok=True)
-        os.startfile(str(executable))
+        open_portable(executable)
         window = Desktop(backend="win32").window(title="Poster 3.0 — ProjectMaker")
         window.wait("visible", timeout=50)
         process = psutil.Process(window.process_id())
@@ -281,6 +283,7 @@ def check(executable, output):
             "commit": info["commit"],
             "os_mouse_keyboard": True,
             "dialogs_mocked": False,
+            "system_only_launch_path": True,
             "graph_browser_session_started": False,
             "cases": completed,
             "windows_data_graph_sha256": hashlib.sha256(exported.read_bytes()).hexdigest(),
