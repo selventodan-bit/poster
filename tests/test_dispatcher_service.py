@@ -361,6 +361,16 @@ def test_explicit_profile_is_serialized_across_independent_queues(tmp_path):
             wait(lambda: any(c["path"] == "/hold/1" for c in server.calls))
             server.gates["1"].set()
             finish(processes[1])
+            if any(store.show(job)["status"] != "SUCCEEDED" for store, job in zip(stores, jobs, strict=True)):
+                diagnostic = []
+                for store, job in zip(stores, jobs, strict=True):
+                    execution = store.history(job)[0]
+                    safe = {key: execution[key] for key in ("status", "code", "exit_code")}
+                    if execution["report"]:
+                        report = json.loads(Path(execution["report"]).read_bytes())
+                        safe.update({key: report.get(key) for key in ("node_error_code", "cleanup_failure")})
+                    diagnostic.append(safe)
+                print("\n::error title=Profile worker states::" + json.dumps(diagnostic), flush=True)
             assert all(
                 store.show(job)["status"] == "SUCCEEDED" for store, job in zip(stores, jobs, strict=True)
             )

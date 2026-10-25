@@ -101,6 +101,7 @@ def pytest_runtest_makereport(item, call):
     codes = set(MESSAGES) | set(ERRORS)
     diagnostic = {"test": item.name, "frames": [], "executions": []}
     if call.excinfo:
+        diagnostic["exception_type"] = type(call.excinfo.value).__name__
         diagnostic["frames"] = [
             Path(frame.filename).name + ":" + str(frame.lineno)
             for frame in traceback.extract_tb(call.excinfo.value.__traceback__)[-6:]
@@ -123,4 +124,4 @@ def pytest_runtest_makereport(item, call):
                     diagnostic["executions"].append(entry)
         except (OSError, ValueError, sqlite3.Error):
             pass
-    print("::error title=Dispatcher diagnostics::" + json.dumps(diagnostic), flush=True)
+    print("\n::error title=Dispatcher diagnostics::" + json.dumps(diagnostic), flush=True)

@@ -89,6 +89,7 @@ async def execute(store, execution, owner, controls):
     state, code, node_code = Status.FAILED, "EXECUTION_FAILED", None
     uncertain = False
     browser = False
+    cleanup_failure = None
     try:
         snapshots = Snapshots(store.root)
         manifest, files = snapshots.read(job["version"])
@@ -212,21 +213,35 @@ async def execute(store, execution, owner, controls):
         if runner:
             try:
                 await asyncio.wait_for(runner.close(), 3)
-            except BaseException:
+            except BaseException as exc:
                 state, code = Status.UNKNOWN, "PROCESS_CONTROL_FAILED"
-        if profile_lock and profile_lock.is_locked:
-            profile_lock.release()
-        if not clean_descendants():
+                cleanup_failure = {"phase": "runner_close", "type": type(exc).__name__}
+        try:
+            if profile_lock and profile_lock.is_locked:
+                profile_lock.release()
+        except Exception as exc:
             state, code = Status.UNKNOWN, "PROCESS_CONTROL_FAILED"
+            cleanup_failure = {"phase": "profile_unlock", "type": type(exc).__name__}
+        try:
+            if not clean_descendants():
+                state, code = Status.UNKNOWN, "PROCESS_CONTROL_FAILED"
+                cleanup_failure = {"phase": "descendants", "type": "ExitUnconfirmed"}
+        except Exception as exc:
+            state, code = Status.UNKNOWN, "PROCESS_CONTROL_FAILED"
+            cleanup_failure = {"phase": "descendants", "type": type(exc).__name__}
         if controls.reason == "DISPATCHER_LOST":
             state, code = Status.UNKNOWN, "DISPATCHER_LOST"
         # Decrypted project files are private and ephemeral; the immutable
         # encrypted snapshot and intentional workdir outputs remain available.
-        if (run_dir / "project").exists():
-            for path in (run_dir / "project").rglob("*"):
-                if path.is_file():
-                    path.chmod(0o600)
-            shutil.rmtree(run_dir / "project")
+        try:
+            if (run_dir / "project").exists():
+                for path in (run_dir / "project").rglob("*"):
+                    if path.is_file():
+                        path.chmod(0o600)
+                shutil.rmtree(run_dir / "project")
+        except Exception as exc:
+            state, code = Status.UNKNOWN, "PROCESS_CONTROL_FAILED"
+            cleanup_failure = {"phase": "project_cleanup", "type": type(exc).__name__}
     current = store.execution(execution["run_id"])
     from ..maker.runtime import ERRORS
 
@@ -247,6 +262,7 @@ async def execute(store, execution, owner, controls):
         "message": MESSAGES.get(code, ""),
         "node_error_code": node_code,
         "node_message": ERRORS.get(node_code, ""),
+        "cleanup_failure": cleanup_failure,
         "last_confirmed_step": current["last_confirmed_step"],
         "external_effects_may_have_occurred": bool(current["effects_possible"]),
         "outputs_may_be_partial": state != Status.SUCCEEDED,
