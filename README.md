@@ -1,4 +1,6 @@
-# Poster 3.0 — ProjectMaker + Dispatcher, этап 4B.1
+# Poster 3.0 — ProjectMaker + Dispatcher, этап 4B.2
+
+**Расписания 4B.2:** [создание, DST, пропуски, мониторинг и автозапуск службы](docs/POSTER_STAGE4B2_SCHEDULER_MONITORING.md).
 
 **Windows Dispatcher:** распакуйте Full ZIP и дважды щёлкните `PosterDispatcher.exe`.
 Добавляйте проекты Maker, задавайте входы и управляйте настоящей очередью из GUI.

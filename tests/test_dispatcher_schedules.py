@@ -358,3 +358,13 @@ def test_schedule_search_is_case_insensitive_for_russian_projects(scheduled):  #
     store.db.execute("UPDATE schedules SET name=? WHERE id=?", ("Ежедневный Проект", schedule))
     assert schedules.rows(search="ежедневный проект")["total"] == 1
     assert schedules.rows(search="ЕЖЕДНЕВНЫЙ")["total"] == 1
+
+
+def test_durable_stop_prevents_calendar_admission_until_explicit_start(scheduled):  # noqa: F811
+    store, _, _, _, _ = scheduled
+    store.request_stop()
+    Scheduler(store).tick(now=START)
+    assert not store.rows()
+    store.begin_service("resumed-owner")
+    Scheduler(store).tick(now=START)
+    assert len(store.rows()) == 1

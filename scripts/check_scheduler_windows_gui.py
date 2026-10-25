@@ -38,7 +38,7 @@ def check(executable, output):
             hashlib.sha256((executable.parent / record["file"]).read_bytes()).hexdigest() == record["sha256"]
         )
     phase, process, window, service = "start", None, None, None
-    owned, reports = {}, []
+    owned, reports = {}, {}
     canary = "PRIVATE_SCHEDULE_4B2_CANARY"
 
     def snapshot():
@@ -163,12 +163,13 @@ def check(executable, output):
                 else execution["pid"] != service["pid"]
             )
             assert canary not in raw.decode()
-            reports.append(dict(pid=execution["pid"], run_id=execution["run_id"], frozen=True))
+            reports[execution["run_id"]] = dict(pid=execution["pid"], run_id=execution["run_id"], frozen=True)
 
     def select_schedule():
         tab(2)
-        state = wait(
-            lambda s: len(s.get("schedules", [])) == 1 and s["schedules"][0]["visible"] and not s.get("busy"),
+        state, _ = stable_point(
+            lambda s: len(s.get("schedules", [])) == 1 and s["schedules"][0]["visible"],
+            lambda s: s["schedules"][0],
             "schedule visible",
         )
         row = state["schedules"][0]
@@ -273,7 +274,7 @@ def check(executable, output):
             disabled_no_enqueue=True,
             manual_queue=True,
             secret_leaks=0,
-            workers=reports,
+            workers=list(reports.values()),
             harness_has_python=True,
             application_python_on_path=False,
         )

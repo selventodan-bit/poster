@@ -177,6 +177,8 @@ class Scheduler:
         # Bounded batches, one shared queue, original FIFO created ordering.
         # Pauses also cover manual jobs with an uncertain external effect.
         with self.store.transaction():
+            if self.store.stopping():
+                return
             self.db.execute(
                 "UPDATE schedules SET paused_code='SCHEDULE_REVIEW' WHERE deleted=0 AND paused_code!='SCHEDULE_REVIEW' AND project_id IN (SELECT j.project_id FROM jobs j LEFT JOIN schedule_reviews r ON r.job_id=j.id WHERE j.status IN ('UNKNOWN','REVIEW_REQUIRED') AND r.job_id IS NULL)"
             )
@@ -189,6 +191,8 @@ class Scheduler:
         ]
         for schedule_id in ids:
             with self.store.transaction():
+                if self.store.stopping():
+                    return
                 row = self.db.execute(
                     "SELECT * FROM schedules WHERE id=? AND enabled=1 AND deleted=0 AND paused_code='' AND next_due<=?",
                     (schedule_id, now),
