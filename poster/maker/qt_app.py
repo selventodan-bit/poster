@@ -56,10 +56,11 @@ class MakerWindow(QMainWindow, ToolsMixin):
         super().__init__()
         self.setWindowTitle("Poster 3.0 — ProjectMaker")
         self.setObjectName("poster_maker")
-        self.resize(1450, 940)
         screen = QApplication.primaryScreen().availableGeometry()
+        # A fixed 1050px minimum placed the right dock's scroll button beyond a
+        # 1024px desktop. Keep every native control reachable on smaller screens.
+        self.setMinimumSize(min(1050, screen.width() - 30), min(650, screen.height() - 50))
         self.resize(min(1450, screen.width() - 30), min(940, screen.height() - 50))
-        self.setMinimumSize(1050, 650)
         self.workspace = workspace or Workspace()
         ensure_local_key(self.workspace.root / "private")
         self.settings = self.workspace.root / "maker-qt-layout.json"
@@ -171,6 +172,7 @@ class MakerWindow(QMainWindow, ToolsMixin):
         self.browser.navigate_requested.connect(lambda url: self.guard(self.open_url))
         self.refresh_variables()
         self.restore_settings()
+        self.resize(min(self.width(), screen.width() - 30), min(self.height(), screen.height() - 50))
         self.update_controls()
         QTimer.singleShot(0, self.canvas.fit)
         self.observer = QTimer(self)

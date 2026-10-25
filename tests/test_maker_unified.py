@@ -125,6 +125,7 @@ def scenario(root):
     if browser:
         assert os.environ["POSTER_CHROMIUM"] == browser
     window.show()
+    assert app.primaryScreen().availableGeometry().contains(window.frameGeometry())
     QMessageBox.question = lambda *args, **kwargs: QMessageBox.StandardButton.Yes
 
     def wait(predicate, label, timeout=35):
