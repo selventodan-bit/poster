@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+from urllib.parse import urlsplit
 import subprocess
 import sys
 from poster.maker.example_projects import EXAMPLES, source_directory
@@ -38,7 +39,63 @@ def execute(path, workdir, inputs=()):
     return report
 
 
-def check(output, windows_graph=None):
+def check_windows_graphs(directory, output):
+    names = [
+        "windows-http.postergraph.json",
+        "windows-data.postergraph.json",
+        "windows-csv.postergraph.json",
+        "windows-parent.postergraph.json",
+        "child.postergraph.json",
+    ]
+    before = {name: (directory / name).read_bytes() for name in names}
+    cases = []
+    for name in names[:-1]:
+        path = directory / name
+        graph = json.loads(before[name])
+        assert all(not n["type"].startswith("Browser.") for n in graph["nodes"])
+        assert not graph.get("secret_file")
+        workdir = output / name.split(".")[0]
+        if name.startswith("windows-http"):
+            base = graph["variables"]["api_base"]["value"]
+            address = urlsplit(base)
+            assert address.scheme == "http" and address.hostname == "127.0.0.1" and address.port > 1024
+            assert not address.username and not address.password and not address.query
+            assert all(
+                n["type"] == "HTTP.Get" and n["params"]["url"] == "{{api_base}}/api/data"
+                for n in graph["nodes"]
+                if n["type"].startswith("HTTP.")
+            )
+            with serve_maker(port=address.port):
+                result = execute(path, workdir)
+            assert result["variables"]["number"] == 3
+        else:
+            assert all(not n["type"].startswith("HTTP.") for n in graph["nodes"])
+            result = execute(path, workdir)
+            if name.startswith("windows-data"):
+                items = next(n["params"]["items"] for n in graph["nodes"] if n["id"] == "n0")
+                assert json.loads((workdir / "lists/result.json").read_text(encoding="utf-8")) == [
+                    x.upper() for x in items
+                ]
+            elif name.startswith("windows-csv"):
+                assert result["variables"]["csv"] == result["variables"]["excel"]
+                assert (workdir / "tables/output.xlsx").is_file()
+            else:
+                assert result["variables"]["result"] == "POSTER Ж"
+                assert (workdir / "nested/result.txt").read_text(encoding="utf-8") == "POSTER Ж"
+                assert "private_local" not in result["variables"]
+        cases.append(
+            {
+                "name": "exact Windows " + name,
+                "status": "PASSED",
+                "sha256": hashlib.sha256(before[name]).hexdigest(),
+                "same_graph_bytes": True,
+            }
+        )
+    assert all((directory / name).read_bytes() == raw for name, raw in before.items())
+    return cases
+
+
+def check(output, windows_graph=None, windows_dir=None):
     output.mkdir(parents=True, exist_ok=True)
     cases = []
     with serve_maker() as (_, base):
@@ -85,6 +142,8 @@ def check(output, windows_graph=None):
                 "same_graph_bytes": True,
             }
         )
+    if windows_dir:
+        cases.extend(check_windows_graphs(windows_dir, output / "exact-windows"))
     report = {
         "status": "PASSED",
         "platform": sys.platform,
@@ -102,5 +161,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--windows-graph", type=Path)
+    parser.add_argument("--windows-dir", type=Path)
     args = parser.parse_args()
-    check(args.output.resolve(), args.windows_graph)
+    check(args.output.resolve(), args.windows_graph, args.windows_dir)

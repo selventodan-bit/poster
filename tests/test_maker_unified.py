@@ -72,9 +72,9 @@ def scenario(root):
     import json
     import time
 
-    from PySide6.QtCore import Qt
+    from PySide6.QtCore import Qt, QPoint
     from PySide6.QtTest import QTest
-    from PySide6.QtWidgets import QApplication, QLineEdit, QMessageBox, QInputDialog
+    from PySide6.QtWidgets import QApplication, QLineEdit, QMessageBox, QInputDialog, QToolButton, QToolBar
 
     from poster.maker.qt_app import MakerWindow
     from poster.maker.qt_browser import configure_browser
@@ -148,6 +148,16 @@ def scenario(root):
         wait(lambda: window.browser.current().page().devToolsId(), "window starts")
         assert window.browser.current().window() is window
         assert window.canvas.window() is window
+        assert window.action_list.count() == len(window.registry.actions) == 78
+        window.action_category.setFocus()
+        QTest.keyClick(window.action_category, Qt.Key.Key_Home)
+        QTest.keyClick(window.action_category, Qt.Key.Key_Down)
+        window.action_search.setText("HTTP.Post")
+        action("add")
+        assert window.document.graph.node(window.selected_id).type == "HTTP.Post"
+        action("undo")
+        QTest.keyClick(window.action_category, Qt.Key.Key_Home)
+        window.action_search.clear()
         window.live_values = {"runtime_number": 17, "runtime_secret": "••••"}
         window.refresh_variables()
         assert window.variables_table.rowCount() == 2
@@ -285,6 +295,50 @@ raise SystemExit(main(sys.argv[1:]))
             elif filename.startswith("04"):
                 assert window.live_values["result"] == "POSTER Ж"
             action("save")
+        observation = Path(root) / "data-tabs-observer.json"
+        old_observer = os.environ.get("POSTER_GUI_TEST_OUTPUT")
+        os.environ["POSTER_GUI_TEST_OUTPUT"] = str(observation)
+        try:
+            for title in ("Результат", "Кубик", "Проект", "Переменные"):
+                for _ in range(12):
+                    app.processEvents()
+                    window.observe()
+                    state = json.loads(observation.read_text(encoding="utf-8"))
+                    if any(name == title for name, _ in state["tools_tabs"]):
+                        point = next(p for name, p in state["tools_tabs"] if name == title)
+                        bar = window.tools_tabs.tabBar()
+                        QTest.mouseClick(
+                            bar, Qt.MouseButton.LeftButton, pos=bar.mapFromGlobal(QPoint(*point))
+                        )
+                        app.processEvents()
+                        assert window.tools_tabs.tabText(window.tools_tabs.currentIndex()) == title
+                        break
+                    titles = state["tools_tab_titles"]
+                    right = titles.index(title) > max(titles.index(name) for name, _ in state["tools_tabs"])
+                    button = window.findChild(
+                        QToolButton, "tools_scroll_right" if right else "tools_scroll_left"
+                    )
+                    assert button and button.isVisible()
+                    QTest.mouseClick(button, Qt.MouseButton.LeftButton)
+                else:
+                    raise AssertionError("Tool tab is unreachable: " + title)
+        finally:
+            if old_observer is None:
+                os.environ.pop("POSTER_GUI_TEST_OUTPUT", None)
+            else:
+                os.environ["POSTER_GUI_TEST_OUTPUT"] = old_observer
+        # Emulate the constructor's Maker page with a layout saved on System.
+        # Saving legacy-page visibility must not hide Maker controls on reopen.
+        window.pages.setCurrentWidget(window.legacy.system_page)
+        window.save_settings()
+        window.pages.blockSignals(True)
+        window.pages.setCurrentWidget(window.maker_page)
+        window.pages.blockSignals(False)
+        window.restore_settings()
+        app.processEvents()
+        toolbar = window.findChild(QToolBar, "project_toolbar")
+        assert toolbar.widgetForAction(window.controls["data_examples"]).isVisible()
+        assert window.tools_dock.isVisible()
         print("UNIFIED_NATIVE_SCENARIO_PASSED", flush=True)
     finally:
         window.document.dirty = False

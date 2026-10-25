@@ -1083,6 +1083,7 @@ class MakerPanel(BrowserToolsMixin, ToolsMixin, ClipboardMixin):
             "dirty": self.document.dirty,
             "busy": self.busy,
             "run_state": self.runner.state if self.runner else None,
+            "run_graph_id": self.runner.graph.id if self.runner else None,
             "trace": self.trace,
             "error": self.last_error,
             "status": self.status.get(),

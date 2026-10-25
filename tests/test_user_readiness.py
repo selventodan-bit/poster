@@ -78,8 +78,10 @@ async def test_disappeared_control_and_secret_free_diagnostics(tmp_path):
             assert s.result.state == "FAILED" and "BUTTON_DISAPPEARED" in s.result.diagnostics
             assert s.read_only and not server.writes
             s.diagnose("NETWORK_FAILED", ValueError("password=PRIVATE&token=SECRET"))
+            s.diagnose("CLICK_FAILED", TimeoutError("element is not visible; password=PRIVATE&token=SECRET"))
             log = (tmp_path / "diagnostics.jsonl").read_text()
             assert "PRIVATE" not in log and "SECRET" not in log and "http" not in log
+            assert "NOT_VISIBLE" in log
         finally:
             await s.close()
 

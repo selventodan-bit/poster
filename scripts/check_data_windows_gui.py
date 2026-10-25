@@ -25,10 +25,14 @@ def check(executable, output):
     completed = []
 
     def snapshot():
-        try:
-            return json.loads(observer.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return {}
+        # File sharing can briefly prevent an atomic snapshot from being read on Windows.
+        # Retry only this read, never a user action or a network request.
+        for _ in range(4):
+            try:
+                return json.loads(observer.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                time.sleep(0.02)
+        return {}
 
     def wait(predicate, label, timeout=80):
         nonlocal phase
@@ -36,6 +40,9 @@ def check(executable, output):
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             s = snapshot()
+            if not s.get("ui"):
+                time.sleep(0.1)
+                continue
             if s.get("error"):
                 raise AssertionError("Maker error: " + s["error"]["code"])
             if predicate(s):
@@ -50,7 +57,7 @@ def check(executable, output):
         window = Desktop(backend="win32").window(title="Poster 3.0 — ProjectMaker")
         window.wait("visible", timeout=50)
         process = psutil.Process(window.process_id())
-        wait(lambda s: s.get("ui") == "qt", "Qt ready")
+        wait(lambda s: s.get("ui") == "qt" and "data_examples" in s.get("positions", {}), "Qt ready")
 
     def click(name):
         window.set_focus()
@@ -87,6 +94,9 @@ def check(executable, output):
             if any(x[0] == label for x in state.get("tools_tabs", [])):
                 break
             titles = state.get("tools_tab_titles", [])
+            if not titles:
+                time.sleep(0.1)
+                continue
             visible = [titles.index(x[0]) for x in state.get("tools_tabs", [])]
             right = not visible or titles.index(label) > max(visible)
             click("tools_scroll_right" if right else "tools_scroll_left")
@@ -144,13 +154,19 @@ def check(executable, output):
     def picture(name):
         window.capture_as_image().save(output / name)
 
+    def export_graph(filename):
+        click("save")
+        state = wait(lambda s: s.get("saved_file") and not s["dirty"], "saved " + filename)
+        shutil.copyfile(state["saved_file"], output / filename)
+        return Path(state["saved_file"])
+
     try:
         start()
         example(0, "01-")
         run(True)
         wait(lambda s: s["run_state"] == "SUCCEEDED" and not s["busy"], "HTTP JSON demo")
         assert snapshot()["values"]["number"] == 3 and not snapshot()["runner_browser_started"]
-        click("save")
+        export_graph("windows-http.postergraph.json")
         completed.append("http_json_demo_without_graph_browser")
         example(1, "02-")
         choose("n0")
@@ -194,18 +210,21 @@ def check(executable, output):
         tab("Результат")
         wait(lambda s: s.get("preview_rows") == 2 and s.get("preview_columns") == 2, "table preview")
         picture("02-data-table-csv-xlsx.png")
-        click("save")
+        export_graph("windows-csv.postergraph.json")
         completed.append("csv_xlsx_real_readback_and_table_preview")
         example(3, "04-")
         run()
         wait(lambda s: s["run_state"] == "SUCCEEDED" and not s["busy"], "nested project demo")
         assert snapshot()["values"]["result"] == "POSTER Ж" and not snapshot()["runner_browser_started"]
-        click("save")
+        parent_path = export_graph("windows-parent.postergraph.json")
+        shutil.copyfile(parent_path.parent / "child.postergraph.json", output / "child.postergraph.json")
         picture("03-data-subproject.png")
         completed.append("nested_project_inputs_outputs")
         # Manually add/configure a real HTTP cube through the action library.
         click("new")
         wait(lambda s: len(s["graph"]["nodes"]) == 2, "new graph")
+        click("demo")
+        wait(lambda s: bool(s.get("demo_base")) and not s["busy"], "manual HTTP test server")
         fill("action_search", "HTTP.Request")
         click("add")
         state = wait(
@@ -252,6 +271,10 @@ def check(executable, output):
             "graph_browser_session_started": False,
             "cases": completed,
             "windows_data_graph_sha256": hashlib.sha256(exported.read_bytes()).hexdigest(),
+            "exported_graphs": {
+                p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+                for p in sorted(output.glob("*.postergraph.json"))
+            },
             "clean_process_shutdown": True,
         }
         (output / "report.json").write_text(

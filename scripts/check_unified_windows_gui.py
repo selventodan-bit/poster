@@ -32,10 +32,14 @@ def check(executable, output):
     phase, scenarios = "startup", []
 
     def snapshot():
-        try:
-            return json.loads(observer.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return {}
+        # File sharing can briefly prevent an atomic snapshot from being read on Windows.
+        # Retry only this read, never a user action or a network request.
+        for _ in range(4):
+            try:
+                return json.loads(observer.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                time.sleep(0.02)
+        return {}
 
     def wait(predicate, label, timeout=80):
         nonlocal phase
@@ -43,6 +47,9 @@ def check(executable, output):
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             value = snapshot()
+            if not value.get("ui"):
+                time.sleep(0.1)
+                continue
             if value.get("error"):
                 raise AssertionError("Maker error: " + value["error"]["code"])
             if predicate(value):
@@ -124,6 +131,9 @@ def check(executable, output):
                 if any(x[0] == label for x in state.get(key, [])):
                     break
                 titles = state.get("tools_tab_titles", [])
+                if not titles:
+                    time.sleep(0.1)
+                    continue
                 visible = [titles.index(x[0]) for x in state.get(key, [])]
                 right = not visible or titles.index(label) > max(visible)
                 click("tools_scroll_right" if right else "tools_scroll_left")

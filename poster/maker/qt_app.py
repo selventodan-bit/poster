@@ -747,6 +747,7 @@ class MakerWindow(QMainWindow, ToolsMixin):
 
     def save_settings(self):
         data = {
+            "last_page": self.pages.tabText(self.pages.currentIndex()),
             "workdirs": {**self.workdirs, self.document.graph.id: self.execution_workdir.text()},
             "geometry": bytes(self.saveGeometry()).hex(),
             "layout": bytes(self.saveState()).hex(),
@@ -770,6 +771,10 @@ class MakerWindow(QMainWindow, ToolsMixin):
             ):
                 if data.get(key):
                     restore(QByteArray.fromHex(data[key].encode()))
+            # Startup selects Maker. A layout saved from a legacy page has its
+            # Maker toolbars/docks hidden; restore visibility for the actual page.
+            if data.get("last_page") != "ProjectMaker":
+                self.page_changed()
         except (OSError, ValueError):
             pass
 

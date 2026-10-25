@@ -865,3 +865,23 @@ def test_installed_example_assets_match_the_standalone_graphs():
     assert len(files) == 5
     for path in files:
         assert path.read_bytes() == (standalone / path.name).read_bytes()
+
+
+async def test_in_scope_directory_links_cannot_bypass_file_sandbox(tmp_path):
+    import os
+    import subprocess
+
+    root = tmp_path / "Рабочий каталог"
+    target = root / "target"
+    target.mkdir(parents=True)
+    valuable = target / "valuable.txt"
+    valuable.write_text("unchanged", encoding="utf-8")
+    link = root / "alias"
+    if os.name == "nt":
+        # Directory junctions require no symlink privilege on Windows/NTFS.
+        subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(target)], capture_output=True, check=True)
+    else:
+        link.symlink_to(target, target_is_directory=True)
+    r = await run_graph(linear(("Files.Delete", {"path": "alias/valuable.txt"})), root)
+    assert r.state == "FAILED" and r.results[-1].error_code == "FILE_LINK_FORBIDDEN"
+    assert valuable.read_text(encoding="utf-8") == "unchanged"

@@ -6,7 +6,7 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 
 
-def summarize(source, target):
+def summarize(source, target, label="Windows"):
     root = ET.parse(source).getroot()
     cases = root.findall(".//testcase")
     failures = [
@@ -26,12 +26,13 @@ def summarize(source, target):
     target.write_text(json.dumps(report, indent=2), encoding="utf-8")
     for failure in failures:
         print("::error::Windows pytest " + failure["kind"] + " " + failure["test"], flush=True)
-    print("::notice title=Windows pytest summary::" + json.dumps(report), flush=True)
+    print("::notice title=" + label + " pytest summary::" + json.dumps(report), flush=True)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("source", type=Path)
     parser.add_argument("target", type=Path)
+    parser.add_argument("--label", default="Windows")
     args = parser.parse_args()
-    summarize(args.source, args.target)
+    summarize(args.source, args.target, args.label)

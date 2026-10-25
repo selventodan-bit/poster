@@ -32,10 +32,14 @@ def check(executable, output):
     completed = []
 
     def snapshot():
-        try:
-            return json.loads(observer.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return {}
+        # File sharing can briefly prevent an atomic snapshot from being read on Windows.
+        # Retry only this read, never a user action or a network request.
+        for _ in range(4):
+            try:
+                return json.loads(observer.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                time.sleep(0.02)
+        return {}
 
     def wait(predicate, label, timeout=90):
         nonlocal phase
@@ -601,7 +605,11 @@ def check(executable, output):
             click("maker_run")
             confirm()
             result = wait(
-                lambda s: s["maker"]["run_state"] == "SUCCEEDED" and not s["maker"]["busy"],
+                lambda s, graph_id=graph_id: (
+                    s["maker"].get("run_graph_id") == graph_id
+                    and s["maker"]["run_state"] == "SUCCEEDED"
+                    and not s["maker"]["busy"]
+                ),
                 "Lite data execution",
             )["maker"]
             assert result["runtime_values"][expected_key] == expected_value
