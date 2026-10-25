@@ -2,6 +2,7 @@
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import json
 import os
 from pathlib import Path
@@ -79,7 +80,9 @@ class TableModel(QAbstractTableModel):
                 value = spec[key]
             if key == "timing":
                 value = (
-                    str(spec["interval"]) + " с"
+                    datetime.fromtimestamp(spec["start"], ZoneInfo(spec["timezone"])).isoformat()
+                    if spec["mode"] == "once"
+                    else str(spec["interval"]) + " с"
                     if spec["mode"] == "interval"
                     else spec["time"]
                     + (
@@ -93,7 +96,9 @@ class TableModel(QAbstractTableModel):
         if role == Qt.ItemDataRole.DisplayRole:
             key = self.columns[index.column()][0]
             if key in {"created", "updated", "last_run", "next_due", "due", "started"} and value:
-                return datetime.fromtimestamp(value).strftime("%d.%m %H:%M:%S")
+                return datetime.fromtimestamp(
+                    value, ZoneInfo(row["spec"]["timezone"]) if "spec" in row else None
+                ).strftime("%d.%m %H:%M:%S %Z")
             if key == "status":
                 return LABELS.get(value, value)
             if key in {"version", "id"}:

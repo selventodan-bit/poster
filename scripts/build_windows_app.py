@@ -31,6 +31,7 @@ def licenses(bundle, embedded):
         "et-xmlfile",
         "defusedxml",
         "psutil",
+        "tzdata",
     ):
         try:
             distribution = importlib.metadata.distribution(name)

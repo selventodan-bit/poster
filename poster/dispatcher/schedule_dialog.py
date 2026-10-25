@@ -63,7 +63,9 @@ class ScheduleDialog(QDialog):
         self.zone.addItems(sorted(available_timezones()))
         self.zone.setCurrentText("UTC")
         form.addRow("Часовой пояс IANA", self.zone)
-        self.start = QLineEdit((datetime.now() + timedelta(minutes=2)).strftime("%Y-%m-%d %H:%M:%S"))
+        self.start = QLineEdit(
+            (datetime.now(ZoneInfo("UTC")) + timedelta(minutes=2)).strftime("%Y-%m-%d %H:%M:%S")
+        )
         self.start.setObjectName("schedule_start")
         form.addRow("Начало (местное YYYY-MM-DD HH:MM:SS)", self.start)
         self.interval = QSpinBox()

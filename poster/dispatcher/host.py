@@ -27,7 +27,7 @@ from .security import plain_path, private_dir, restrict, safe_json
 from .service import Dispatcher, prepare_snapshot
 from .schedules import Schedules
 from .schedule_time import preview
-from .security import unseal
+from .security import seal, unseal
 from .store import Store
 from .workspace import queue_key, workspace_path
 
@@ -369,9 +369,6 @@ class Host:
                 row = schedules.get(value["id"])
                 item = self.catalog.items[value["item_id"]]
                 payload = unseal(row["inputs_cipher"])
-                if payload.get("profile"):
-                    # Profile data must be reselected explicitly through the input form.
-                    raise DispatcherError("INPUT_INVALID")
                 cipher, names = prepare_snapshot(
                     self.store,
                     item["project_id"],
@@ -380,6 +377,11 @@ class Host:
                     inputs=payload.get("inputs"),
                     secrets=payload.get("secrets"),
                 )
+                if payload.get("profile"):
+                    # Preserve the explicitly selected encrypted profile snapshot and its lock.
+                    prepared = unseal(cipher)
+                    prepared["profile"] = payload["profile"]
+                    cipher = seal(prepared)
                 return schedules.change(value["id"], replacement=(item, cipher, names))
             raise DispatcherError("PARAMETERS_INVALID")
         if op == "ping":
@@ -548,8 +550,24 @@ class Host:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--workspace", type=Path, default=None)
+    parser.add_argument("--autostart", choices=["status", "enable", "disable"])
     args = parser.parse_args()
     root = private_dir(args.workspace or workspace_path())
+    if args.autostart:
+        from .autostart import configure
+
+        try:
+            print(
+                json.dumps(
+                    configure(
+                        root, enabled=None if args.autostart == "status" else args.autostart == "enable"
+                    )
+                )
+            )
+            return 0
+        except DispatcherError as exc:
+            print(json.dumps({"code": exc.code}))
+            return 1
     try:
         with FileLock(str(root / "service.lock"), timeout=0):
             (root / "startup-error.json").unlink(missing_ok=True)

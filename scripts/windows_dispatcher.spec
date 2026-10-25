@@ -7,7 +7,7 @@ root = Path(os.environ["POSTER_BUILD_ROOT"])
 embedded = os.environ["POSTER_BUILD_EMBEDDED"] == "1"
 hook = os.environ["POSTER_BUILD_HOOK"]
 pw_data, pw_binaries, pw_hidden = collect_all("playwright")
-data = collect_data_files("poster") + pw_data
+data = collect_data_files("poster") + collect_data_files("tzdata") + pw_data
 for distribution in ("playwright", "httpx", "pydantic", "cryptography", "filelock", "psutil"):
     data += copy_metadata(distribution)
 
