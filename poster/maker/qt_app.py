@@ -672,7 +672,7 @@ class MakerWindow(QMainWindow, ToolsMixin):
             elif event == "result":
                 result = data["result"]
                 self.trace.append(result)
-                self.preview_value(result["value"])
+                self.preview_result(result)
                 self.canvas.follow(result["node_id"], result["status"])
                 self.log.appendPlainText(
                     result["action"]
@@ -924,6 +924,30 @@ class MakerWindow(QMainWindow, ToolsMixin):
                     )
                 ],
                 "tools_tab_titles": [self.tools_tabs.tabText(i) for i in range(self.tools_tabs.count())],
+                "tools_bar": {
+                    "rect": self.tools_tabs.tabBar().rect().getRect(),
+                    "visible_rect": self.tools_tabs.tabBar().visibleRegion().boundingRect().getRect(),
+                    "tabs": [
+                        {
+                            "title": self.tools_tabs.tabText(i),
+                            "rect": self.tools_tabs.tabBar().tabRect(i).getRect(),
+                            "covered_by": type(
+                                self.tools_tabs.tabBar().childAt(self.tools_tabs.tabBar().tabRect(i).center())
+                            ).__name__,
+                        }
+                        for i in range(self.tools_tabs.count())
+                    ],
+                    "buttons": [
+                        {
+                            "name": b.objectName(),
+                            "arrow": b.arrowType().name,
+                            "enabled": b.isEnabled(),
+                            "visible": b.isVisible(),
+                            "rect": b.geometry().getRect(),
+                        }
+                        for b in self.tools_tabs.tabBar().findChildren(QToolButton)
+                    ],
+                },
                 "demo_base": self.demo_base,
                 "demo_posts": self.demo_server.posts if self.demo_server else {},
                 "demo_api_posts": self.demo_server.api_posts if self.demo_server else 0,

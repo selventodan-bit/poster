@@ -141,6 +141,14 @@ class DataToolsMixin:
                 self.result_table.setItem(i, j, QTableWidgetItem(display(v)))
         self.result_table.resizeColumnsToContents()
 
+    def preview_result(self, result):
+        if result.get("status") == "SUCCEEDED":
+            self.preview_value(result.get("value", {}))
+        else:
+            self.preview_value(
+                {key: result.get(key) for key in ("status", "error_code", "message", "details")}
+            )
+
     def data_examples(self):
         if not self.editable() or not self.discard():
             return

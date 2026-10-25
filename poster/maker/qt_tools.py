@@ -172,8 +172,8 @@ class ToolsMixin(DataToolsMixin):
         if node_id:
             node = self.document.graph.node(node_id)
             spec = self.registry.get(node.type, node.action_version)
-            previous = next((r["value"] for r in reversed(self.trace) if r["node_id"] == node.id), {})
-            self.preview_value(previous)
+            previous = next((r for r in reversed(self.trace) if r["node_id"] == node.id), None)
+            self.preview_result(previous) if previous else self.preview_value({})
             form.addRow(QLabel(node.type))
             self.node_title = QLineEdit(node.title)
             self.node_title.setObjectName("node_title")

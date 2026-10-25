@@ -98,7 +98,7 @@ def session(ctx):
 
 
 def protect_values(vault, value):
-    if isinstance(value, str) and value.startswith(("http://", "https://")) and sensitive_url(value):
+    if isinstance(value, str) and sensitive_url(value):
         return vault.put_value(value)
     if isinstance(value, dict):
         return {
@@ -363,17 +363,20 @@ def register_http_actions(registry):
         ("SetCookie", "Задать cookie", set_cookie, Cookie),
         ("ClearCookies", "Очистить cookies", clear_cookies, Empty),
     ):
+        fields = properties(
+            model, paths=("download_path",), secrets=("url", "query", "headers", "cookies", "body", "value")
+        )
+        if name in {"Get", "Post", "Download"}:
+            # The alias fixes its verb. Keep accepting old serialized method
+            # fields, but do not offer an ineffective method selector in the UI.
+            fields = tuple(prop for prop in fields if prop.name != "method")
         registry.register(
             Action(
                 "HTTP." + name,
                 "HTTP · " + label,
                 model,
                 execute,
-                properties(
-                    model,
-                    paths=("download_path",),
-                    secrets=("url", "query", "headers", "cookies", "body", "value"),
-                ),
+                fields,
                 reveal_parameters=True,
             )
         )

@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import json
+import re
 
 import pytest
 
@@ -64,6 +66,26 @@ def test_unified_native_record_edit_debug_profiles_and_linux_format(tmp_path):
         text=True,
         timeout=180,
     )
+    if process.returncode:
+        frames = re.findall(r'File "([^"]+)", line (\d+)', process.stderr)
+        print(
+            "::error::Native Qt failure at "
+            + " > ".join(Path(name).name + ":" + line for name, line in frames[-4:]),
+            flush=True,
+        )
+        observer = tmp_path / "data-tabs-observer.json"
+        if observer.is_file():
+            state = json.loads(observer.read_text(encoding="utf-8"))
+            print(
+                "::error title=Native Qt geometry::"
+                + json.dumps(
+                    {
+                        k: state.get(k)
+                        for k in ("tools_page", "tools_tabs", "tools_bar", "tools_tab_titles", "panel_sizes")
+                    }
+                ),
+                flush=True,
+            )
     assert process.returncode == 0, process.stdout + process.stderr
 
 
@@ -320,6 +342,7 @@ raise SystemExit(main(sys.argv[1:]))
                     )
                     assert button and button.isVisible()
                     QTest.mouseClick(button, Qt.MouseButton.LeftButton)
+                    QTest.qWait(150)
                 else:
                     raise AssertionError("Tool tab is unreachable: " + title)
         finally:
@@ -327,6 +350,14 @@ raise SystemExit(main(sys.argv[1:]))
                 os.environ.pop("POSTER_GUI_TEST_OUTPUT", None)
             else:
                 os.environ["POSTER_GUI_TEST_OUTPUT"] = old_observer
+        from poster.maker.example_projects import chain
+
+        window.replace(chain("Ошибка данных", [("JSON.Parse", {"text": "not JSON"})]), dirty=False)
+        window.path = None
+        action("run")
+        wait(lambda: window.run_state == "FAILED" and not window.busy, "data error shown in UI")
+        assert "JSON_INVALID" in window.result_json.toPlainText()
+        assert "Некорректный JSON" in window.result_json.toPlainText()
         # Emulate the constructor's Maker page with a layout saved on System.
         # Saving legacy-page visibility must not hide Maker controls on reopen.
         window.pages.setCurrentWidget(window.legacy.system_page)

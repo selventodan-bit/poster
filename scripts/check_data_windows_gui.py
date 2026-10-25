@@ -287,6 +287,17 @@ def check(executable, output):
         except Exception:
             pass
         print("::error::Stage3B2 data GUI phase=" + phase, flush=True)
+        state = snapshot()
+        print(
+            "::error title=Data GUI geometry::"
+            + json.dumps(
+                {
+                    k: state.get(k)
+                    for k in ("tools_page", "tools_tabs", "tools_bar", "tools_tab_titles", "panel_sizes")
+                }
+            ),
+            flush=True,
+        )
         raise
     finally:
         if process and process.is_running():

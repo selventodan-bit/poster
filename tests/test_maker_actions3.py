@@ -57,7 +57,9 @@ def api_server():
             if self.path.startswith("/set"):
                 self.send_header("Set-Cookie", "sid=private-cookie; Path=/")
             if status == 302:
-                self.send_header("Location", "/echo")
+                self.send_header(
+                    "Location", "/echo?token=PRIVATE_LOCATION" if self.path == "/redirect-secret" else "/echo"
+                )
             self.end_headers()
             self.server.admitted.set()
             if self.path.startswith("/slow"):
@@ -885,3 +887,28 @@ async def test_in_scope_directory_links_cannot_bypass_file_sandbox(tmp_path):
     r = await run_graph(linear(("Files.Delete", {"path": "alias/valuable.txt"})), root)
     assert r.state == "FAILED" and r.results[-1].error_code == "FILE_LINK_FORBIDDEN"
     assert valuable.read_text(encoding="utf-8") == "unchanged"
+
+
+async def test_relative_redirect_tokens_are_masked_even_for_public_response(tmp_path):
+    with api_server() as (_, base):
+        r = await run_graph(
+            linear(
+                (
+                    "HTTP.Get",
+                    {
+                        "url": base + "/redirect-secret",
+                        "follow_redirects": False,
+                        "expected_status": [],
+                        "protect_response": False,
+                    },
+                    {"save_as": "location", "result_path": "headers.location"},
+                )
+            ),
+            tmp_path,
+        )
+        assert r.state == "SUCCEEDED"
+        assert (
+            r.context.variables.reveal(r.context.variables.get("location")) == "/echo?token=PRIVATE_LOCATION"
+        )
+        assert r.context.variables.snapshot()["location"] == "••••"
+        assert "PRIVATE_LOCATION" not in str(r.results)
