@@ -77,6 +77,14 @@ def safe_code(code):
     return code if code in ERRORS or code in MESSAGES else "EXECUTION_FAILED"
 
 
+def exception_state(store, run_id):
+    """A durable effects marker outranks an unexpected Python exception."""
+    try:
+        return Status.UNKNOWN if store.execution(run_id)["effects_possible"] else Status.FAILED
+    except Exception:
+        return Status.UNKNOWN  # Missing evidence cannot prove absence of a write.
+
+
 async def execute(store, execution, owner, controls):
     from ..maker.model import Graph
 
@@ -209,10 +217,10 @@ async def execute(store, execution, owner, controls):
                 ),
             )
     except Exception as exc:
-        code = exc.code if isinstance(exc, DispatcherError) else "EXECUTION_FAILED"
+        code = exc.code if isinstance(exc, DispatcherError) else "WORKER_INTERNAL_ERROR"
         if getattr(exc, "code", None):
             node_code = safe_code(exc.code)
-        state = Status.FAILED
+        state = exception_state(store, execution["run_id"])
     finally:
         if runner:
             try:
