@@ -166,6 +166,10 @@ class Host:
                         }
                         for t in threading.enumerate()
                     ],
+                    "gui_imported": any(
+                        n.split(".")[0] in {"PySide6", "tkinter", "_tkinter"}
+                        for n in __import__("sys").modules
+                    ),
                 },
             )
         except (OSError, DispatcherError):

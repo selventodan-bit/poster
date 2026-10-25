@@ -16,6 +16,7 @@ from pathlib import Path
 import sqlite3
 import threading
 import time
+import traceback
 
 from windows_gui_launch import open_portable
 
@@ -199,6 +200,7 @@ def check(executable, output):
         process = psutil.Process(window.process_id())
         owned[process.pid] = process.create_time()
         state = idle()
+        assert state["pid"] == process.pid
         service = state["service"]
         assert (
             Path(psutil.Process(service["pid"]).exe()).resolve()
@@ -678,9 +680,12 @@ def check(executable, output):
             scenarios.append("move_bundle_stable_queue_and_key")
             monitor_done.set()
             monitor_thread.join(3)
+            phase = "verify only packaged workers were launched"
             assert not unexpected_children
+            phase = "verify every worker was observed through OS information"
             assert set(workers_seen) <= set(observed_workers)
             proofs["os_process_observations"] = observed_workers
+            phase = "verify all worker processes exited"
             for pid, birth in workers_seen.items():
                 try:
                     p = psutil.Process(pid)
@@ -691,6 +696,7 @@ def check(executable, output):
             public += list(root.rglob("report.json")) + list(root.glob("dispatcher.sqlite-*"))
             for path in public:
                 if path.is_file():
+                    phase = "verify public files contain no secret canary"
                     assert canary.encode() not in path.read_bytes()
             report = {
                 "commit": info["commit"],
@@ -731,6 +737,12 @@ def check(executable, output):
                     "service": snapshot().get("service"),
                     "job_states": [r["status"] for r in all_jobs().values()],
                     "service_trace": service_trace,
+                    "frames": [
+                        Path(f.filename).name + ":" + str(f.lineno)
+                        for f in traceback.extract_tb(exc.__traceback__)[-5:]
+                    ],
+                    "unexpected_child_names": sorted(set(unexpected_children)),
+                    "worker_pids_not_observed": sorted(set(workers_seen) - set(observed_workers)),
                 }
             ),
             flush=True,

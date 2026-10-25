@@ -348,6 +348,11 @@ jobs:
           if ((Get-FileHash release/poster-maker-windows.zip -Algorithm SHA256).Hash.ToLower() -ne $expected) { throw 'Maker ZIP checksum mismatch' }
           Expand-Archive release/poster-maker-windows.zip 'Maker Проверка с пробелами'
       - run: python -m pip install pywinauto==0.6.9 Pillow==11.3.0 psutil==6.1.1
+      - name: Full shared runtime headless service lifecycle before GUI tests
+        run: python scripts/check_dispatcher_frozen_shutdown.py --bundle 'Maker Проверка с пробелами' --output .poster/frozen-full-lifecycle
+        env:
+          EXPECTED_POSTER_COMMIT: '${{ github.sha }}'
+          PYTHONUTF8: '1'
       - name: Packaged Qt Maker through real OS mouse and keyboard
         run: python scripts/check_unified_windows_gui.py --exe 'Maker Проверка с пробелами/Poster.exe' --output .poster/maker-qt-gui
         env:
@@ -379,6 +384,7 @@ jobs:
             .poster/maker-qt-gui/*.png
             .poster/maker-data-gui/report.json
             .poster/maker-data-gui/*.png
+            .poster/frozen-full-lifecycle/report.json
           include-hidden-files: true
           if-no-files-found: error
 
