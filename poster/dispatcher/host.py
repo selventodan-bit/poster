@@ -312,6 +312,10 @@ class Host:
 
     def dispatch(self, value):
         op = value.pop("op")
+        if op in {"autostart_status", "autostart_set"}:
+            from .autostart import configure
+
+            return configure(self.root, enabled=value.get("enabled") if op == "autostart_set" else None)
         if op.startswith("schedule_"):
             schedules = Schedules(self.store)
             if op == "schedule_list":
@@ -342,6 +346,8 @@ class Host:
                 self.start()  # Saving a real schedule starts the singleton queue service.
                 return result
             if op == "schedule_change":
+                if set(value) - {"id", "spec", "enabled", "delete", "resume"}:
+                    raise DispatcherError("PARAMETERS_INVALID")
                 return schedules.change(value.pop("id"), **value)
             if op == "schedule_version":
                 row = schedules.get(value["id"])
@@ -375,11 +381,12 @@ class Host:
         if op == "projects":
             return self.projects()
         if op == "dashboard":
+            schedule_query = value.pop("schedule_query", {})
             return {
                 "service": self.dispatch({"op": "ping"}),
                 "projects": self.projects(),
                 "jobs": self.jobs(**value),
-                "schedules": Schedules(self.store).rows(),
+                "schedules": Schedules(self.store).rows(**schedule_query),
             }
         if op == "add":
             return self.catalog.inspect(**value)

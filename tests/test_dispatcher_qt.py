@@ -139,6 +139,46 @@ def scenario(root):
             click("save_settings")
             wait(lambda: window.service["settings"]["max_workers"] == 1 and not window.busy)
             assert len(server.calls) == 2
+            # Create a real persisted schedule using the native form, then close the client.
+            from datetime import datetime, timedelta
+            from poster.dispatcher.schedule_dialog import ScheduleDialog
+
+            window.tabs.setCurrentIndex(2)
+
+            def accept_schedule():
+                active = app.activeModalWidget()
+                if isinstance(active, ScheduleDialog):
+                    active.start.setText(
+                        (datetime.now() + timedelta(seconds=3)).strftime("%Y-%m-%d %H:%M:%S")
+                    )
+                    active.validate()
+                    QTimer.singleShot(30, accept_schedule)
+                elif isinstance(active, InputsDialog):
+                    active.validate()
+                else:
+                    QTimer.singleShot(20, accept_schedule)
+
+            QTimer.singleShot(20, accept_schedule)
+            click("create_schedule")
+            wait(lambda: len(window.schedules_model.rows) == 1 and not window.busy)
+            schedule_id = window.schedules_model.rows[0]["id"]
+            window.close()
+            wait(lambda: request(window.root, "schedule_history", id=schedule_id)["total"] == 1)
+            job_id = request(window.root, "schedule_history", id=schedule_id)["rows"][0]["job_id"]
+            wait(lambda: request(window.root, "show", id=job_id)["status"] == "SUCCEEDED")
+            assert (
+                Path(request(window.root, "show", id=job_id)["workdir"]) / "output.txt"
+            ).read_text() == "Qt worker"
+            window = DispatcherWindow()
+            window.show()
+            wait(lambda: len(window.schedules_model.rows) == 1 and not window.busy)
+            window.tabs.setCurrentIndex(2)
+            window.schedules.selectRow(0)
+            click("schedule_history")
+            wait(lambda: "SUCCEEDED" in window.details.toPlainText() and not window.busy)
+            click("pause_schedule")
+            wait(lambda: not window.schedules_model.rows[0]["enabled"] and not window.busy)
+            window.grab().save(str(root / "scheduler-native.png"))
             print(json.dumps({"qt_dispatcher": "passed", "workers": pids, "closed_gui_survives": True}))
     finally:
         request(window.root, "shutdown")

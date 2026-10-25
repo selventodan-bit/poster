@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QMenu,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QSpinBox,
@@ -40,6 +41,7 @@ from .catalog import RESOURCE_NOTICE
 from .host import ensure_service, request
 from .models import DispatcherError, MESSAGES
 from .workspace import workspace_path
+from .schedule_dialog import ScheduleDialog
 
 LABELS = {
     "PENDING": "Ожидает",
@@ -68,12 +70,29 @@ class TableModel(QAbstractTableModel):
     def data(self, index, role=Qt.ItemDataRole.DisplayRole):
         if not index.isValid():
             return None
-        value = self.rows[index.row()].get(self.columns[index.column()][0], "")
+        row = self.rows[index.row()]
+        key = self.columns[index.column()][0]
+        value = row.get(key, "")
+        if "spec" in row:
+            spec = row["spec"]
+            if key in {"mode", "timezone"}:
+                value = spec[key]
+            if key == "timing":
+                value = (
+                    str(spec["interval"]) + " с"
+                    if spec["mode"] == "interval"
+                    else spec["time"]
+                    + (
+                        " · " + ",".join(str(d + 1) for d in spec["weekdays"])
+                        if spec["mode"] == "weekly"
+                        else ""
+                    )
+                )
         if role == Qt.ItemDataRole.UserRole:
             return value
         if role == Qt.ItemDataRole.DisplayRole:
             key = self.columns[index.column()][0]
-            if key in {"created", "updated", "last_run"} and value:
+            if key in {"created", "updated", "last_run", "next_due", "due", "started"} and value:
                 return datetime.fromtimestamp(value).strftime("%d.%m %H:%M:%S")
             if key == "status":
                 return LABELS.get(value, value)
@@ -241,6 +260,12 @@ class DispatcherWindow(QMainWindow):
         screen = QApplication.primaryScreen().availableGeometry()
         self.resize(min(1220, screen.width() - 30), min(780, screen.height() - 50))
         self.setMinimumSize(min(900, screen.width() - 30), min(620, screen.height() - 50))
+        self.schedule_dialog = None
+        self.schedule_offset = self.history_offset = 0
+        self.schedule_order, self.schedule_descending = "next_due", False
+        self.project_items = []
+        self.schedule_total = 0
+        self.history_schedule = None
         self.root = workspace_path()
         self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="dispatcher-client")
         self.replies = Replies(self)
@@ -336,6 +361,7 @@ class DispatcherWindow(QMainWindow):
         self.jobs = self.table("jobs_table", self.jobs_model)
         self.tabs.addTab(self.projects, "Проекты")
         self.tabs.addTab(self.jobs, "Задания и история")
+        self.build_schedules()
         self.projects.doubleClicked.connect(self.inspect)
         self.jobs.doubleClicked.connect(self.show_job)
         self.projects.horizontalHeader().sectionClicked.connect(self.sort_projects)
@@ -389,6 +415,223 @@ class DispatcherWindow(QMainWindow):
         )
         note.setWordWrap(True)
         layout.addWidget(note)
+
+    def build_schedules(self):
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        filters = QHBoxLayout()
+        self.schedule_search = QLineEdit()
+        self.schedule_search.setObjectName("schedule_search")
+        self.schedule_search.setPlaceholderText("Поиск расписаний: проект / ID")
+        self.schedule_state = QComboBox()
+        self.schedule_state.setObjectName("schedule_state")
+        for title, state in [
+            ("Все", ""),
+            ("Включено", "enabled"),
+            ("Пауза проверки", "paused"),
+            ("Выключено", "disabled"),
+        ]:
+            self.schedule_state.addItem(title, state)
+        self.schedule_search.textChanged.connect(self.schedule_filters)
+        self.schedule_state.currentIndexChanged.connect(self.schedule_filters)
+        filters.addWidget(self.schedule_search)
+        filters.addWidget(self.schedule_state)
+        layout.addLayout(filters)
+        self.schedules_model = TableModel(
+            [
+                ("name", "Проект"),
+                ("version", "Версия"),
+                ("mode", "Режим"),
+                ("timing", "Дни / время / интервал"),
+                ("timezone", "Часовой пояс"),
+                ("status", "Состояние"),
+                ("next_due", "Следующий запуск"),
+                ("last_run", "Последний запуск"),
+                ("last_result", "Результат"),
+                ("executions", "Запуски"),
+                ("successes", "Успехи"),
+                ("errors", "Ошибки"),
+                ("missed", "Пропущено"),
+                ("paused_code", "Причина паузы"),
+                ("id", "ID"),
+            ],
+            self,
+        )
+        self.schedules = self.table("schedules_table", self.schedules_model)
+        self.schedules.doubleClicked.connect(self.schedule_history)
+        self.schedules.horizontalHeader().sectionClicked.connect(self.schedule_sort)
+        layout.addWidget(self.schedules)
+        actions = QHBoxLayout()
+        for name, title, callback in [
+            ("create_schedule", "Создать…", self.schedule_create),
+            ("edit_schedule", "Изменить…", self.schedule_edit),
+            ("enable_schedule", "Включить", lambda: self.schedule_change(enabled=True)),
+            ("pause_schedule", "Пауза", lambda: self.schedule_change(enabled=False)),
+            ("delete_schedule", "Удалить", self.schedule_delete),
+            ("resume_schedule", "Проверено: возобновить", self.schedule_resume),
+            ("version_schedule", "Обновить версию…", self.schedule_version),
+        ]:
+            self.button(name, title, callback, actions)
+        layout.addLayout(actions)
+        pages = QHBoxLayout()
+        self.button("previous_schedules", "← 200", lambda: self.schedule_page_by(-200), pages)
+        self.schedule_page = QLabel()
+        pages.addWidget(self.schedule_page)
+        self.button("next_schedules", "200 →", lambda: self.schedule_page_by(200), pages)
+        self.button("schedule_history", "История расписания", self.schedule_history, pages)
+        self.button("schedule_history_prev", "История ←", lambda: self.schedule_history_page(-200), pages)
+        self.button("schedule_history_next", "История →", lambda: self.schedule_history_page(200), pages)
+        layout.addLayout(pages)
+        autostart = QHBoxLayout()
+        self.autostart_status = QLabel("Автозапуск Windows: не проверен")
+        self.autostart_status.setWordWrap(True)
+        autostart.addWidget(self.autostart_status)
+        self.button(
+            "autostart_status", "Проверить автозапуск", lambda: self.call("autostart_status"), autostart
+        )
+        self.button("autostart_enable", "Включить при входе…", self.autostart_enable, autostart)
+        self.button(
+            "autostart_disable",
+            "Отключить автозапуск",
+            lambda: self.call("autostart_set", enabled=False),
+            autostart,
+        )
+        layout.addLayout(autostart)
+        self.tabs.addTab(panel, "Расписание")
+
+    def autostart_enable(self):
+        if (
+            QMessageBox.question(
+                self,
+                "Автозапуск службы",
+                "Разрешить запуск PosterService.exe при вашем входе в Windows? Пароль и права администратора не требуются. Компьютер должен быть включён, пользователь должен войти в систему.",
+            )
+            == QMessageBox.StandardButton.Yes
+        ):
+            self.call("autostart_set", enabled=True)
+
+    def schedule_filters(self, *_):
+        self.schedule_offset = 0
+        self.refresh()
+
+    def schedule_sort(self, index):
+        key = self.schedules_model.columns[index][0]
+        if key not in {"name", "version", "next_due", "updated", "enabled", "project_id", "created"}:
+            return
+        self.schedule_order, self.schedule_descending = key, not self.schedule_descending
+        self.refresh()
+
+    def schedule_page_by(self, delta):
+        self.schedule_offset = max(0, self.schedule_offset + delta)
+        self.refresh()
+
+    def schedule_form(self, items, row=None):
+        dialog = ScheduleDialog(items, self, row)
+        self.schedule_dialog = dialog
+        result = dialog.exec()
+        dialog.debounce.stop()
+        self.schedule_dialog = None
+        if result == QDialog.DialogCode.Accepted:
+            value = (items[dialog.project.currentIndex()], dialog.values())
+        else:
+            value = None
+        dialog.deleteLater()
+        return value
+
+    def schedule_create(self):
+        if not self.project_items:
+            self.details.setPlainText("Сначала добавьте сохранённый проект Maker.")
+            return
+        value = self.schedule_form(self.project_items)
+        if not value:
+            return
+        item, spec = value
+        dialog = InputsDialog(item, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            inputs, secrets = dialog.values()
+            self.call(
+                "schedule_create",
+                item_id=item["id"],
+                spec=spec,
+                options=dict(
+                    inputs=inputs,
+                    secrets=secrets,
+                    timeout=dialog.timeout.value(),
+                    profile_root=str(Path(dialog.profile_path.text()).parent)
+                    if dialog.profile_path.text()
+                    else None,
+                    profile_id=Path(dialog.profile_path.text()).stem if dialog.profile_path.text() else None,
+                    profile_key_file=dialog.profile_key.text() or None,
+                ),
+            )
+            self.tabs.setCurrentIndex(2)
+        dialog.deleteLater()
+
+    def schedule_edit(self):
+        rows = self.selected(self.schedules)
+        if rows:
+            row = rows[0]
+            item = dict(id=row["id"], name=row["name"], version=row["version"])
+            value = self.schedule_form([item], row)
+            if value:
+                self.call("schedule_change", id=row["id"], spec=value[1])
+
+    def schedule_change(self, **options):
+        rows = self.selected(self.schedules)
+        if rows:
+            self.call("schedule_change", id=rows[0]["id"], **options)
+
+    def schedule_delete(self):
+        if (
+            self.selected(self.schedules)
+            and QMessageBox.question(
+                self, "Удаление", "Удалить расписание? История, задания и результаты сохранятся."
+            )
+            == QMessageBox.StandardButton.Yes
+        ):
+            self.schedule_change(delete=True)
+
+    def schedule_resume(self):
+        if (
+            self.selected(self.schedules)
+            and QMessageBox.question(
+                self,
+                "Ручная проверка",
+                "Вы проверили внешние действия всех UNKNOWN/REVIEW_REQUIRED этого проекта? Возобновить автозапуски без изменения этих статусов?",
+            )
+            == QMessageBox.StandardButton.Yes
+        ):
+            self.schedule_change(resume=True, enabled=True)
+
+    def schedule_version(self):
+        rows = self.selected(self.schedules)
+        if rows:
+            row = rows[0]
+            items = [i for i in self.project_items if i["project_id"] == row["project_id"]]
+            if not items:
+                self.details.setPlainText("Сначала явно добавьте новую версию проекта в каталог.")
+                return
+            item = items[0]
+            if (
+                QMessageBox.question(
+                    self,
+                    "Закрепить версию",
+                    f"Заменить {row['version']} на {item['version']}? Сохранённые входы будут проверены.",
+                )
+                == QMessageBox.StandardButton.Yes
+            ):
+                self.call("schedule_version", id=row["id"], item_id=item["id"])
+
+    def schedule_history(self, *_):
+        rows = self.selected(self.schedules)
+        if rows:
+            self.history_schedule, self.history_offset = rows[0]["id"], 0
+            self.call("schedule_history", id=self.history_schedule, offset=0)
+
+    def schedule_history_page(self, delta):
+        if self.history_schedule:
+            self.history_offset = max(0, self.history_offset + delta)
+            self.call("schedule_history", id=self.history_schedule, offset=self.history_offset)
 
     def table(self, name, model):
         view = QTableView()
@@ -451,7 +694,36 @@ class DispatcherWindow(QMainWindow):
         else:
             if label != "dashboard":
                 self.last_error = None
-            if label == "connect":
+            if label in {"autostart_status", "autostart_set"}:
+                self.autostart_status.setText(
+                    "Автозапуск Windows: "
+                    + ("включён" if value["enabled"] else "выключен")
+                    + (
+                        " · путь изменился, включите заново"
+                        if value["exists"] and not value["matches"]
+                        else ""
+                    )
+                    + " · "
+                    + value["task"]
+                )
+            elif label == "schedule_preview":
+                if self.schedule_dialog and context == self.schedule_dialog.token:
+                    self.schedule_dialog.display_preview(value)
+            elif label == "schedule_list":
+                self.replace_rows(self.schedules, value["rows"])
+                self.schedule_total = value["total"]
+                self.schedule_page.setText(
+                    f"{self.schedule_offset + 1 if value['total'] else 0}–{min(self.schedule_offset + 200, value['total'])} из {value['total']}"
+                )
+            elif label == "schedule_history":
+                self.details.setPlainText(
+                    f"История расписания {self.history_schedule} · событий {value['total']} · страница {self.history_offset // 200 + 1}\n"
+                    + "\n".join(
+                        f"UTC {datetime.fromtimestamp(r['due']).astimezone().isoformat()} · {r['status'] or r['outcome']} · {r['occurrences']} событий · job {r['job_id'] or '—'} · PID {r['pid']} · {r['code'] or ''}"
+                        for r in value["rows"]
+                    )
+                )
+            elif label == "connect":
                 self.connected, self.service = True, value
                 for key, number in value["settings"].items():
                     getattr(self, key).setValue(number)
@@ -460,6 +732,12 @@ class DispatcherWindow(QMainWindow):
                 self.tabs.setCurrentIndex(0)
             elif label == "dashboard":
                 self.service = value["service"]
+                self.project_items = value["projects"]
+                self.replace_rows(self.schedules, value["schedules"]["rows"])
+                self.schedule_total = value["schedules"]["total"]
+                self.schedule_page.setText(
+                    f"{self.schedule_offset + 1 if self.schedule_total else 0}–{min(self.schedule_offset + 200, self.schedule_total)} из {self.schedule_total}"
+                )
                 projects = [
                     r for r in value["projects"] if self.search.text().casefold() in r["name"].casefold()
                 ]
@@ -525,7 +803,14 @@ class DispatcherWindow(QMainWindow):
             pending, self.pending = self.pending, None
             self.submit(*pending)
             return
-        if not error and label not in {"dashboard", "show", "shutdown"}:
+        if not error and label not in {
+            "dashboard",
+            "show",
+            "shutdown",
+            "schedule_preview",
+            "schedule_list",
+            "schedule_history",
+        }:
             self.refresh()
 
     def replace_rows(self, view, rows):
@@ -543,6 +828,13 @@ class DispatcherWindow(QMainWindow):
     def refresh(self):
         if not self.busy and self.connected:
             query = {
+                "schedule_query": dict(
+                    search=self.schedule_search.text(),
+                    state=self.schedule_state.currentData(),
+                    offset=self.schedule_offset,
+                    order=self.schedule_order,
+                    descending=self.schedule_descending,
+                ),
                 "search": self.search.text(),
                 "status": self.status_filter.currentData(),
                 "offset": self.offset,
@@ -581,6 +873,10 @@ class DispatcherWindow(QMainWindow):
         self.buttons["stop_service"].setEnabled(available and running)
         self.buttons["save_settings"].setEnabled(available and not running)
         self.buttons["reconcile_jobs"].setEnabled(available and not running)
+        self.buttons["previous_schedules"].setEnabled(available and self.schedule_offset > 0)
+        self.buttons["next_schedules"].setEnabled(
+            available and self.schedule_offset + 200 < self.schedule_total
+        )
         self.buttons["previous_jobs"].setEnabled(available and self.offset > 0)
         self.buttons["next_jobs"].setEnabled(
             available and bool(self.buttons["next_jobs"].property("has_next"))
@@ -721,7 +1017,7 @@ class DispatcherWindow(QMainWindow):
                 pos = child.mapToGlobal(child.rect().center())
                 widgets[child.objectName()] = {"x": pos.x(), "y": pos.y(), "enabled": child.isEnabled()}
         rows = {}
-        for name, view in [("projects", self.projects), ("jobs", self.jobs)]:
+        for name, view in [("projects", self.projects), ("jobs", self.jobs), ("schedules", self.schedules)]:
             values = []
             for index, row in enumerate(view.model().rows):
                 rect = view.visualRect(view.model().index(index, 0))
