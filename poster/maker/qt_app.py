@@ -6,7 +6,7 @@ from pathlib import Path
 import tempfile
 
 from PySide6.QtCore import QByteArray, QObject, Qt, QTimer, Signal, qVersion
-from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtGui import QAction, QKeySequence, QCursor
 from PySide6.QtWidgets import QApplication, QDockWidget, QFileDialog, QHBoxLayout, QInputDialog
 from PySide6.QtWidgets import QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMessageBox
 from PySide6.QtWidgets import (
@@ -925,6 +925,9 @@ class MakerWindow(QMainWindow, ToolsMixin):
                 ],
                 "tools_tab_titles": [self.tools_tabs.tabText(i) for i in range(self.tools_tabs.count())],
                 "tools_bar": {
+                    "cursor": QCursor.pos().toTuple(),
+                    "cursor_widget": type(QApplication.widgetAt(QCursor.pos())).__name__,
+                    "dpr": self.devicePixelRatioF(),
                     "rect": self.tools_tabs.tabBar().rect().getRect(),
                     "visible_rect": self.tools_tabs.tabBar().visibleRegion().boundingRect().getRect(),
                     "tabs": [
@@ -944,6 +947,11 @@ class MakerWindow(QMainWindow, ToolsMixin):
                             "enabled": b.isEnabled(),
                             "visible": b.isVisible(),
                             "rect": b.geometry().getRect(),
+                            "point": b.mapToGlobal(b.rect().center()).toTuple(),
+                            "hit_widget": type(
+                                QApplication.widgetAt(b.mapToGlobal(b.rect().center()))
+                            ).__name__,
+                            "presses": b.property("poster_presses") or 0,
                         }
                         for b in self.tools_tabs.tabBar().findChildren(QToolButton)
                     ],

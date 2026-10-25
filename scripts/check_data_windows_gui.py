@@ -114,6 +114,7 @@ def check(executable, output):
                     "point": after.get("positions", {}).get(name),
                     "before": [t["rect"][0] for t in before.get("tabs", [])],
                     "after": [t["rect"][0] for t in after.get("tools_bar", {}).get("tabs", [])],
+                    "buttons": after.get("tools_bar", {}).get("buttons", []),
                 }
             )
         s = wait(lambda s: any(x[0] == label for x in s.get("tools_tabs", [])), "tools " + label)

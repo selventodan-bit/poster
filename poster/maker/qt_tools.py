@@ -1,6 +1,7 @@
 """Native property, variable, element and profile panels over existing models."""
 
 import json
+import os
 
 from PySide6.QtWidgets import QCheckBox, QComboBox, QFormLayout, QInputDialog, QLabel, QLineEdit, QHBoxLayout
 from PySide6.QtWidgets import (
@@ -159,6 +160,10 @@ class ToolsMixin(DataToolsMixin):
             button.setObjectName(
                 "tools_scroll_left" if button.objectName() == "ScrollLeftButton" else "tools_scroll_right"
             )
+            if os.environ.get("POSTER_GUI_TEST_OUTPUT"):
+                button.pressed.connect(
+                    lambda b=button: b.setProperty("poster_presses", (b.property("poster_presses") or 0) + 1)
+                )
         return self.tools_tabs
 
     def show_properties(self, node_id):
