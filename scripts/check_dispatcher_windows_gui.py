@@ -102,6 +102,8 @@ def check(executable, output):
     monitor_done = threading.Event()
     phase, safe_error = "start", None
     canary = "PRIVATE_MAKER_DISPATCHER_4B1_CANARY"
+    original_browser = os.environ.get("POSTER_CHROMIUM")
+    disabled_worker = None
 
     def monitor():
         while not monitor_done.wait(0.02):
@@ -613,13 +615,48 @@ def check(executable, output):
             moved = previous.with_name(previous.name + " Перенесён")
             previous.rename(moved)
             executable = moved / executable.name
+            os.environ["POSTER_CHROMIUM"] = str(output / "deliberately-missing-browser.exe")
             open_gui()
             assert all_jobs()[secret_job]["status"] == "SUCCEEDED"
             assert (moved / marker.name).read_text(encoding="utf-8") == "keep user files"
             assert (moved / ".poster/private/session.key").exists()
+            before_missing_browser = len(server.calls)
+            missing_browser = enqueue("Frozen installed Chrome")
+            start()
+            assert state_job(missing_browser, {"FAILED", "UNKNOWN"}) == "FAILED"
+            assert evidence(missing_browser)["public_report"]["code"] == "BROWSER_UNAVAILABLE"
+            assert len(server.calls) == before_missing_browser
+            select_job(missing_browser)
+            click("job_details")
+            wait(lambda s: s.get("details_sha_verified"), "missing browser diagnosis shown")
+            window.capture_as_image().save(output / "05-browser-unavailable.png")
+            stop()
+            scenarios.append("missing_browser_path_diagnosed_without_download")
             click("shutdown_service")
             wait(lambda _: not psutil.pid_exists(service["pid"]), "final service shutdown")
             close_gui()
+            # A missing role must be diagnosed before claiming a job, with no
+            # fallback to the harness's installed Python.
+            worker_file = moved / "PosterWorker.exe"
+            disabled_worker = worker_file.with_suffix(".exe.disabled")
+            worker_file.rename(disabled_worker)
+            open_gui()
+            missing_worker_job = enqueue("Frozen a")
+            click("start_service")
+            wait(lambda s: s.get("error") == "WORKER_UNAVAILABLE", "missing worker diagnosis shown")
+            assert all_jobs()[missing_worker_job]["status"] == "PENDING"
+            assert all_jobs()[missing_worker_job]["attempt"] == 0
+            assert len(server.calls) == before_missing_browser
+            window.capture_as_image().save(output / "06-worker-unavailable.png")
+            select_job(missing_worker_job)
+            click("cancel_jobs")
+            state_job(missing_worker_job, {"CANCELLED"})
+            click("shutdown_service")
+            wait(lambda _: not psutil.pid_exists(service["pid"]), "missing-worker host shutdown")
+            close_gui()
+            disabled_worker.rename(worker_file)
+            disabled_worker = None
+            scenarios.append("missing_frozen_worker_no_python_fallback_or_claim")
             # Restore only the test-owned distribution's location for CI steps.
             moved.rename(previous)
             executable = previous / executable.name
@@ -682,6 +719,10 @@ def check(executable, output):
     finally:
         monitor_done.set()
         monitor_thread.join(3)
+        if original_browser is None:
+            os.environ.pop("POSTER_CHROMIUM", None)
+        else:
+            os.environ["POSTER_CHROMIUM"] = original_browser
         # Never upload private queue/snapshot/key files or observer files.
         for path in [observer, maker_observer]:
             path.unlink(missing_ok=True)
@@ -695,6 +736,8 @@ def check(executable, output):
                     p.wait(5)
             except psutil.Error:
                 pass
+        if disabled_worker and disabled_worker.exists():
+            disabled_worker.rename(disabled_worker.with_suffix(""))
 
 
 if __name__ == "__main__":
