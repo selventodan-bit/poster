@@ -188,6 +188,34 @@ def test_registered_snapshot_survives_source_removal_and_report_tampering_is_rej
     path.write_bytes(raw)
 
 
+def test_unrelated_foreign_secret_graph_does_not_require_its_key_and_input_defaults_are_kept(
+    host, tmp_path, monkeypatch
+):
+    root, _ = host
+    monkeypatch.setenv("POSTER_SESSION_KEY", Fernet.generate_key().decode())
+    vault = Vault()
+    foreign = chain("Foreign key", [])
+    foreign.variables["private"] = Variable(secret=True, value=vault.put("FOREIGN_PRIVATE_CANARY"))
+    save_graph(tmp_path / "foreign.postergraph.json", foreign, vault)
+    item = register(
+        root,
+        tmp_path / "default.postergraph.json",
+        [
+            ("Files.WriteText", {"path": "default.txt", "text": "{{note}}"}),
+        ],
+        variables={"note": Variable(input=True, required=True, value="Saved Maker default")},
+    )
+    assert item["inputs"] == [
+        {"name": "note", "secret": False, "required": True, "has_default": True, "type": "str"}
+    ]
+    job = request(root, "enqueue", ids=[item["id"]], request_id="use-default")[0]
+    request(root, "start")
+    wait(lambda: request(root, "show", id=job)["status"] == "SUCCEEDED")
+    assert (
+        Path(request(root, "show", id=job)["workdir"]) / "default.txt"
+    ).read_text() == "Saved Maker default"
+
+
 def test_service_rejects_live_settings_change_and_bounded_pagination(host, tmp_path):
     from poster.dispatcher.store import Store
 

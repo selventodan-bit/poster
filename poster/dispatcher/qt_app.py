@@ -111,7 +111,10 @@ class InputsDialog(QDialog):
         self.resize(560, 400)
         self.fields = []
         layout = QVBoxLayout(self)
-        note = QLabel("Типы JSON сохраняются. Защищённые входы шифруются; значения не попадают в журнал.")
+        note = QLabel(
+            "Без флажка «Передать» используется сохранённое значение Maker. Типы JSON сохраняются. "
+            "Защищённые входы шифруются; значения не попадают в журнал."
+        )
         note.setWordWrap(True)
         layout.addWidget(note)
         content = QWidget()
@@ -146,7 +149,7 @@ class InputsDialog(QDialog):
             row = QWidget()
             line = QHBoxLayout(row)
             enabled = QCheckBox("Передать")
-            enabled.setChecked(definition["required"])
+            enabled.setChecked(definition["required"] and not definition.get("has_default"))
             enabled.setObjectName("input_enabled_" + definition["name"])
             edit = QLineEdit()
             edit.setObjectName("input_" + definition["name"])
@@ -219,7 +222,7 @@ class InputsDialog(QDialog):
                     value = raw
                 json.dumps(value, allow_nan=False)
                 (secrets if definition["secret"] else inputs)[definition["name"]] = value
-            elif definition["required"]:
+            elif definition["required"] and not definition.get("has_default"):
                 raise ValueError()
         return inputs, secrets
 

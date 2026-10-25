@@ -3,13 +3,15 @@
 import base64
 import json
 from pathlib import Path
+import posixpath
 import uuid
 
 from cryptography.fernet import Fernet
 
 from ..auth import session_key
-from ..maker.model import Graph
+from ..maker.model import Graph, secret_refs
 from ..maker.storage import atomic
+from ..maker.variables import has_reference
 from .models import DispatcherError
 from .security import plain_path, restrict, seal, unseal
 from .service import enqueue_snapshot
@@ -45,9 +47,31 @@ class Catalog:
         manifest, files = snapshots.read(version)
         graph = Graph.model_validate_json(files[manifest["main"]])
         tokens = []
-        for name, raw in files.items():
-            if name.endswith(".secrets.enc"):
-                tokens.extend(base64.b64decode(v, validate=True) for v in json.loads(raw)["tokens"].values())
+        pending, visited = [manifest["main"]], set()
+        while pending:
+            name = pending.pop()
+            if name in visited:
+                continue
+            if name not in files:
+                raise DispatcherError("PROJECT_INVALID")
+            visited.add(name)
+            dependency = Graph.model_validate_json(files[name])
+            if dependency.secret_file:
+                sidecar = posixpath.join(posixpath.dirname(name), dependency.secret_file)
+                tokens.extend(
+                    base64.b64decode(v, validate=True) for v in json.loads(files[sidecar])["tokens"].values()
+                )
+            for node in dependency.nodes:
+                if node.type == "Project.Run":
+                    value = node.params.get("path", "child.postergraph.json")
+                    if has_reference(value):
+                        pending.extend(n for n in files if n.endswith(".postergraph.json"))
+                    elif isinstance(value, str):
+                        pending.append(
+                            posixpath.normpath(
+                                posixpath.join(posixpath.dirname(name), value.replace("\\", "/"))
+                            )
+                        )
         project_key = None
         if tokens:
             candidates = [session_key()]
@@ -73,8 +97,9 @@ class Catalog:
         inputs = [
             {
                 "name": n,
-                "secret": v.secret,
+                "secret": v.secret or bool(secret_refs(v.value)),
                 "required": v.required,
+                "has_default": v.value is not None,
                 "type": type(v.value).__name__ if not v.secret else "str",
             }
             for n, v in graph.variables.items()
@@ -89,7 +114,12 @@ class Catalog:
             "source": str(source),
             "inputs": inputs,
             "nodes": len(graph.nodes),
-            "browser": any(n.type.startswith("Browser.") for n in graph.nodes),
+            "browser": any(
+                n.type.startswith("Browser.")
+                or n.type == "Logic.If"
+                and n.params.get("condition") != "equals"
+                for n in graph.nodes
+            ),
             "project_key": project_key,
             "resources": RESOURCE_NOTICE,
         }
