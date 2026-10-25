@@ -337,13 +337,16 @@ def test_real_scheduled_write_service_crash_pauses_without_retry(host, tmp_path)
             root, "schedule_create", item_id=item["id"], spec=spec(start=int(time.time()), interval=1)
         )
         wait(lambda: server.calls)
+        running_job = request(root, "jobs", status="RUNNING")["rows"][0]["id"]
         psutil.Process(info["pid"]).kill()
         wait(lambda: stopped(info))
         replacement = ensure_service(root)
         try:
             wait(lambda: request(root, "schedule_list")["rows"][0]["paused_code"] == "SCHEDULE_REVIEW")
             history = request(root, "schedule_history", id=schedule)["rows"]
-            assert history[0]["status"] == "UNKNOWN"
+            assert next(row for row in history if row["job_id"] == running_job)["status"] == "UNKNOWN"
+            # Slow worker startup may admit another interval before the crash.
+            # Such PENDING jobs are retained but cannot bypass the review hold.
             assert len(server.calls) == 1
             request(root, "schedule_change", id=schedule, enabled=True)
             assert request(root, "schedule_list")["rows"][0]["paused_code"] == "SCHEDULE_REVIEW"
