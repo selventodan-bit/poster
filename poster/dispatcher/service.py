@@ -69,6 +69,33 @@ def enqueue_snapshot(
     """Admit the inspected immutable version, never recapture a moving source."""
     if key is not None and (previous := store.find_key(key)):
         return previous
+    cipher, names = prepare_snapshot(
+        store,
+        project_id,
+        version,
+        inputs=inputs,
+        secrets=secrets,
+        profile_root=profile_root,
+        profile_id=profile_id,
+        project_key=project_key,
+        profile_key_file=profile_key_file,
+    )
+    return store.enqueue(project_id, version, plain_path(source), cipher, names, key=key, timeout=timeout)
+
+
+def prepare_snapshot(
+    store,
+    project_id,
+    version,
+    *,
+    inputs=None,
+    secrets=None,
+    profile_root=None,
+    profile_id=None,
+    project_key=None,
+    profile_key_file=None,
+):
+    """Validate once and retain encrypted inputs for manual or scheduled admission."""
     snapshots = Snapshots(store.root)
     manifest, files = snapshots.read(version)
     if manifest["project_id"] != project_id:
@@ -125,15 +152,7 @@ def enqueue_snapshot(
             "data": profile.data,
             "lock": str(profiles.path(profile_id)) + ".dispatcher-execution.lock",
         }
-    return store.enqueue(
-        project_id,
-        version,
-        plain_path(source),
-        seal(envelope),
-        set(inputs) | set(secrets),
-        key=key,
-        timeout=timeout,
-    )
+    return seal(envelope), sorted(set(inputs) | set(secrets))
 
 
 class Dispatcher:
@@ -236,6 +255,11 @@ class Dispatcher:
                         self.tick()
                         stopping = self.stop_requested or self.store.stopping()
                         if not stopping:
+                            from .schedules import Scheduler
+
+                            if not hasattr(self, "schedule_engine"):
+                                self.schedule_engine = Scheduler(self.store)
+                            self.schedule_engine.tick()
                             while (
                                 len(self.workers) < self.max_workers
                                 and not self.stop_requested

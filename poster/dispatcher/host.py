@@ -24,7 +24,10 @@ from .catalog import Catalog
 from .launcher import build_info, command, environment, process_options
 from .models import DispatcherError, Status
 from .security import plain_path, private_dir, restrict, safe_json
-from .service import Dispatcher
+from .service import Dispatcher, prepare_snapshot
+from .schedules import Schedules
+from .schedule_time import preview
+from .security import unseal
 from .store import Store
 from .workspace import queue_key, workspace_path
 
@@ -309,6 +312,54 @@ class Host:
 
     def dispatch(self, value):
         op = value.pop("op")
+        if op.startswith("schedule_"):
+            schedules = Schedules(self.store)
+            if op == "schedule_list":
+                return schedules.rows(**value)
+            if op == "schedule_preview":
+                return preview(
+                    value["spec"], after=value.get("after", time.time()), count=value.get("count", 5)
+                )
+            if op == "schedule_history":
+                return schedules.history(value["id"], value.get("offset", 0))
+            if op == "schedule_create":
+                item = self.catalog.items[value["item_id"]]
+                options = value.get("options", {})
+                cipher, names = prepare_snapshot(
+                    self.store,
+                    item["project_id"],
+                    item["version"],
+                    project_key=item["project_key"],
+                    **{k: v for k, v in options.items() if k != "timeout"},
+                )
+                result = schedules.create(
+                    item,
+                    value["spec"],
+                    cipher,
+                    names,
+                    timeout=options.get("timeout", self.settings["timeout"]),
+                )
+                self.start()  # Saving a real schedule starts the singleton queue service.
+                return result
+            if op == "schedule_change":
+                return schedules.change(value.pop("id"), **value)
+            if op == "schedule_version":
+                row = schedules.get(value["id"])
+                item = self.catalog.items[value["item_id"]]
+                payload = unseal(row["inputs_cipher"])
+                if payload.get("profile"):
+                    # Profile data must be reselected explicitly through the input form.
+                    raise DispatcherError("INPUT_INVALID")
+                cipher, names = prepare_snapshot(
+                    self.store,
+                    item["project_id"],
+                    item["version"],
+                    project_key=item["project_key"],
+                    inputs=payload.get("inputs"),
+                    secrets=payload.get("secrets"),
+                )
+                return schedules.change(value["id"], replacement=(item, cipher, names))
+            raise DispatcherError("PARAMETERS_INVALID")
         if op == "ping":
             return {
                 "pid": os.getpid(),
@@ -328,6 +379,7 @@ class Host:
                 "service": self.dispatch({"op": "ping"}),
                 "projects": self.projects(),
                 "jobs": self.jobs(**value),
+                "schedules": Schedules(self.store).rows(),
             }
         if op == "add":
             return self.catalog.inspect(**value)
@@ -482,6 +534,10 @@ def main():
             import atexit
 
             atexit.register(host.trace, "finalizing")
+            if host.store.db.execute(
+                "SELECT 1 FROM schedules WHERE enabled=1 AND deleted=0 LIMIT 1"
+            ).fetchone():
+                host.start()
             host.serve()
             host.trace("releasing_host_lock")
         host.trace("main_returning")

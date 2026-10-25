@@ -26,6 +26,11 @@ TRANSITIONS = {
 }
 
 MESSAGES = {
+    "SCHEDULE_INVALID": "Проверьте режим, дату, время и часовой пояс расписания.",
+    "SCHEDULE_MISSING": "Расписание отсутствует или удалено.",
+    "SCHEDULE_REVIEW": "Автозапуски проекта приостановлены: проверьте UNKNOWN/REVIEW_REQUIRED и явно возобновите.",
+    "AUTOSTART_FAILED": "Windows отказала в изменении автозапуска. Проверьте права и путь к PosterService.exe.",
+    "AUTOSTART_UNSUPPORTED": "Автозапуск доступен только в Windows frozen Full/Lite сборке.",
     "BUILD_INVALID": "Версия программы не совпадает с BUILD_INFO.json. Распакуйте полный исходный ZIP заново.",
     "BROWSER_UNAVAILABLE": "Установленный Chrome/Chromium/Edge не найден или задан неверный путь. Установите браузер самостоятельно либо исправьте путь. Автоматическая загрузка не выполняется.",
     "WORKER_UNAVAILABLE": "Служба или worker отсутствует либо повреждён. Распакуйте полный ZIP; Python устанавливать не нужно.",

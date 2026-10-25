@@ -169,33 +169,39 @@ class Store:
         return row[0] if row else None
 
     def enqueue(self, project_id, version, source, inputs_cipher, input_names=(), *, key=None, timeout=300):
-        if not 0.05 <= timeout <= 3600:
+        with self.transaction():
+            return self._enqueue(
+                project_id, version, source, inputs_cipher, input_names, key=key, timeout=timeout
+            )
+
+    def _enqueue(self, project_id, version, source, inputs_cipher, input_names=(), *, key=None, timeout=300):
+        """Caller owns BEGIN IMMEDIATE, including any schedule event and cursor update."""
+        if not 0.05 <= timeout <= 86400:
             raise DispatcherError("PARAMETERS_INVALID")
         now, job_id = time.time(), uuid.uuid4().hex
         hashed = dedup_hash(key)
-        with self.transaction():
-            if hashed:
-                previous = self.db.execute("SELECT id FROM jobs WHERE dedup_hash=?", (hashed,)).fetchone()
-                if previous:
-                    return previous[0]
-            self.db.execute(
-                "INSERT OR IGNORE INTO projects VALUES(?,?,?,?)", (project_id, version, str(source), now)
-            )
-            self.db.execute(
-                "INSERT INTO jobs(id,project_id,version,inputs_cipher,input_names,dedup_hash,status,timeout,created,updated) VALUES(?,?,?,?,?,?,'PENDING',?,?,?)",
-                (
-                    job_id,
-                    project_id,
-                    version,
-                    inputs_cipher,
-                    json.dumps(sorted(input_names)),
-                    hashed,
-                    timeout,
-                    now,
-                    now,
-                ),
-            )
-            self.event(job_id, Status.PENDING)
+        if hashed:
+            previous = self.db.execute("SELECT id FROM jobs WHERE dedup_hash=?", (hashed,)).fetchone()
+            if previous:
+                return previous[0]
+        self.db.execute(
+            "INSERT OR IGNORE INTO projects VALUES(?,?,?,?)", (project_id, version, str(source), now)
+        )
+        self.db.execute(
+            "INSERT INTO jobs(id,project_id,version,inputs_cipher,input_names,dedup_hash,status,timeout,created,updated) VALUES(?,?,?,?,?,?,'PENDING',?,?,?)",
+            (
+                job_id,
+                project_id,
+                version,
+                inputs_cipher,
+                json.dumps(sorted(input_names)),
+                hashed,
+                timeout,
+                now,
+                now,
+            ),
+        )
+        self.event(job_id, Status.PENDING)
         return job_id
 
     def payload(self, job_id, *, private=True):
@@ -257,7 +263,7 @@ class Store:
             ):
                 return None
             row = self.db.execute(
-                "SELECT * FROM jobs j WHERE status='PENDING' AND (SELECT count(*) FROM jobs a WHERE a.project_id=j.project_id AND a.status IN ('LEASED','RUNNING'))<? ORDER BY created LIMIT 1",
+                "SELECT * FROM jobs j WHERE status='PENDING' AND NOT (EXISTS(SELECT 1 FROM schedule_events se WHERE se.job_id=j.id) AND EXISTS(SELECT 1 FROM jobs u LEFT JOIN schedule_reviews r ON r.job_id=u.id WHERE u.project_id=j.project_id AND u.status IN ('UNKNOWN','REVIEW_REQUIRED') AND r.job_id IS NULL)) AND (SELECT count(*) FROM jobs a WHERE a.project_id=j.project_id AND a.status IN ('LEASED','RUNNING'))<? ORDER BY created LIMIT 1",
                 (max_per_project,),
             ).fetchone()
             if row is None:
