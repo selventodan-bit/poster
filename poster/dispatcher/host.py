@@ -203,7 +203,23 @@ class Host:
         return self.names[version]
 
     def jobs(self, search="", status="", offset=0, order="created", descending=True):
-        if order not in {"created", "updated", "status", "project_id", "attempt", "timeout"}:
+        columns = {
+            name: "j." + name
+            for name in ["id", "created", "updated", "status", "project_id", "attempt", "timeout"]
+        }
+        columns.update(
+            name="poster_project_name(j.project_id,j.version)",
+            pid="e.pid",
+            code="e.code",
+            duration="duration",
+        )
+        self.store.db.create_function(
+            "poster_project_name",
+            2,
+            lambda project_id, version: self.project_name(project_id, version).casefold(),
+            deterministic=True,
+        )
+        if order not in columns:
             raise DispatcherError("PARAMETERS_INVALID")
         if status and status not in Status._value2member_map_:
             raise DispatcherError("PARAMETERS_INVALID")
@@ -212,17 +228,10 @@ class Host:
             clauses.append("j.status=?")
             args.append(status)
         if search:
-            matches = [
-                r["project_id"]
-                for r in self.store.db.execute("SELECT * FROM projects")
-                if search.casefold() in self.project_name(r["project_id"], r["version"]).casefold()
-            ]
             clauses.append(
-                "(j.id LIKE ? OR j.project_id LIKE ? OR j.project_id IN ("
-                + ",".join("?" for _ in matches)
-                + "))"
+                "(j.id LIKE ? OR j.project_id LIKE ? OR poster_project_name(j.project_id,j.version) LIKE ?)"
             )
-            args.extend(["%" + search[:200] + "%", "%" + search[:200] + "%", *matches])
+            args.extend(["%" + search[:200].casefold() + "%"] * 3)
         where = " WHERE " + " AND ".join(clauses) if clauses else ""
         total = self.store.db.execute("SELECT count(*) FROM jobs j" + where, args).fetchone()[0]
         rows = self.store.db.execute(
@@ -231,8 +240,8 @@ class Host:
             "round(coalesce(e.finished,?)-e.started,2) duration FROM jobs j "
             "LEFT JOIN executions e ON e.job_id=j.id AND e.attempt=j.attempt"
             + where
-            + " ORDER BY j."
-            + order
+            + " ORDER BY "
+            + columns[order]
             + (" DESC" if descending else " ASC")
             + " LIMIT 200 OFFSET ?",
             [time.time(), *args, max(0, int(offset))],

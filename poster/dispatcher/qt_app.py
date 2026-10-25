@@ -398,6 +398,7 @@ class DispatcherWindow(QMainWindow):
         view.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         view.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         view.horizontalHeader().setStretchLastSection(True)
+        view.horizontalHeader().setSortIndicatorShown(True)
         view.setColumnWidth(0, 230)
         view.setColumnWidth(1, 155)
         return view
@@ -557,15 +558,18 @@ class DispatcherWindow(QMainWindow):
     def sort_projects(self, index):
         self.project_sort = self.projects_model.columns[index][0]
         self.project_descending = not self.project_descending
+        self.projects.horizontalHeader().setSortIndicator(
+            index, Qt.SortOrder.DescendingOrder if self.project_descending else Qt.SortOrder.AscendingOrder
+        )
         self.refresh()
 
     def sort_jobs(self, index):
         key = self.jobs_model.columns[index][0]
-        if key == "name":
-            key = "project_id"
-        if key in {"created", "updated", "status", "project_id", "attempt", "timeout"}:
-            self.job_order, self.job_descending = key, not self.job_descending
-            self.refresh()
+        self.job_order, self.job_descending = key, not self.job_descending
+        self.jobs.horizontalHeader().setSortIndicator(
+            index, Qt.SortOrder.DescendingOrder if self.job_descending else Qt.SortOrder.AscendingOrder
+        )
+        self.refresh()
 
     def update_buttons(self):
         available = not self.busy and self.connected

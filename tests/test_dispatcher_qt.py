@@ -22,7 +22,7 @@ def test_dispatcher_native_client_lifetime_tables_inputs_and_real_workers(tmp_pa
 def scenario(root):
     import json
     import time
-    from PySide6.QtCore import Qt
+    from PySide6.QtCore import Qt, QPoint
     from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QApplication, QFileDialog, QDialogButtonBox
     from poster.dispatcher.qt_app import DispatcherWindow, InputsDialog
@@ -122,6 +122,11 @@ def scenario(root):
                 )
             )
             window.tabs.setCurrentIndex(1)
+            header = window.jobs.horizontalHeader()
+            QTest.mouseClick(
+                header.viewport(), Qt.MouseButton.LeftButton, pos=QPoint(20, header.height() // 2)
+            )
+            wait(lambda: window.jobs_model.rows[0]["name"] == "GUI 0" and not window.busy)
             window.jobs.selectRow(0)
             click("job_details")
             wait(lambda: "SHA256" in window.details.toPlainText())

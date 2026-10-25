@@ -246,3 +246,22 @@ def test_service_rejects_live_settings_change_and_bounded_pagination(host, tmp_p
     request(root, "stop")
     wait(lambda: not request(root, "ping")["running"])
     assert request(root, "settings", max_workers=4, max_per_project=2, timeout=13)["max_workers"] == 4
+
+
+def test_job_name_sort_uses_human_names_across_all_pages(host, tmp_path):
+    root, _ = host
+    for name, project_id in [("Zulu", "a-id"), ("Alpha", "z-id")]:
+        graph = chain(name, [])
+        graph.id = project_id
+        path = tmp_path / (name + ".postergraph.json")
+        save_graph(path, graph, Vault())
+        item = request(root, "add", source=str(path))
+        request(root, "enqueue", ids=[item["id"]], request_id=name)
+    assert [r["name"] for r in request(root, "jobs", order="name", descending=False)["rows"]] == [
+        "Alpha",
+        "Zulu",
+    ]
+    assert [r["name"] for r in request(root, "jobs", order="name", descending=True)["rows"]] == [
+        "Zulu",
+        "Alpha",
+    ]
