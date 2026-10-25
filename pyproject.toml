@@ -18,6 +18,7 @@ dependencies = [
   "openpyxl>=3.1.5,<4",
   "defusedxml>=0.7.1,<1",
   "psutil>=6.1.1,<8",
+  "tzdata>=2025.2",
 ]
 
 [project.optional-dependencies]

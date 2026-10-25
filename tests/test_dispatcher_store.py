@@ -10,7 +10,7 @@ import pytest
 from poster.dispatcher.models import DispatcherError
 from poster.dispatcher.security import key_setup, seal
 from poster.dispatcher.snapshots import Snapshots
-from poster.dispatcher.store import APPLICATION_ID, Store
+from poster.dispatcher.store import APPLICATION_ID, SCHEMA_VERSION, Store
 from poster.maker.example_projects import chain
 from poster.maker.model import Variable
 from poster.maker.storage import Vault, load_graph, save_graph
@@ -255,4 +255,4 @@ def test_simultaneous_first_creation_is_a_single_schema_migration(tmp_path):
                 store.close()
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
-            assert list(pool.map(first_open, range(4))) == [(1, {})] * 4
+            assert list(pool.map(first_open, range(4))) == [(SCHEMA_VERSION, {})] * 4

@@ -14,7 +14,25 @@ from .models import ACTIVE, MESSAGES, TERMINAL, TRANSITIONS, DispatcherError, St
 from .security import plain_path, private_dir, restrict
 
 APPLICATION_ID = 0x50445350
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+
+# Additive migration: the 4A queue, reports and state machine remain intact.
+MIGRATION_2 = """
+CREATE TABLE schedules(
+ id TEXT PRIMARY KEY, project_id TEXT NOT NULL, version TEXT NOT NULL, name TEXT NOT NULL,
+ source TEXT NOT NULL, spec TEXT NOT NULL, inputs_cipher BLOB NOT NULL, input_names TEXT NOT NULL,
+ timeout REAL NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, deleted INTEGER NOT NULL DEFAULT 0,
+ paused_code TEXT NOT NULL DEFAULT '', next_due INTEGER, created REAL NOT NULL, updated REAL NOT NULL);
+CREATE INDEX schedules_due ON schedules(enabled,deleted,paused_code,next_due);
+CREATE INDEX jobs_project_status ON jobs(project_id,status);
+CREATE TABLE schedule_events(
+ id TEXT PRIMARY KEY, schedule_id TEXT NOT NULL REFERENCES schedules(id), due INTEGER NOT NULL,
+ through_due INTEGER NOT NULL, occurrences INTEGER NOT NULL DEFAULT 1,
+ outcome TEXT NOT NULL, job_id TEXT UNIQUE REFERENCES jobs(id), created REAL NOT NULL,
+ UNIQUE(schedule_id,due));
+CREATE INDEX schedule_events_history ON schedule_events(schedule_id,due DESC);
+CREATE TABLE schedule_reviews(job_id TEXT PRIMARY KEY REFERENCES jobs(id), reviewed REAL NOT NULL);
+"""
 
 SCHEMA = """
 CREATE TABLE projects(
@@ -80,7 +98,7 @@ class Store:
         tables = {r[0] for r in self.db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         app = self.db.execute("PRAGMA application_id").fetchone()[0]
         version = self.db.execute("PRAGMA user_version").fetchone()[0]
-        if (tables and (app != APPLICATION_ID or version != SCHEMA_VERSION)) or (
+        if (tables and (app != APPLICATION_ID or version not in (1, SCHEMA_VERSION))) or (
             not tables and (app or version)
         ):
             raise DispatcherError("STORE_INVALID")
@@ -109,6 +127,11 @@ class Store:
                     f"CREATE TRIGGER jobs_transition BEFORE UPDATE OF status ON jobs WHEN OLD.status!=NEW.status AND NOT ({allowed}) BEGIN SELECT RAISE(ABORT,'INVALID_TRANSITION'); END"
                 )
                 self.db.execute(f"PRAGMA application_id={APPLICATION_ID}")
+                self.db.execute("PRAGMA user_version=1")
+            if self.db.execute("PRAGMA user_version").fetchone()[0] == 1:
+                for statement in MIGRATION_2.split(";"):
+                    if statement.strip():
+                        self.db.execute(statement)
                 self.db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
         for suffix in ("", "-wal", "-shm"):
             item = Path(str(self.path) + suffix)
