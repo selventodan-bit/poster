@@ -265,3 +265,41 @@ def test_job_name_sort_uses_human_names_across_all_pages(host, tmp_path):
         "Zulu",
         "Alpha",
     ]
+
+
+def test_idle_service_shutdown_waits_for_rpc_owned_database_close(tmp_path):
+    from poster.dispatcher.launcher import environment
+
+    root = tmp_path / "idle-service"
+    code = """import sys,threading,time
+from pathlib import Path
+from poster.dispatcher.store import Store
+from poster.dispatcher.host import main
+close=Store.close
+def delayed_close(store):
+    if threading.current_thread().name=='poster-rpc':
+        time.sleep(0.3)
+        close(store)
+        (Path(sys.argv[2])/'rpc-closed.marker').write_text('closed')
+    else:
+        close(store)
+Store.close=delayed_close
+raise SystemExit(main())
+"""
+    process = subprocess.Popen([sys.executable, "-c", code, "--workspace", str(root)], env=environment())
+    try:
+
+        def ready():
+            try:
+                return request(root, "ping")
+            except DispatcherError:
+                return False
+
+        wait(ready)
+        assert request(root, "shutdown")
+        assert process.wait(15) == 0
+        assert (root / "rpc-closed.marker").read_text() == "closed"
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(5)

@@ -119,15 +119,51 @@ def pytest_runtest_makereport(item, call):
     for path in root.rglob("*.sqlite") if root else ():
         try:
             with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as connection:
-                rows = connection.execute("SELECT status,code,exit_code,report FROM executions LIMIT 10")
-                for status, code, exit_code, filename in rows:
+                rows = connection.execute(
+                    "SELECT status,code,exit_code,report,pid,birth,last_confirmed_step,effects_possible FROM executions ORDER BY leased DESC LIMIT 10"
+                )
+                for status, code, exit_code, filename, pid, birth, step, effects in rows:
                     entry = {"status": status, "code": code if code in codes else None, "exit": exit_code}
+                    entry.update(last_confirmed_step=step, effects_possible=bool(effects))
+                    if status in {"LEASED", "RUNNING"} and pid:
+                        from poster.dispatcher.processes import same_process
+                        import psutil
+
+                        process = same_process(pid, birth)
+                        entry["processes"] = []
+                        if process:
+                            try:
+                                for child in [process, *process.children(recursive=True)][:12]:
+                                    name = Path(child.exe()).stem.lower()
+                                    kind = (
+                                        "driver"
+                                        if name == "node"
+                                        else "browser"
+                                        if name in {"chrome", "chromium", "msedge"}
+                                        else "other"
+                                    )
+                                    entry["processes"].append(
+                                        {
+                                            "pid": child.pid,
+                                            "kind": kind,
+                                            "state": child.status(),
+                                            "threads": child.num_threads(),
+                                        }
+                                    )
+                            except psutil.Error:
+                                pass
                     if filename and Path(filename).is_file():
                         safe = json.loads(Path(filename).read_bytes())
                         entry["node_code"] = (
                             safe.get("node_error_code") if safe.get("node_error_code") in codes else None
                         )
                     diagnostic["executions"].append(entry)
+                diagnostic["events"] = [
+                    {"status": state, "code": code if code in codes else None}
+                    for state, code in connection.execute(
+                        "SELECT status,code FROM events ORDER BY id DESC LIMIT 12"
+                    )
+                ]
         except (OSError, ValueError, sqlite3.Error):
             pass
     print("\n::error title=Dispatcher diagnostics::" + json.dumps(diagnostic), flush=True)

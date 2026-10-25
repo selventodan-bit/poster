@@ -425,6 +425,10 @@ class Host:
         thread = threading.Thread(target=manager, name="poster-rpc", daemon=True)
         thread.start()
         self.done.wait()
+        # Finish the shutdown reply and close the RPC-owned SQLite connection
+        # before Python tears down modules/daemon threads. In particular there
+        # may be no scheduler thread to give the command thread time to finish.
+        thread.join()
         if self.thread:
             self.thread.join()  # Drain admitted jobs; do not tie this to GUI lifetime.
         listener.close()
