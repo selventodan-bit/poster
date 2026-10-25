@@ -245,6 +245,11 @@ class Host:
             pid="e.pid",
             code="e.code",
             duration="duration",
+            started="e.started",
+            due="se.due",
+            next_due="sn.next_due",
+            last_confirmed_step="e.last_confirmed_step",
+            schedule_id="se.schedule_id",
         )
         self.store.db.create_function(
             "poster_project_name",
@@ -269,9 +274,11 @@ class Host:
         total = self.store.db.execute("SELECT count(*) FROM jobs j" + where, args).fetchone()[0]
         rows = self.store.db.execute(
             "SELECT j.id,j.project_id,j.version,j.status,j.attempt,j.created,j.updated,j.timeout,"
-            "e.pid,e.code,e.last_confirmed_step,e.report,e.report_sha256,"
+            "e.pid,e.code,e.last_confirmed_step,e.report,e.report_sha256,e.started,se.due,se.schedule_id,sn.next_due,"
             "round(coalesce(e.finished,?)-e.started,2) duration FROM jobs j "
-            "LEFT JOIN executions e ON e.job_id=j.id AND e.attempt=j.attempt"
+            "LEFT JOIN executions e ON e.job_id=j.id AND e.attempt=j.attempt "
+            "LEFT JOIN schedule_events se ON se.job_id=j.id "
+            "LEFT JOIN (SELECT project_id,min(next_due) next_due FROM schedules WHERE enabled=1 AND deleted=0 AND paused_code='' GROUP BY project_id) sn ON sn.project_id=j.project_id"
             + where
             + " ORDER BY "
             + columns[order]
@@ -293,18 +300,27 @@ class Host:
                 "LEFT JOIN executions e ON e.job_id=j.id AND e.attempt=j.attempt GROUP BY j.project_id"
             )
         }
+        latest_status = {
+            r["project_id"]: r["status"]
+            for r in self.store.db.execute(
+                "SELECT project_id,status FROM (SELECT project_id,status,row_number() OVER(PARTITION BY project_id ORDER BY created DESC,id DESC) rank FROM jobs) WHERE rank=1"
+            )
+        }
+        upcoming = {
+            r["project_id"]: r["next_due"]
+            for r in self.store.db.execute(
+                "SELECT project_id,min(next_due) next_due FROM schedules WHERE enabled=1 AND deleted=0 AND paused_code='' GROUP BY project_id"
+            )
+        }
         rows = []
         for item in self.catalog.rows():
             stats = aggregates.get(item["project_id"], {})
-            latest = self.store.db.execute(
-                "SELECT status FROM jobs WHERE project_id=? ORDER BY created DESC LIMIT 1",
-                (item["project_id"],),
-            ).fetchone()
             rows.append(
                 {
                     **item,
                     **stats,
-                    "status": latest[0] if latest else "",
+                    "status": latest_status.get(item["project_id"], ""),
+                    "next_due": upcoming.get(item["project_id"]),
                     "elapsed": round(stats.get("elapsed", 0), 2),
                 }
             )
