@@ -1,6 +1,7 @@
 .venv/
 .venv-backup-*/
 release/
+build/
 __pycache__/
 *.py[cod]
 *.egg-info/

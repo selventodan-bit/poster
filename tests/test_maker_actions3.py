@@ -5,7 +5,6 @@ from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import threading
-import time
 import pytest
 from poster.maker.model import Graph, Node, Edge
 from poster.maker.runtime import GraphRunner, BrowserSession
@@ -33,8 +32,6 @@ def api_server():
         def request(self):
             self.server.calls.append((self.command, self.path))
             body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
-            if self.path.startswith("/slow"):
-                time.sleep(0.15)
             status = (
                 418 if self.path.startswith("/status") else 302 if self.path.startswith("/redirect") else 200
             )
@@ -62,6 +59,9 @@ def api_server():
             if status == 302:
                 self.send_header("Location", "/echo")
             self.end_headers()
+            self.server.admitted.set()
+            if self.path.startswith("/slow"):
+                self.server.response_gate.wait(timeout=6)
             if self.command != "HEAD":
                 try:
                     self.wfile.write(raw)
@@ -73,11 +73,14 @@ def api_server():
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     server.daemon_threads = True
     server.calls = []
+    server.response_gate = threading.Event()
+    server.admitted = threading.Event()
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
         yield server, "http://127.0.0.1:" + str(server.server_port)
     finally:
+        server.response_gate.set()
         server.shutdown()
         server.server_close()
         thread.join()
@@ -160,17 +163,39 @@ async def test_http_sessions_and_concurrency(tmp_path):
 @pytest.mark.parametrize(
     "path,options,code",
     [
-        ("/slow", {"timeout_ms": 20}, "HTTP_TIMEOUT"),
+        ("/slow", {"timeout_ms": 5000}, "HTTP_TIMEOUT"),
         ("/status", {}, "HTTP_STATUS"),
         ("/invalid", {"response_type": "json"}, "HTTP_DECODE"),
         ("/large", {"max_response_bytes": 100}, "HTTP_RESPONSE_LIMIT"),
     ],
 )
-async def test_http_errors_no_repeated_writes(path, options, code, tmp_path):
+async def test_http_errors_no_repeated_writes(path, options, code, tmp_path, monkeypatch):
+    if path == "/slow":
+        import httpx
+
+        original = httpx.AsyncClient.stream
+
+        def read_timeout(client, *args, **kwargs):
+            kwargs["timeout"] = httpx.Timeout(5, read=0.05)
+            return original(client, *args, **kwargs)
+
+        monkeypatch.setattr(httpx.AsyncClient, "stream", read_timeout)
     with api_server() as (server, base):
-        r = await run_graph(linear(("HTTP.Post", {"url": base + path, **options})), tmp_path)
+        task = asyncio.create_task(
+            run_graph(linear(("HTTP.Post", {"url": base + path, **options})), tmp_path)
+        )
+        if path == "/slow":
+            assert await asyncio.to_thread(server.admitted.wait, 5), (
+                "POST did not reach the response-body stage"
+            )
+        r = await task
         assert r.state == "FAILED" and r.results[-1].error_code == code, r.results
         assert len(server.calls) == 1
+        assert r.context.http.client.is_closed
+        if path == "/slow":
+            assert r.results[-1].details["phase"] == "read"
+            assert r.results[-1].details["write_outcome_unknown"] is True
+            assert r.results[-1].details["retried"] is False
 
 
 async def test_http_download_multipart_redirect_and_secret(tmp_path):
@@ -793,3 +818,50 @@ async def test_public_http_defaults_do_not_create_private_sidecars(tmp_path):
     params = Request().model_dump()
     graph = save_graph(tmp_path / "public.json", linear(("HTTP.Request", params)), Vault())
     assert not graph_secret_refs(graph) and graph.secret_file is None
+
+
+async def test_http_total_timeout_before_any_send_is_not_retried(tmp_path, monkeypatch):
+    import httpx
+    from poster.maker.http_actions import HTTPState
+
+    class NotSent(httpx.AsyncBaseTransport):
+        calls = 0
+        closed = False
+        cancelled = False
+
+        async def handle_async_request(self, request):
+            self.calls += 1
+            try:
+                await asyncio.Event().wait()
+            finally:
+                self.cancelled = True
+
+        async def aclose(self):
+            self.closed = True
+
+    transport = NotSent()
+
+    def state_init(self):
+        self.client = httpx.AsyncClient(transport=transport, trust_env=False)
+        self.tainted = False
+        self.headers = {}
+
+    monkeypatch.setattr(HTTPState, "__init__", state_init)
+    with api_server() as (server, base):
+        r = await run_graph(linear(("HTTP.Post", {"url": base + "/slow", "timeout_ms": 20})), tmp_path)
+        assert r.results[-1].error_code == "HTTP_TIMEOUT"
+        assert r.results[-1].details["phase"] == "total"
+        assert r.results[-1].details["retried"] is False
+        assert server.calls == [] and transport.calls == 1
+        assert transport.closed and transport.cancelled and r.context.http.client.is_closed
+
+
+def test_installed_example_assets_match_the_standalone_graphs():
+    from poster.maker.example_projects import source_directory
+    from pathlib import Path
+
+    standalone = Path(__file__).parents[1] / "examples" / "maker-stage3b2"
+    files = list(source_directory().glob("*.postergraph.json"))
+    assert len(files) == 5
+    for path in files:
+        assert path.read_bytes() == (standalone / path.name).read_bytes()

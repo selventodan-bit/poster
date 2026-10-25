@@ -1,0 +1,264 @@
+{
+  "format": "poster.maker.graph",
+  "schema_version": 2,
+  "id": "29afd91ca79244cb9b06a9939bb709f1",
+  "name": "CSV / Excel",
+  "entry": "start",
+  "nodes": [
+    {
+      "id": "start",
+      "type": "Start",
+      "action_version": 1,
+      "title": "",
+      "x": 40.0,
+      "y": 40.0,
+      "params": {},
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    },
+    {
+      "id": "n0",
+      "type": "Files.WriteText",
+      "action_version": 1,
+      "title": "",
+      "x": 290.0,
+      "y": 40.0,
+      "params": {
+        "path": "tables/input.csv",
+        "text": "name;n\n\"Ж \"\"quote\"\"\";2\n\"line\nbreak\";3\nskip;1\n",
+        "encoding": "utf-8-sig",
+        "overwrite": true
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    },
+    {
+      "id": "n1",
+      "type": "CSV.Read",
+      "action_version": 1,
+      "title": "",
+      "x": 540.0,
+      "y": 40.0,
+      "params": {
+        "path": "tables/input.csv",
+        "delimiter": ";",
+        "infer_json": true
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": "table",
+      "result_path": "value",
+      "protect_result": false
+    },
+    {
+      "id": "n2",
+      "type": "Tables.Filter",
+      "action_version": 1,
+      "title": "",
+      "x": 790.0,
+      "y": 40.0,
+      "params": {
+        "table": "{{table}}",
+        "column": "n",
+        "operator": "ge",
+        "value": 2
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": "table",
+      "result_path": "value",
+      "protect_result": false
+    },
+    {
+      "id": "n3",
+      "type": "Tables.SetCell",
+      "action_version": 1,
+      "title": "",
+      "x": 40.0,
+      "y": 180.0,
+      "params": {
+        "table": "{{table}}",
+        "row": 0,
+        "column": "name",
+        "value": "Edited Ж"
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": "table",
+      "result_path": "value",
+      "protect_result": false
+    },
+    {
+      "id": "n4",
+      "type": "CSV.Write",
+      "action_version": 1,
+      "title": "",
+      "x": 290.0,
+      "y": 180.0,
+      "params": {
+        "table": "{{table}}",
+        "path": "tables/output.csv",
+        "delimiter": ";",
+        "overwrite": true
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    },
+    {
+      "id": "n5",
+      "type": "Excel.Write",
+      "action_version": 1,
+      "title": "",
+      "x": 540.0,
+      "y": 180.0,
+      "params": {
+        "table": "{{table}}",
+        "path": "tables/output.xlsx",
+        "sheet": "Results",
+        "update_existing": true,
+        "replace_sheet": true
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    },
+    {
+      "id": "n6",
+      "type": "CSV.Read",
+      "action_version": 1,
+      "title": "",
+      "x": 790.0,
+      "y": 180.0,
+      "params": {
+        "path": "tables/output.csv",
+        "delimiter": ";",
+        "infer_json": true
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": "csv",
+      "result_path": "value",
+      "protect_result": false
+    },
+    {
+      "id": "n7",
+      "type": "Excel.Read",
+      "action_version": 1,
+      "title": "",
+      "x": 40.0,
+      "y": 320.0,
+      "params": {
+        "path": "tables/output.xlsx",
+        "sheet": "Results"
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": "excel",
+      "result_path": "value",
+      "protect_result": false
+    },
+    {
+      "id": "n8",
+      "type": "Variables.Compare",
+      "action_version": 1,
+      "title": "",
+      "x": 290.0,
+      "y": 320.0,
+      "params": {
+        "left": "{{csv}}",
+        "right": "{{excel}}"
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    },
+    {
+      "id": "end",
+      "type": "End.Success",
+      "action_version": 1,
+      "title": "",
+      "x": 800.0,
+      "y": 500.0,
+      "params": {},
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    }
+  ],
+  "edges": [
+    {
+      "source": "start",
+      "port": "success",
+      "target": "n0"
+    },
+    {
+      "source": "n0",
+      "port": "success",
+      "target": "n1"
+    },
+    {
+      "source": "n1",
+      "port": "success",
+      "target": "n2"
+    },
+    {
+      "source": "n2",
+      "port": "success",
+      "target": "n3"
+    },
+    {
+      "source": "n3",
+      "port": "success",
+      "target": "n4"
+    },
+    {
+      "source": "n4",
+      "port": "success",
+      "target": "n5"
+    },
+    {
+      "source": "n5",
+      "port": "success",
+      "target": "n6"
+    },
+    {
+      "source": "n6",
+      "port": "success",
+      "target": "n7"
+    },
+    {
+      "source": "n7",
+      "port": "success",
+      "target": "n8"
+    },
+    {
+      "source": "n8",
+      "port": "success",
+      "target": "end"
+    }
+  ],
+  "view": {
+    "zoom": 1.0
+  },
+  "max_steps": 500,
+  "metadata": {},
+  "extensions": {},
+  "secret_file": null,
+  "secret_sha256": null,
+  "variables": {}
+}

@@ -82,6 +82,15 @@ def check(executable, output):
         paste(text)
 
     def tab(label):
+        for _ in range(12):
+            state = snapshot()
+            if any(x[0] == label for x in state.get("tools_tabs", [])):
+                break
+            titles = state.get("tools_tab_titles", [])
+            visible = [titles.index(x[0]) for x in state.get("tools_tabs", [])]
+            right = not visible or titles.index(label) > max(visible)
+            click("tools_scroll_right" if right else "tools_scroll_left")
+            time.sleep(0.15)
         s = wait(lambda s: any(x[0] == label for x in s.get("tools_tabs", [])), "tools " + label)
         mouse.click(coords=tuple(next(x[1] for x in s["tools_tabs"] if x[0] == label)))
         wait(lambda s: s.get("tools_page") == label, "tab " + label)

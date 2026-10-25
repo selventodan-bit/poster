@@ -1089,6 +1089,7 @@ class MakerPanel(BrowserToolsMixin, ToolsMixin, ClipboardMixin):
             "saved_file": str(self.path) if self.path else None,
             "browser": self.browser_view,
             "runtime_values": self.runtime_values,
+            "browser_session_started": bool(self.runner and self.runner.context.session.page),
             "current_node": self.runner.current if self.runner else None,
             "pause_reason": self.runner.pause_reason if self.runner else None,
             "picked": self.last_pick,

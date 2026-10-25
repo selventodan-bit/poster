@@ -156,6 +156,23 @@ def scenario():
         maker.buttons["run"].invoke()
         wait(lambda: maker.runner.state == "SUCCEEDED" and not maker.busy)
         assert maker.runtime_values["counter"] == 2
+        maker.buttons["stop"].invoke()
+        wait(lambda: maker.runner is None and not maker.busy)
+        from poster.maker.example_projects import EXAMPLES, source_directory
+        from poster.maker.fixtures import serve_maker
+        from tkinter import simpledialog
+
+        simpledialog.askstring = lambda *a, **k: k.get("initialvalue", "")
+        with serve_maker() as (_, base):
+            for _, filename in EXAMPLES:
+                maker.load(source_directory() / filename)
+                if filename.startswith("01"):
+                    maker.document.graph.variables["api_base"].value = base
+                maker.buttons["run"].invoke()
+                wait(lambda: maker.runner and maker.runner.state == "SUCCEEDED" and not maker.busy)
+                assert maker.runner.context.session.page is None
+                maker.buttons["stop"].invoke()
+                wait(lambda: maker.runner is None and not maker.busy)
     finally:
         maker.document.dirty = False
         app.close()

@@ -248,7 +248,21 @@ async def request(ctx, p, method=None, download=False):
         raise GraphError("HTTP_RESPONSE_LIMIT") from exc
     except (TimeoutError, httpx.TimeoutException) as exc:
         raise GraphError(
-            "HTTP_TIMEOUT", details={"write_outcome_unknown": method not in {"GET", "HEAD"}, "retried": False}
+            "HTTP_TIMEOUT",
+            details={
+                "write_outcome_unknown": method not in {"GET", "HEAD"}
+                and not isinstance(exc, (httpx.ConnectTimeout, httpx.PoolTimeout)),
+                "phase": "connect"
+                if isinstance(exc, httpx.ConnectTimeout)
+                else "pool"
+                if isinstance(exc, httpx.PoolTimeout)
+                else "read"
+                if isinstance(exc, httpx.ReadTimeout)
+                else "write"
+                if isinstance(exc, httpx.WriteTimeout)
+                else "total",
+                "retried": False,
+            },
         ) from exc
     except httpx.ConnectError as exc:
         raise GraphError("HTTP_CONNECT") from exc

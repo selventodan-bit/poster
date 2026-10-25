@@ -438,12 +438,34 @@ class RecognitionSession:
                             "code": code,
                             "exception": type(exc).__name__ if exc else None,
                             "write_admitted": self.write_admitted,
+                            "read_only": self.read_only,
+                            "phase_hint": self.click_failure_hint(exc) if code == "CLICK_FAILED" else None,
                         }
                     )
                     + "\n"
                 )
         except OSError:
             self.result.diagnostics.append("DIAGNOSTIC_UNAVAILABLE")
+
+    @staticmethod
+    def click_failure_hint(exc):
+        """Classify actionability wording without persisting its payload."""
+        if exc is None:
+            return "UNKNOWN"
+        if type(exc).__name__ == "TargetClosedError":
+            return "TARGET_CLOSED"
+        message = str(exc).lower()
+        for phrase, hint in (
+            ("intercepts pointer events", "POINTER_INTERCEPTED"),
+            ("element is not visible", "NOT_VISIBLE"),
+            ("element is not enabled", "NOT_ENABLED"),
+            ("element is not stable", "NOT_STABLE"),
+            ("outside of the viewport", "OUTSIDE_VIEWPORT"),
+            ("element was detached", "DETACHED"),
+        ):
+            if phrase in message:
+                return hint
+        return "ACTION_TIMEOUT" if type(exc).__name__ == "TimeoutError" else "CLICK_ERROR"
 
     async def session_state(self):
         for _ in range(3):

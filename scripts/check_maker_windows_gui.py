@@ -44,6 +44,9 @@ def check(executable, output):
         while time.monotonic() < deadline:
             value = snapshot()
             maker = value.get("maker", {})
+            if not maker:
+                time.sleep(0.12)
+                continue
             if maker.get("error") and not maker.get("busy"):
                 raise AssertionError("Maker reported an error")
             if predicate(value):
@@ -579,6 +582,33 @@ def check(executable, output):
                 "saved_stage2_graph_reopens_with_isolated_inputs",
             ]
         )
+        start()
+        for filename, expected_key, expected_value in [
+            ("02-lists-loop.postergraph.json", "out", ["ALPHA", "BETA", "ГАММА"]),
+            ("04-parent.postergraph.json", "result", "POSTER Ж"),
+        ]:
+            click("maker_open_file")
+            dialog = Desktop(backend="win32").window(title="Открыть граф Maker")
+            dialog.wait("visible", timeout=15)
+            dialog.set_focus()
+            keyboard.send_keys("%n", pause=0.1)
+            clipboard(str(executable.parent / "examples" / "maker-stage3b2" / filename))
+            keyboard.send_keys("{ENTER}")
+            graph_id = json.loads(
+                (executable.parent / "examples" / "maker-stage3b2" / filename).read_text(encoding="utf-8")
+            )["id"]
+            wait(lambda s, graph_id=graph_id: s["maker"]["graph"]["id"] == graph_id, "Lite data graph opened")
+            click("maker_run")
+            confirm()
+            result = wait(
+                lambda s: s["maker"]["run_state"] == "SUCCEEDED" and not s["maker"]["busy"],
+                "Lite data execution",
+            )["maker"]
+            assert result["runtime_values"][expected_key] == expected_value
+            assert not result["browser_session_started"]
+        picture("12-lite-data-subproject.png")
+        close()
+        completed.append("stage3b2_lists_files_nested_projects_without_graph_browser")
         report = {
             "status": "PASSED",
             "commit": info["commit"],

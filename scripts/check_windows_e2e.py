@@ -34,6 +34,26 @@ async def check(directory, case="topic"):
             title = "Windows Ж 日本語" if case not in {"reply", "comment"} else ""
             await session.test_publish(title, "Браузер & <literal>\nسطر 日本語", "acceptance", confirmed=True)
             if session.result.state != "HTTP_CANDIDATE":
+                diagnostic_path = session.profile.parent / "diagnostics.jsonl"
+                if diagnostic_path.is_file():
+                    try:
+                        rows = [
+                            json.loads(line)
+                            for line in diagnostic_path.read_text(encoding="utf-8").splitlines()[-5:]
+                        ]
+                        safe = [
+                            {
+                                k: row.get(k)
+                                for k in ("code", "exception", "phase_hint", "read_only", "write_admitted")
+                            }
+                            for row in rows
+                        ]
+                        print(
+                            "::error title=Windows acceptance safe diagnostics::" + json.dumps(safe),
+                            flush=True,
+                        )
+                    except (OSError, ValueError):
+                        pass
                 print(
                     "::error title=Windows acceptance state::"
                     + json.dumps(

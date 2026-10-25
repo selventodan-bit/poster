@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
     QComboBox,
+    QToolButton,
 )
 
 from ..auth import ensure_local_key
@@ -911,7 +912,13 @@ class MakerWindow(QMainWindow, ToolsMixin):
                         .toTuple(),
                     ]
                     for i in range(self.tools_tabs.count())
+                    if self.tools_tabs.tabBar().rect().contains(self.tools_tabs.tabBar().tabRect(i).center())
+                    and not isinstance(
+                        self.tools_tabs.tabBar().childAt(self.tools_tabs.tabBar().tabRect(i).center()),
+                        QToolButton,
+                    )
                 ],
+                "tools_tab_titles": [self.tools_tabs.tabText(i) for i in range(self.tools_tabs.count())],
                 "demo_base": self.demo_base,
                 "demo_posts": self.demo_server.posts if self.demo_server else {},
                 "demo_api_posts": self.demo_server.api_posts if self.demo_server else 0,

@@ -12,6 +12,8 @@ from PySide6.QtWidgets import (
     QTableWidgetItem,
 )
 from PySide6.QtWidgets import QVBoxLayout, QWidget
+from PySide6.QtWidgets import QToolButton
+from PySide6.QtCore import Qt
 
 from .model import GraphError, Node, Variable, secret_refs
 from .variables import draft_parameters
@@ -153,6 +155,10 @@ class ToolsMixin(DataToolsMixin):
         self.tools_tabs.addTab(profiles, "Профили")
         self.refresh_profiles()
         self.build_data_tools()
+        for button in self.tools_tabs.tabBar().findChildren(QToolButton):
+            button.setObjectName(
+                "tools_scroll_left" if button.arrowType() == Qt.ArrowType.LeftArrow else "tools_scroll_right"
+            )
         return self.tools_tabs
 
     def show_properties(self, node_id):

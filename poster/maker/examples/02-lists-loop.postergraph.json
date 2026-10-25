@@ -1,0 +1,234 @@
+{
+  "format": "poster.maker.graph",
+  "schema_version": 2,
+  "id": "abc404e4707b484fa48827af1395a519",
+  "name": "Список и цикл",
+  "entry": "start",
+  "nodes": [
+    {
+      "id": "start",
+      "type": "Start",
+      "action_version": 1,
+      "title": "",
+      "x": 40.0,
+      "y": 40.0,
+      "params": {},
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    },
+    {
+      "id": "n0",
+      "type": "Lists.Create",
+      "action_version": 1,
+      "title": "",
+      "x": 290.0,
+      "y": 40.0,
+      "params": {
+        "items": [
+          "alpha",
+          "beta",
+          "гамма"
+        ]
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": "words",
+      "result_path": "value",
+      "protect_result": false
+    },
+    {
+      "id": "n1",
+      "type": "Lists.Create",
+      "action_version": 1,
+      "title": "",
+      "x": 540.0,
+      "y": 40.0,
+      "params": {
+        "items": []
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": "out",
+      "result_path": "value",
+      "protect_result": false
+    },
+    {
+      "id": "n2",
+      "type": "Logic.ForEach",
+      "action_version": 1,
+      "title": "",
+      "x": 790.0,
+      "y": 40.0,
+      "params": {
+        "items": "{{words}}",
+        "item": "word"
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    },
+    {
+      "id": "n3",
+      "type": "Strings.Transform",
+      "action_version": 1,
+      "title": "",
+      "x": 40.0,
+      "y": 180.0,
+      "params": {
+        "operation": "upper",
+        "value": "{{word}}"
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": "upper",
+      "result_path": "value",
+      "protect_result": false
+    },
+    {
+      "id": "n4",
+      "type": "Lists.Add",
+      "action_version": 1,
+      "title": "",
+      "x": 290.0,
+      "y": 180.0,
+      "params": {
+        "items": "{{out}}",
+        "item": "{{upper}}"
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": "out",
+      "result_path": "value",
+      "protect_result": false
+    },
+    {
+      "id": "n5",
+      "type": "Logic.Continue",
+      "action_version": 1,
+      "title": "",
+      "x": 540.0,
+      "y": 180.0,
+      "params": {},
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    },
+    {
+      "id": "n6",
+      "type": "JSON.Stringify",
+      "action_version": 1,
+      "title": "",
+      "x": 790.0,
+      "y": 180.0,
+      "params": {
+        "value": "{{out}}",
+        "pretty": true
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": "json_text",
+      "result_path": "value",
+      "protect_result": false
+    },
+    {
+      "id": "n7",
+      "type": "Files.WriteText",
+      "action_version": 1,
+      "title": "",
+      "x": 40.0,
+      "y": 320.0,
+      "params": {
+        "path": "lists/result.json",
+        "text": "{{json_text}}",
+        "overwrite": true
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    },
+    {
+      "id": "end",
+      "type": "End.Success",
+      "action_version": 1,
+      "title": "",
+      "x": 800.0,
+      "y": 500.0,
+      "params": {},
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    }
+  ],
+  "edges": [
+    {
+      "source": "start",
+      "port": "success",
+      "target": "n0"
+    },
+    {
+      "source": "n0",
+      "port": "success",
+      "target": "n1"
+    },
+    {
+      "source": "n1",
+      "port": "success",
+      "target": "n2"
+    },
+    {
+      "source": "n2",
+      "port": "success",
+      "target": "n3"
+    },
+    {
+      "source": "n3",
+      "port": "success",
+      "target": "n4"
+    },
+    {
+      "source": "n4",
+      "port": "success",
+      "target": "n5"
+    },
+    {
+      "source": "n5",
+      "port": "success",
+      "target": "n6"
+    },
+    {
+      "source": "n6",
+      "port": "success",
+      "target": "n7"
+    },
+    {
+      "source": "n7",
+      "port": "success",
+      "target": "end"
+    },
+    {
+      "source": "n2",
+      "port": "error",
+      "target": "n6"
+    }
+  ],
+  "view": {
+    "zoom": 1.0
+  },
+  "max_steps": 500,
+  "metadata": {},
+  "extensions": {},
+  "secret_file": null,
+  "secret_sha256": null,
+  "variables": {}
+}

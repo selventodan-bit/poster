@@ -179,10 +179,9 @@ def definitions():
 
 
 def source_directory():
-    root = (
-        Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parents[2]
-    )
-    return root / "examples" / "maker-stage3b2"
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).parent / "examples" / "maker-stage3b2"
+    return Path(__file__).resolve().parent / "examples"
 
 
 def copy_examples(workspace):

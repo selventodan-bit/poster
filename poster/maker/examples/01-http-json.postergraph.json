@@ -1,0 +1,147 @@
+{
+  "format": "poster.maker.graph",
+  "schema_version": 2,
+  "id": "2e54c6d0731b4c8981eafb905df6dac5",
+  "name": "HTTP + JSON",
+  "entry": "start",
+  "nodes": [
+    {
+      "id": "start",
+      "type": "Start",
+      "action_version": 1,
+      "title": "",
+      "x": 40.0,
+      "y": 40.0,
+      "params": {},
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    },
+    {
+      "id": "n0",
+      "type": "HTTP.Get",
+      "action_version": 1,
+      "title": "",
+      "x": 290.0,
+      "y": 40.0,
+      "params": {
+        "url": "{{api_base}}/api/data",
+        "protect_response": false
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": "response",
+      "result_path": "text",
+      "protect_result": false
+    },
+    {
+      "id": "n1",
+      "type": "JSON.Parse",
+      "action_version": 1,
+      "title": "",
+      "x": 540.0,
+      "y": 40.0,
+      "params": {
+        "text": "{{response}}"
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": "document",
+      "result_path": "value",
+      "protect_result": false
+    },
+    {
+      "id": "n2",
+      "type": "JSON.Get",
+      "action_version": 1,
+      "title": "",
+      "x": 790.0,
+      "y": 40.0,
+      "params": {
+        "value": "{{document}}",
+        "path": "/items/0/value"
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": "number",
+      "result_path": "value",
+      "protect_result": false
+    },
+    {
+      "id": "n3",
+      "type": "Variables.Compare",
+      "action_version": 1,
+      "title": "",
+      "x": 40.0,
+      "y": 180.0,
+      "params": {
+        "left": "{{number}}",
+        "right": 3
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    },
+    {
+      "id": "end",
+      "type": "End.Success",
+      "action_version": 1,
+      "title": "",
+      "x": 800.0,
+      "y": 500.0,
+      "params": {},
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    }
+  ],
+  "edges": [
+    {
+      "source": "start",
+      "port": "success",
+      "target": "n0"
+    },
+    {
+      "source": "n0",
+      "port": "success",
+      "target": "n1"
+    },
+    {
+      "source": "n1",
+      "port": "success",
+      "target": "n2"
+    },
+    {
+      "source": "n2",
+      "port": "success",
+      "target": "n3"
+    },
+    {
+      "source": "n3",
+      "port": "success",
+      "target": "end"
+    }
+  ],
+  "view": {
+    "zoom": 1.0
+  },
+  "max_steps": 500,
+  "metadata": {},
+  "extensions": {},
+  "secret_file": null,
+  "secret_sha256": null,
+  "variables": {
+    "api_base": {
+      "value": "http://127.0.0.1:8765",
+      "input": true,
+      "required": true,
+      "secret": false
+    }
+  }
+}

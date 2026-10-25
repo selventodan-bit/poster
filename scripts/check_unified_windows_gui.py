@@ -118,6 +118,16 @@ def check(executable, output):
 
     def tab(label, tools=False):
         key = "tools_tabs" if tools else "main_tabs"
+        if tools:
+            for _ in range(12):
+                state = snapshot()
+                if any(x[0] == label for x in state.get(key, [])):
+                    break
+                titles = state.get("tools_tab_titles", [])
+                visible = [titles.index(x[0]) for x in state.get(key, [])]
+                right = not visible or titles.index(label) > max(visible)
+                click("tools_scroll_right" if right else "tools_scroll_left")
+                time.sleep(0.15)
         state = wait(lambda s: any(x[0] == label for x in s.get(key, [])), "tab " + label)
         window.set_focus()
         mouse.click(coords=tuple(next(x[1] for x in state[key] if x[0] == label)))
@@ -134,7 +144,7 @@ def check(executable, output):
         frame = snapshot().get("canvas_frame", 0)
         click("fit")
         state = wait(lambda s: s.get("canvas_frame", 0) > frame, "graph fit painted")
-        if not visible(state):
+        if not visible(state) or len(state.get("graph", {}).get("nodes", [])) > 1000:
             # Large graphs can exceed the minimum zoom; use the real search UI
             # to select and reveal the cube. Enter already selects it: do not
             # send a second click using geometry from before the search paint.
