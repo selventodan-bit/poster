@@ -9,6 +9,9 @@ import sys
 
 
 def main():
+    from poster.dispatcher.launcher import build_info
+
+    build_info()  # Compiled build marker must match the adjacent manifest.
     if Path(sys.executable).stem.casefold() == "posterservice":
         from poster.dispatcher.host import main as entry
     elif Path(sys.executable).stem.casefold() == "posterworker":

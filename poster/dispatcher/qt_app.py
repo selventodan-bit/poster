@@ -217,6 +217,7 @@ class InputsDialog(QDialog):
                         raise ValueError()
                 else:
                     value = raw
+                json.dumps(value, allow_nan=False)
                 (secrets if definition["secret"] else inputs)[definition["name"]] = value
             elif definition["required"]:
                 raise ValueError()
@@ -314,6 +315,7 @@ class DispatcherWindow(QMainWindow):
                 ("created", "Создано"),
                 ("updated", "Обновлено"),
                 ("timeout", "Лимит, с"),
+                ("duration", "Секунд"),
                 ("code", "Диагностика"),
             ],
             self,
@@ -447,9 +449,15 @@ class DispatcherWindow(QMainWindow):
                 projects = [
                     r for r in value["projects"] if self.search.text().casefold() in r["name"].casefold()
                 ]
-                projects.sort(
-                    key=lambda r: str(r.get(self.project_sort, "")), reverse=self.project_descending
-                )
+
+                def sort_value(row):
+                    value = row.get(self.project_sort)
+                    return (
+                        value is not None,
+                        value if isinstance(value, (int, float)) else str(value or "").casefold(),
+                    )
+
+                projects.sort(key=sort_value, reverse=self.project_descending)
                 self.replace_rows(self.projects, projects)
                 self.replace_rows(self.jobs, value["jobs"]["rows"])
                 total = value["jobs"]["total"]
@@ -461,9 +469,11 @@ class DispatcherWindow(QMainWindow):
                 self.selected_report = value.get("report")
                 self.details.setPlainText(self.format_job(value))
             elif label == "open_workdir":
-                report = value.get("report")
-                if report:
-                    QDesktopServices.openUrl(QUrl.fromLocalFile(report["workdir"]))
+                path = value.get("workdir")
+                if path and Path(path).is_dir():
+                    QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+                else:
+                    self.details.setPlainText("Рабочая папка ещё не создана: задание не запускалось.")
             elif label == "enqueue_batch":
                 self.tabs.setCurrentIndex(1)
                 self.details.setPlainText(

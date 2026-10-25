@@ -135,6 +135,7 @@ def windows_dacl(path, *, directory=False):
                 descriptor, ctypes.byref(present), ctypes.byref(acl), ctypes.byref(defaulted)
             )
             or not present
+            or not acl.value
         ):
             raise failed(ctypes.get_last_error())
         result = advapi.SetNamedSecurityInfoW(str(path), 1, 0x80000004, None, None, acl, None)

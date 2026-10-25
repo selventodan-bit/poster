@@ -227,14 +227,15 @@ class Host:
         total = self.store.db.execute("SELECT count(*) FROM jobs j" + where, args).fetchone()[0]
         rows = self.store.db.execute(
             "SELECT j.id,j.project_id,j.version,j.status,j.attempt,j.created,j.updated,j.timeout,"
-            "e.pid,e.code,e.last_confirmed_step,e.report,e.report_sha256 FROM jobs j "
+            "e.pid,e.code,e.last_confirmed_step,e.report,e.report_sha256,"
+            "round(coalesce(e.finished,?)-e.started,2) duration FROM jobs j "
             "LEFT JOIN executions e ON e.job_id=j.id AND e.attempt=j.attempt"
             + where
             + " ORDER BY j."
             + order
             + (" DESC" if descending else " ASC")
             + " LIMIT 200 OFFSET ?",
-            [*args, max(0, int(offset))],
+            [time.time(), *args, max(0, int(offset))],
         ).fetchall()
         values = [{**dict(r), "name": self.project_name(r["project_id"], r["version"])} for r in rows]
         return {"rows": values, "total": total, "offset": offset}
@@ -243,7 +244,7 @@ class Host:
         aggregates = {
             r["project_id"]: dict(r)
             for r in self.store.db.execute(
-                "SELECT j.project_id,count(*) executions,"
+                "SELECT j.project_id,count(e.run_id) executions,"
                 "sum(j.status IN ('FAILED','TIMED_OUT','UNKNOWN','REVIEW_REQUIRED')) errors,"
                 "sum(j.status IN ('LEASED','RUNNING')) active,max(e.started) last_run,"
                 "sum(coalesce(e.finished-e.started,0)) elapsed FROM jobs j "
@@ -337,6 +338,9 @@ class Host:
             result = self.store.show(value["id"])
             history = self.store.history(value["id"])
             result["report"] = None
+            result["workdir"] = (
+                str(self.store.root / "runs" / history[0]["run_id"] / "work") if history else None
+            )
             if history and history[0]["report"]:
                 execution = history[0]
                 if not Dispatcher(self.store).validate_confirmation(execution):

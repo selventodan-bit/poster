@@ -96,6 +96,11 @@ def test_maker_distinct_key_secret_types_through_service_and_worker(host, tmp_pa
     assert value["report"]["gui_imports_forbidden"] and value["report"]["browser_imports_forbidden"]
     for path in root.rglob("*"):
         if path.is_file() and path.suffix not in {".key"}:
+            if path.suffix == ".lock":
+                # Windows byte-range locks deliberately deny concurrent reads;
+                # their single marker byte cannot contain credential data.
+                assert path.stat().st_size <= 1
+                continue
             assert b"CANARY_MAKER_KEY_4B1" not in path.read_bytes()
             assert key not in path.read_bytes()
 
