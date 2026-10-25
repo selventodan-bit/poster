@@ -58,10 +58,33 @@ def check(executable, output):
             time.sleep(0.08)
         raise AssertionError("Schedule GUI: " + label)
 
+    def stable_point(predicate, point_for, label):
+        # Qt can publish observer coordinates before its deferred LayoutRequest.
+        # Require the same point in two distinct observer generations, never a
+        # guessed sleep or a click on a hidden table's retained model rows.
+        previous, generation, count = None, None, 0
+
+        def ready(state):
+            nonlocal previous, generation, count
+            if not predicate(state) or state.get("busy"):
+                previous, count = None, 0
+                return False
+            point = point_for(state)
+            identity = (state.get("pid"), point["x"], point["y"])
+            current = observer.stat().st_mtime_ns
+            if current != generation:
+                count = count + 1 if identity == previous else 1
+                previous, generation = identity, current
+            return count >= 2
+
+        state = wait(ready, label)
+        return state, point_for(state)
+
     def click(name):
-        state = wait(lambda s: s.get("widgets", {}).get(name, {}).get("enabled"), name)
+        state, point = stable_point(
+            lambda s: s.get("widgets", {}).get(name, {}).get("enabled"), lambda s: s["widgets"][name], name
+        )
         window.set_focus()
-        point = state["widgets"][name]
         mouse.click(coords=(point["x"], point["y"]))
 
     def paste(text):
@@ -79,9 +102,10 @@ def check(executable, output):
         paste(text)
 
     def tab(index):
-        state = wait(lambda s: s.get("connected") and not s.get("busy"), "idle")
+        state, point = stable_point(
+            lambda s: s.get("connected"), lambda s: s["tabs"][index], "tab coordinates"
+        )
         window.set_focus()
-        point = state["tabs"][index]
         mouse.click(coords=(point["x"], point["y"]))
         table = {0: "projects_table", 1: "jobs_table", 2: "schedules_table"}[index]
         wait(lambda s: table in s.get("widgets", {}), "tab visible " + str(index))
