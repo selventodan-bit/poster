@@ -34,6 +34,12 @@ def check(bundle, output):
             encoding="utf-8",
             timeout=20,
         )
+        if result.returncode:
+            print(
+                "::error title=Scheduler frozen autostart::"
+                + json.dumps({"action": action, "code": "AUTOSTART_FAILED"}),
+                flush=True,
+            )
         assert result.returncode == 0, "Frozen autostart command failed: " + action
         return json.loads(result.stdout)
 
@@ -82,9 +88,15 @@ def check(bundle, output):
             if info:
                 try:
                     request(root, "shutdown")
-                    psutil.Process(info["pid"]).wait(20)
+                    try:
+                        stopped_service = psutil.Process(info["pid"])
+                        if stopped_service.create_time() == info["birth"]:
+                            stopped_service.wait(20)
+                    except psutil.NoSuchProcess:
+                        pass
                 finally:
                     terminate_tree(info["pid"], info["birth"])
+            print("::notice title=Scheduler frozen autostart::" + json.dumps(evidence), flush=True)
             (output / "report.json").write_text(json.dumps(evidence, indent=2), encoding="utf-8")
 
 

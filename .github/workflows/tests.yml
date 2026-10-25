@@ -579,8 +579,10 @@ jobs:
           if ((Get-FileHash release/poster-maker-windows.zip -Algorithm SHA256).Hash.ToLower() -ne $expected) { throw 'Scheduler ZIP checksum mismatch' }
           Expand-Archive release/poster-maker-windows.zip 'Scheduler Проверка с пробелами'
       - name: Native schedule GUI closed-window execution real frozen worker history and restart
+        id: schedule-gui
         run: python scripts/check_scheduler_windows_gui.py --exe 'Scheduler Проверка с пробелами/PosterDispatcher.exe' --output .poster/scheduler-windows-gui
       - name: Separate opt-in logon task test with mandatory task cleanup
+        if: ${{ !cancelled() && (success() || steps.schedule-gui.outcome == 'failure') }}
         run: python scripts/check_scheduler_windows_autostart.py --bundle 'Scheduler Проверка с пробелами' --output .poster/scheduler-windows-autostart
       - uses: actions/upload-artifact@v4
         if: always()

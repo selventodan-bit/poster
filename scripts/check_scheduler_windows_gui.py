@@ -197,7 +197,12 @@ def check(executable, output):
         wait(lambda s: not s.get("busy"), "history")
         window.capture_as_image().save(output / "02-history-after-gui-close.png")
         click("shutdown_service")
-        psutil.Process(service["pid"]).wait(30)
+        try:
+            stopped_service = psutil.Process(service["pid"])
+            if stopped_service.create_time() == service["birth"]:
+                stopped_service.wait(30)
+        except psutil.NoSuchProcess:
+            pass  # Confirmed exit before opening a process handle is also success.
         close_gui()
         open_gui()
         assert len(rows("jobs")) == len(rows("schedule_events")) == 1
