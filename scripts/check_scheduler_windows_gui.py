@@ -241,6 +241,7 @@ def check(executable, output):
         )
     except Exception as exc:
         report = dict(status="FAILED", phase=phase, exception_type=type(exc).__name__, commit=build["commit"])
+        print("::error title=Scheduler frozen GUI::" + json.dumps(report), flush=True)
         if window:
             try:
                 window.capture_as_image().save(output / "failure.png")
@@ -252,6 +253,8 @@ def check(executable, output):
         for pid, birth in reversed(list(owned.items())):
             terminate_tree(pid, birth)
         observer.unlink(missing_ok=True)
+        if report["status"] == "PASSED":
+            print("::notice title=Scheduler frozen GUI::" + json.dumps(report), flush=True)
         (output / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
 
 

@@ -23,15 +23,17 @@ $f=$s.GetFolder('\')
 if ($p.operation -eq 'enable') {
   $null=$f.RegisterTask($p.name,$p.xml,6,$null,$null,3,$null)
 }
-if ($p.operation -eq 'disable') {
-  try {$f.DeleteTask($p.name,0)} catch {if ($_.Exception.HResult -ne -2147024894) {throw}}
+$t=$null
+foreach ($candidate in $f.GetTasks(1)) {
+  if ($candidate.Name -eq $p.name) {$t=$candidate;break}
 }
-try {$t=$f.GetTask($p.name)} catch {
-  if ($_.Exception.HResult -eq -2147024894) {
-    @{enabled=$false;exists=$false;xml=''} | ConvertTo-Json -Compress
-    exit 0
-  }
-  throw
+if ($p.operation -eq 'disable' -and $null -ne $t) {
+  $f.DeleteTask($p.name,0)
+  $t=$null
+}
+if ($null -eq $t) {
+  @{enabled=$false;exists=$false;xml=''} | ConvertTo-Json -Compress
+  exit 0
 }
 @{enabled=[bool]$t.Enabled;exists=$true;xml=[string]$t.Xml} | ConvertTo-Json -Compress
 """

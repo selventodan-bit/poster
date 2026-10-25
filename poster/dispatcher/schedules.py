@@ -101,14 +101,15 @@ class Schedules:
             raise DispatcherError("PARAMETERS_INVALID")
         if state not in {"", "enabled", "paused", "disabled"}:
             raise DispatcherError("PARAMETERS_INVALID")
-        where = "deleted=0 AND (name LIKE ? OR project_id LIKE ? OR id LIKE ?)"
+        self.db.create_function("poster_fold", 1, str.casefold, deterministic=True)
+        where = "deleted=0 AND (poster_fold(name) LIKE ? OR project_id LIKE ? OR id LIKE ?)"
         if state == "enabled":
             where += " AND enabled=1 AND paused_code=''"
         elif state == "paused":
             where += " AND paused_code!=''"
         elif state == "disabled":
             where += " AND enabled=0"
-        args = ["%" + search[:200] + "%"] * 3
+        args = ["%" + search[:200].casefold() + "%"] * 3
         total = self.db.execute("SELECT count(*) FROM schedules WHERE " + where, args).fetchone()[0]
         rows = [
             self.public(dict(r))

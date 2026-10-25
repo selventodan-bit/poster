@@ -45,6 +45,9 @@ from .workspace import workspace_path
 from .schedule_dialog import ScheduleDialog
 
 LABELS = {
+    "ENABLED": "Включено",
+    "DISABLED": "Выключено",
+    "SCHEDULE_REVIEW": "Пауза: ручная проверка",
     "PENDING": "Ожидает",
     "LEASED": "Запускается",
     "RUNNING": "Выполняется",
@@ -99,8 +102,8 @@ class TableModel(QAbstractTableModel):
                 return datetime.fromtimestamp(
                     value, ZoneInfo(row["spec"]["timezone"]) if "spec" in row else None
                 ).strftime("%d.%m %H:%M:%S %Z")
-            if key == "status":
-                return LABELS.get(value, value)
+            if key in {"paused_code", "status"}:
+                return LABELS.get(value, MESSAGES.get(value, value))
             if key in {"version", "id"}:
                 return str(value)[:12]
             if key == "browser":
@@ -730,7 +733,7 @@ class DispatcherWindow(QMainWindow):
                 self.details.setPlainText(
                     f"История расписания {self.history_schedule} · событий {value['total']} · страница {self.history_offset // 200 + 1}\n"
                     + "\n".join(
-                        f"UTC {datetime.fromtimestamp(r['due']).astimezone().isoformat()} · {r['status'] or r['outcome']} · {r['occurrences']} событий · job {r['job_id'] or '—'} · PID {r['pid']} · {r['code'] or ''}"
+                        f"UTC {datetime.fromtimestamp(r['due'], ZoneInfo('UTC')).isoformat()} · {r['status'] or r['outcome']} · {r['occurrences']} событий · job {r['job_id'] or '—'} · PID {r['pid']} · {r['code'] or ''}"
                         for r in value["rows"]
                     )
                 )

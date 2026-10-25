@@ -351,3 +351,10 @@ def test_real_scheduled_write_service_crash_pauses_without_retry(host, tmp_path)
             server.gates["0"].set()
             request(root, "shutdown")
             wait(lambda: stopped(replacement))
+
+
+def test_schedule_search_is_case_insensitive_for_russian_projects(scheduled):  # noqa: F811
+    store, schedules, schedule, _, _ = scheduled
+    store.db.execute("UPDATE schedules SET name=? WHERE id=?", ("Ежедневный Проект", schedule))
+    assert schedules.rows(search="ежедневный проект")["total"] == 1
+    assert schedules.rows(search="ЕЖЕДНЕВНЫЙ")["total"] == 1
