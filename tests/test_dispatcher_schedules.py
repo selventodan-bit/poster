@@ -1,6 +1,7 @@
 """Controlled UTC clocks, durable admission, fail-closed secrets and real workers."""
 
 from datetime import datetime
+import json
 from pathlib import Path
 
 import pytest
@@ -270,3 +271,53 @@ def test_real_service_scheduled_worker_without_gui_and_restart(host, tmp_path): 
     finally:
         request(root, "shutdown")
         wait(lambda: stopped(replacement))
+
+
+def test_secretref_and_typed_protected_inputs_recur_without_reentry(host, tmp_path, monkeypatch):  # noqa: F811
+    import time
+    from cryptography.fernet import Fernet
+    from poster.dispatcher.host import request
+    from poster.maker.example_projects import chain
+    from poster.maker.model import Variable
+    from poster.maker.storage import Vault, save_graph
+    from test_dispatcher_service import wait
+
+    root, _ = host
+    maker = tmp_path / "Maker"
+    private = maker / ".poster/private"
+    private.mkdir(parents=True)
+    key = Fernet.generate_key()
+    (private / "session.key").write_bytes(key)
+    monkeypatch.setenv("POSTER_SESSION_KEY", key.decode())
+    vault = Vault()
+    graph = chain(
+        "Pinned secrets",
+        [
+            ("JSON.Stringify", {"value": {"variable": "saved"}}),
+            ("JSON.Stringify", {"value": {"variable": "typed"}}),
+        ],
+    )
+    graph.variables["saved"] = Variable(secret=True, value=vault.put("SCHEDULE_SAVED_CANARY"))
+    graph.variables["typed"] = Variable(secret=True, input=True, required=True)
+    source = maker / "secret.postergraph.json"
+    save_graph(source, graph, vault)
+    item = request(root, "add", source=str(source))
+    schedule = request(
+        root,
+        "schedule_create",
+        item_id=item["id"],
+        spec=spec(start=int(time.time()), interval=1),
+        options={"secrets": {"typed": {"token": "SCHEDULE_INPUT_CANARY", "n": 42, "ok": True}}},
+    )
+    source.unlink()
+    wait(lambda: request(root, "ping")["counts"].get("SUCCEEDED", 0) >= 2)
+    request(root, "schedule_change", id=schedule, enabled=False)
+    value = request(root, "schedule_list")
+    assert value["rows"][0]["version"] == item["version"]
+    assert "inputs_cipher" not in json.dumps(value)
+    for file in root.rglob("*"):
+        if file.is_file() and file.suffix not in {".key", ".lock"}:
+            raw = file.read_bytes()
+            assert b"SCHEDULE_INPUT_CANARY" not in raw
+            assert b"SCHEDULE_SAVED_CANARY" not in raw
+            assert key not in raw

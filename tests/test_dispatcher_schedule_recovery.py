@@ -69,3 +69,12 @@ def test_southern_and_half_hour_dst_calendar_does_not_double():
         )
         assert value.next_after(first - 1) == first
         assert value.next_after(first) - first >= 86400
+
+
+def test_clock_rollback_and_explicit_edit_cannot_duplicate_committed_slot(scheduled):  # noqa: F811
+    store, schedules, schedule, _, _ = scheduled
+    Scheduler(store).tick(now=START)
+    schedules.change(schedule, spec=spec(), now=START - 1)
+    Scheduler(store).tick(now=START)
+    assert len(store.rows()) == schedules.history(schedule)["total"] == 1
+    assert schedules.get(schedule)["next_due"] == START + 60

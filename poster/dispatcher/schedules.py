@@ -54,10 +54,12 @@ class Schedules:
             )
         return schedule_id
 
-    def change(self, schedule_id, *, spec=None, enabled=None, delete=False, resume=False, replacement=None):
+    def change(
+        self, schedule_id, *, spec=None, enabled=None, delete=False, resume=False, replacement=None, now=None
+    ):
         with self.store.transaction():
             row = self.get(schedule_id)
-            now = time.time()
+            now = time.time() if now is None else now
             if spec is not None:
                 parsed = parse_spec(spec)
                 self.db.execute(
@@ -231,7 +233,7 @@ class Scheduler:
                             timeout=row["timeout"],
                         )
                         self.db.execute(
-                            "INSERT INTO schedule_events VALUES(?,?,?,?,?,'ENQUEUED',?,?)",
+                            "INSERT OR IGNORE INTO schedule_events VALUES(?,?,?,?,?,'ENQUEUED',?,?)",
                             (identity, schedule_id, last, last, 1, job, now),
                         )
                     except DispatcherError as exc:
