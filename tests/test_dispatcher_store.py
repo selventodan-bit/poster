@@ -168,3 +168,18 @@ def test_pending_cancel_and_proven_unstarted_recovery(tmp_path):
     store.review(second)
     assert store.show(second)["status"] == "REVIEW_REQUIRED" and store.claim("owner", 1, 1) is None
     store.close()
+
+
+def test_stop_prevents_atomic_admission_and_cancelled_lease_never_requeues(tmp_path):
+    source = tmp_path / "a.postergraph.json"
+    project(source)
+    store = Store(tmp_path / "q.sqlite")
+    job = queue(store, source)
+    store.request_stop()
+    assert store.claim("owner", 1, 1) is None
+    store.begin_service("owner")
+    run = store.claim("owner", 1, 1)
+    store.cancel(job)
+    assert store.recover_unstarted(run["run_id"])
+    assert store.show(job)["status"] == "CANCELLED" and store.claim("owner", 1, 1) is None
+    store.close()

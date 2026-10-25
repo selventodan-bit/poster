@@ -115,7 +115,7 @@ class Dispatcher:
                 return False
             raw = path.read_bytes()
             value = json.loads(raw)
-            job = self.store.payload(execution["job_id"])
+            job = self.store.payload(execution["job_id"], private=False)
             return (
                 digest(raw) == execution["report_sha256"]
                 and value["format"] == "poster.dispatcher.report"
@@ -148,7 +148,7 @@ class Dispatcher:
                 del self.workers[run_id]
                 continue
             execution = self.store.execution(run_id)
-            job = self.store.payload(execution["job_id"])
+            job = self.store.payload(execution["job_id"], private=False)
             if job["cancel_requested"]:
                 worker.request("CANCEL_REQUESTED")
             elif time.monotonic() - worker.created > job["timeout"]:
@@ -169,7 +169,11 @@ class Dispatcher:
                         self.tick()
                         stopping = self.stop_requested or self.store.stopping()
                         if not stopping:
-                            while len(self.workers) < self.max_workers:
+                            while (
+                                len(self.workers) < self.max_workers
+                                and not self.stop_requested
+                                and not self.store.stopping()
+                            ):
                                 execution = self.store.claim(
                                     self.owner, self.max_workers, self.max_per_project
                                 )

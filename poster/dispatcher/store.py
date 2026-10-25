@@ -56,7 +56,10 @@ class Store:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.root = private_dir(self.path.with_name(self.path.name + ".data"))
         if not self.path.exists():
-            self.path.touch(mode=0o600, exist_ok=False)
+            try:
+                self.path.touch(mode=0o600, exist_ok=False)
+            except FileExistsError:
+                pass  # Another connection completed the exclusive first creation.
             restrict(self.path)
         self.db = sqlite3.connect(self.path, timeout=30, isolation_level=None)
         self.db.row_factory = sqlite3.Row
@@ -65,7 +68,9 @@ class Store:
             tables = {r[0] for r in self.db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             app = self.db.execute("PRAGMA application_id").fetchone()[0]
             version = self.db.execute("PRAGMA user_version").fetchone()[0]
-            if tables and (app != APPLICATION_ID or version != SCHEMA_VERSION):
+            if (tables and (app != APPLICATION_ID or version != SCHEMA_VERSION)) or (
+                not tables and (app or version)
+            ):
                 raise DispatcherError("STORE_INVALID")
             self.db.execute("PRAGMA foreign_keys=ON")
             self.db.execute("PRAGMA journal_mode=WAL")
@@ -161,15 +166,19 @@ class Store:
             self.event(job_id, Status.PENDING)
         return job_id
 
-    def payload(self, job_id):
-        row = self.db.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+    def payload(self, job_id, *, private=True):
+        columns = (
+            "*"
+            if private
+            else "id,project_id,version,input_names,dedup_hash,status,attempt,timeout,cancel_requested,owner,created,updated"
+        )
+        row = self.db.execute("SELECT " + columns + " FROM jobs WHERE id=?", (job_id,)).fetchone()
         if row is None:
             raise DispatcherError("JOB_MISSING")
         return dict(row)
 
     def show(self, job_id):
-        value = self.payload(job_id)
-        value.pop("inputs_cipher")
+        value = self.payload(job_id, private=False)
         value.pop("dedup_hash")
         value["input_names"] = json.loads(value["input_names"])
         value["history"] = self.history(job_id)
@@ -206,6 +215,8 @@ class Store:
 
     def claim(self, owner, max_workers, max_per_project):
         with self.transaction():
+            if self.stopping():
+                return None
             if (
                 self.db.execute("SELECT count(*) FROM jobs WHERE status IN ('LEASED','RUNNING')").fetchone()[
                     0
@@ -243,7 +254,7 @@ class Store:
     def start(self, run_id, owner, pid):
         with self.transaction():
             execution = self.execution(run_id)
-            job = self.payload(execution["job_id"])
+            job = self.payload(execution["job_id"], private=False)
             if (
                 execution["owner"] != owner
                 or execution["pid"] != pid
@@ -270,7 +281,7 @@ class Store:
             raise DispatcherError("PARAMETERS_INVALID")
         with self.transaction():
             execution = self.execution(run_id)
-            job = self.payload(execution["job_id"])
+            job = self.payload(execution["job_id"], private=False)
             if job["owner"] != execution["owner"] or job["status"] not in ACTIVE:
                 return False
             now = time.time()
@@ -310,15 +321,18 @@ class Store:
             execution = self.execution(run_id)
             if execution["status"] != Status.LEASED or execution["pid"] is not None:
                 return False
+            target = (
+                Status.CANCELLED if self.payload(execution["job_id"])["cancel_requested"] else Status.PENDING
+            )
             self.db.execute(
-                "UPDATE jobs SET status='PENDING',owner=NULL,updated=? WHERE id=? AND status='LEASED'",
-                (time.time(), execution["job_id"]),
+                "UPDATE jobs SET status=?,owner=NULL,updated=? WHERE id=? AND status='LEASED'",
+                (target, time.time(), execution["job_id"]),
             )
             self.db.execute(
                 "UPDATE executions SET status='FAILED',finished=?,code='NOT_STARTED' WHERE run_id=?",
                 (time.time(), run_id),
             )
-            self.event(execution["job_id"], Status.PENDING, "NOT_STARTED")
+            self.event(execution["job_id"], target, "NOT_STARTED")
         return True
 
     def review(self, job_id):

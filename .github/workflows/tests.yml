@@ -405,11 +405,54 @@ jobs:
           path: windows-data
       - name: Execute all four exact Windows data graphs without GUI or browser imports
         run: uv run --no-sync python scripts/check_maker_stage3b2.py --windows-dir windows-data --output .poster/windows-data-linux
+      - name: Exact Windows Maker graphs through independent Linux Dispatcher and subprocess workers
+        run: uv run --no-sync python scripts/check_dispatcher.py --windows-dir windows-data --browser-graph windows-graph/windows-maker-demo.postergraph.json --output .poster/dispatcher-windows-linux
       - uses: actions/upload-artifact@v4
         with:
           name: windows-graph-linux-report
           path: |
             .poster/windows-graph-linux/report.json
             .poster/windows-data-linux/report.json
+            .poster/dispatcher-windows-linux/report.json
+          include-hidden-files: true
+          if-no-files-found: error
+
+  dispatcher:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-24.04, python: '3.11'}
+          - {os: ubuntu-24.04, python: '3.13'}
+          - {os: windows-latest, python: '3.11'}
+          - {os: windows-latest, python: '3.12'}
+          - {os: windows-latest, python: '3.13'}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env:
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install the wheel with no GUI dependency
+        run: python -m pip install ".[dev,recorder]" -c requirements-recorder.txt
+      - if: runner.os == 'Linux'
+        run: python -m playwright install --with-deps chromium
+      - name: Real subprocess queue concurrency crash secret and browser lifecycle tests
+        run: python -m pytest -q tests/test_dispatcher_store.py tests/test_dispatcher_worker.py tests/test_dispatcher_service.py tests/test_dispatcher_cli.py --junitxml=.poster/dispatcher-tests.xml
+      - name: Public CLI executes the four saved projects
+        run: python scripts/check_dispatcher.py --output .poster/dispatcher-demo
+      - name: Publish dispatcher counts
+        if: always()
+        run: python scripts/summarize_pytest.py .poster/dispatcher-tests.xml .poster/dispatcher-tests-report.json --label 'Dispatcher ${{ matrix.os }} Python ${{ matrix.python }}'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dispatcher-${{ matrix.os }}-${{ matrix.python }}
+          path: |
+            .poster/dispatcher-tests-report.json
+            .poster/dispatcher-demo/report.json
           include-hidden-files: true
           if-no-files-found: error
