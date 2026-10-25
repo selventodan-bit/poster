@@ -64,6 +64,9 @@ class ToolsMixin(DataToolsMixin):
         self.variable_input = QCheckBox("Входной параметр")
         self.variable_required = QCheckBox("Обязательный")
         self.variable_secret = QCheckBox("Защищённое значение")
+        self.variable_secret.setObjectName("variable_secret")
+        self.variable_input.setObjectName("variable_input")
+        self.variable_required.setObjectName("variable_required")
         for widget in (self.variable_input, self.variable_required, self.variable_secret):
             form.addWidget(widget)
         self.row_buttons(

@@ -167,6 +167,8 @@ class InputsDialog(QDialog):
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
         buttons.setObjectName("inputs_buttons")
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setObjectName("confirm_enqueue")
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setObjectName("cancel_enqueue")
         buttons.accepted.connect(self.validate)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -205,8 +207,9 @@ class DispatcherWindow(QMainWindow):
         super().__init__()
         self.setObjectName("dispatcher_window")
         self.setWindowTitle("Poster Dispatcher — очередь проектов")
-        self.resize(1220, 780)
-        self.setMinimumSize(900, 620)
+        screen = QApplication.primaryScreen().availableGeometry()
+        self.resize(min(1220, screen.width() - 30), min(780, screen.height() - 50))
+        self.setMinimumSize(min(900, screen.width() - 30), min(620, screen.height() - 50))
         self.root = workspace_path()
         self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="dispatcher-client")
         self.replies = Replies(self)
@@ -296,6 +299,7 @@ class DispatcherWindow(QMainWindow):
         )
         self.tabs = QTabWidget()
         self.tabs.setObjectName("dispatcher_tabs")
+        self.tabs.tabBar().setObjectName("dispatcher_tabbar")
         self.projects = self.table("projects_table", self.projects_model)
         self.jobs = self.table("jobs_table", self.jobs_model)
         self.tabs.addTab(self.projects, "Проекты")
@@ -666,6 +670,10 @@ class DispatcherWindow(QMainWindow):
                     }
                 )
             rows[name] = values
+        tabs = []
+        for index in range(self.tabs.count()):
+            point = self.tabs.tabBar().mapToGlobal(self.tabs.tabBar().tabRect(index).center())
+            tabs.append({"index": index, "x": point.x(), "y": point.y()})
         atomic(
             Path(target),
             json.dumps(
@@ -678,6 +686,8 @@ class DispatcherWindow(QMainWindow):
                     "error": self.last_error,
                     "action": self.last_action,
                     "widgets": widgets,
+                    "tabs": tabs,
+                    "details_sha_verified": "Отчёт проверен по SHA256." in self.details.toPlainText(),
                     **rows,
                 }
             ).encode(),

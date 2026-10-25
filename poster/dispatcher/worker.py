@@ -327,7 +327,25 @@ def main(argv=None):
         store = Store(args.db)
         execution = store.execution(args.run)
         return asyncio.run(execute(store, execution, args.owner, controls))
-    except Exception:
+    except Exception as exc:
+        # Last-resort, payload-free evidence for failures outside execute's
+        # protected region (including report I/O / event-loop teardown).
+        try:
+            import traceback
+
+            if store:
+                safe_json(
+                    store.root / "runs" / args.run / "worker-failure.json",
+                    {
+                        "type": type(exc).__name__,
+                        "frames": [
+                            Path(f.filename).name + ":" + str(f.lineno)
+                            for f in traceback.extract_tb(exc.__traceback__)[-6:]
+                        ],
+                    },
+                )
+        except Exception:
+            pass
         return 2  # Never print exception payloads or interpreter tracebacks.
     finally:
         controls.finished.set()

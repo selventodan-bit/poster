@@ -110,6 +110,12 @@ def pytest_runtest_makereport(item, call):
         if code in codes:
             diagnostic["code"] = code
     root = item.funcargs.get("tmp_path")
+    diagnostic["worker_failures"] = []
+    for failure in root.rglob("worker-failure.json") if root else ():
+        try:
+            diagnostic["worker_failures"].append(json.loads(failure.read_bytes()))
+        except (OSError, ValueError):
+            pass
     for path in root.rglob("*.sqlite") if root else ():
         try:
             with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as connection:

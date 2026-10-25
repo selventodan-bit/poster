@@ -382,6 +382,41 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
 
+  dispatcher-windows-package:
+    needs: maker-windows-package
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install ".[recorder]" -c requirements-recorder.txt pywinauto==0.6.9 Pillow==11.3.0 psutil==6.1.1
+      - uses: actions/download-artifact@v4
+        with:
+          name: poster-maker-windows
+          path: release
+      - name: Check internal ZIP and extract the complete frozen distribution
+        shell: pwsh
+        run: |
+          $expected = (Get-Content release/poster-maker-windows.sha256).Split(' ')[0]
+          if ((Get-FileHash release/poster-maker-windows.zip -Algorithm SHA256).Hash.ToLower() -ne $expected) { throw 'Dispatcher ZIP checksum mismatch' }
+          Expand-Archive release/poster-maker-windows.zip 'Dispatcher Проверка с пробелами'
+      - name: Native Windows Dispatcher GUI and frozen workers without Python on PATH
+        run: python scripts/check_dispatcher_windows_gui.py --exe 'Dispatcher Проверка с пробелами/PosterDispatcher.exe' --output .poster/dispatcher-windows-gui
+        env:
+          EXPECTED_POSTER_COMMIT: '${{ github.sha }}'
+          PYTHONUTF8: '1'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dispatcher-windows-gui
+          path: |
+            .poster/dispatcher-windows-gui/report.json
+            .poster/dispatcher-windows-gui/*.png
+          include-hidden-files: true
+          if-no-files-found: error
+
   windows-graph-on-linux:
     needs: maker-windows-package
     runs-on: ubuntu-24.04
