@@ -311,11 +311,11 @@ jobs:
           python -m playwright install --with-deps chromium
           sudo apt-get install -y xvfb xauth dbus-daemon libegl1 libgl1 libopengl0 libxcb-cursor0 libxkbcommon-x11-0 libxcb-icccm4 libxcb-keysyms1 libxcb-xinerama0 libxcb-shape0 libatomic1 libxtst6
       - if: runner.os == 'Linux'
-        run: dbus-run-session -- xvfb-run -a python -m pytest -q tests/test_maker_stage3a.py tests/test_maker_unified.py --junitxml=.poster/provider-tests.xml
+        run: dbus-run-session -- xvfb-run -a python -m pytest -q tests/test_maker_stage3a.py tests/test_maker_unified.py tests/test_dispatcher_qt.py --junitxml=.poster/provider-tests.xml
         env:
           POSTER_QT_TEST_NO_SANDBOX: '1'
       - if: runner.os == 'Windows'
-        run: python -m pytest -q tests/test_maker_stage3a.py tests/test_maker_unified.py --junitxml=.poster/provider-tests.xml
+        run: python -m pytest -q tests/test_maker_stage3a.py tests/test_maker_unified.py tests/test_dispatcher_qt.py --junitxml=.poster/provider-tests.xml
       - name: Publish Qt regression counts
         if: always()
         run: python scripts/summarize_pytest.py .poster/provider-tests.xml .poster/provider-tests-report.json --label 'Qt ${{ runner.os }}'
@@ -441,7 +441,7 @@ jobs:
       - if: runner.os == 'Linux'
         run: python -m playwright install --with-deps chromium
       - name: Real subprocess queue concurrency crash secret and browser lifecycle tests
-        run: python -m pytest -q tests/test_dispatcher_store.py tests/test_dispatcher_worker.py tests/test_dispatcher_service.py tests/test_dispatcher_cli.py --junitxml=.poster/dispatcher-tests.xml
+        run: python -m pytest -q tests/test_dispatcher_store.py tests/test_dispatcher_worker.py tests/test_dispatcher_service.py tests/test_dispatcher_cli.py tests/test_dispatcher_faults.py tests/test_dispatcher_host.py --junitxml=.poster/dispatcher-tests.xml
       - name: Public CLI executes the four saved projects
         run: python scripts/check_dispatcher.py --output .poster/dispatcher-demo
       - name: Publish dispatcher counts

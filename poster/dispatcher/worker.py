@@ -116,6 +116,10 @@ async def execute(store, execution, owner, controls):
 
         graph, vault = load_graph(source)
         envelope = unseal(job["inputs_cipher"])
+        if envelope.get("project_key"):
+            from ..auth import _legacy_keys
+
+            _legacy_keys.append(envelope["project_key"].encode("ascii"))
         inputs = envelope["inputs"]
         for name, value in envelope.get("secrets", {}).items():
             inputs[name] = vault.put_value(value)
@@ -266,6 +270,8 @@ async def execute(store, execution, owner, controls):
         "project_version": job["version"],
         "attempt": execution["attempt"],
         "worker_id": os.getpid(),
+        "worker_executable": sys.executable,
+        "worker_frozen": bool(getattr(sys, "frozen", False)),
         "status": state,
         "started": started,
         "finished": time.time(),

@@ -11,6 +11,10 @@ def main():
     multiprocessing.freeze_support()
     if getattr(sys, "frozen", False):
         os.chdir(Path(sys.executable).resolve().parent)
+    if Path(sys.executable).stem.casefold() == "posterdispatcher" or "--dispatcher" in sys.argv:
+        from poster.dispatcher.qt_app import launch
+
+        return launch()
     if "--qt-browser-host" in sys.argv:
         from poster.maker.qt_host import main as host_main
 

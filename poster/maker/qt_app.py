@@ -227,6 +227,22 @@ class MakerWindow(QMainWindow, ToolsMixin):
             self.controls[key] = action
         return toolbar
 
+    def open_dispatcher(self):
+        import subprocess
+        from ..dispatcher.launcher import command, environment, process_options
+
+        try:
+            subprocess.Popen(
+                command("gui"),
+                env=environment(),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                **process_options(),
+            )
+        except Exception:
+            self.statusBar().showMessage("Не удалось открыть Dispatcher. Распакуйте полный ZIP этой версии.")
+
     def build_toolbar(self):
         self.toolbar(
             "project_toolbar",
@@ -238,6 +254,7 @@ class MakerWindow(QMainWindow, ToolsMixin):
                 ("demo", "Демо-сайт", self.demo, ""),
                 ("example", "Пример с циклом", self.example, ""),
                 ("data_examples", "Примеры 3B.2…", self.data_examples, ""),
+                ("dispatcher", "Dispatcher", self.open_dispatcher, ""),
             ],
         )
         self.addToolBarBreak()

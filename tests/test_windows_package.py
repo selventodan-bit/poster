@@ -1,4 +1,5 @@
 import importlib.util
+import hashlib
 import json
 import os
 import subprocess
@@ -156,11 +157,18 @@ def test_executable_bundle_identifies_commit_and_excludes_private_state(tmp_path
     bundle = tmp_path / "bundle"
     bundle.mkdir()
     (bundle / "Poster.exe").write_bytes(b"test executable")
+    (bundle / "PosterWorker.exe").write_bytes(b"worker")
+    (bundle / "PosterService.exe").write_bytes(b"service")
     builder = module("build_windows_app")
     checksum = builder.package(bundle, tmp_path / "out", "a" * 40)
     with zipfile.ZipFile(tmp_path / "out/poster-windows.zip") as archive:
         assert {"Poster.exe", "BUILD_INFO.json", "WINDOWS_README.txt"} <= set(archive.namelist())
-        assert json.loads(archive.read("BUILD_INFO.json")) == {"commit": "a" * 40, "browser_bundled": False}
+        info = json.loads(archive.read("BUILD_INFO.json"))
+        assert info["commit"] == "a" * 40 and not info["browser_bundled"]
+        assert info["shared_runtime"] == "_internal"
+        assert set(info["launchers"]) == {"maker", "service", "worker"}
+        for record in info["launchers"].values():
+            assert hashlib.sha256(archive.read(record["file"])).hexdigest() == record["sha256"]
         assert checksum in (tmp_path / "out/poster-windows.sha256").read_text()
     (bundle / ".poster").mkdir()
     (bundle / ".poster/session.key").write_text("private")
@@ -172,13 +180,17 @@ def test_full_maker_package_has_distinct_identity_checksum_and_measured_sizes(tm
     bundle = tmp_path / "full bundle"
     bundle.mkdir()
     (bundle / "Poster.exe").write_bytes(b"windowed exe")
+    for name in ["PosterWorker.exe", "PosterService.exe", "PosterDispatcher.exe"]:
+        (bundle / name).write_bytes(name.encode())
     (bundle / "QtWebEngineProcess.exe").write_bytes(b"Qt subprocess")
     builder = module("build_windows_app")
     output = tmp_path / "out"
     checksum = builder.package(bundle, output, "c" * 40, embedded=True)
     with zipfile.ZipFile(output / "poster-maker-windows.zip") as archive:
         info = json.loads(archive.read("BUILD_INFO.json"))
-        assert info == {"commit": "c" * 40, "browser_bundled": True, "browser_provider": "qt", "ui": "qt"}
+        assert info["commit"] == "c" * 40 and info["browser_bundled"]
+        assert info["browser_provider"] == "qt" and info["ui"] == "qt"
+        assert set(info["launchers"]) == {"maker", "service", "worker", "gui"}
         report = json.loads((output / "build-report.json").read_text())
         assert report["unpacked_bytes"] == sum(item.file_size for item in archive.infolist())
         assert report["zip_bytes"] == (output / "poster-maker-windows.zip").stat().st_size

@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 from types import SimpleNamespace
+import sys
 
 import psutil
 import pytest
@@ -20,6 +21,9 @@ CANARY = "PRIVATE_WORKER_EXCEPTION_4B1_CANARY"
 @pytest.mark.parametrize("fault", ["before_graph", "post_inflight", "result_serialization"])
 async def test_unexpected_failure_uses_durable_effects_and_never_retries(tmp_path, capsys, fault):
     injected = pytest.MonkeyPatch()
+    # execute() normally owns a one-shot worker process. Fault injection runs
+    # it in pytest, so its import guard must not escape into unrelated tests.
+    injected.setattr(sys, "meta_path", list(sys.meta_path))
     with controlled_server() as (server, base):
         source = tmp_path / "source" / "main.postergraph.json"
         source.parent.mkdir()

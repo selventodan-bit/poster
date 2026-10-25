@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import importlib.metadata
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -29,6 +30,7 @@ def licenses(bundle, embedded):
         "openpyxl",
         "et-xmlfile",
         "defusedxml",
+        "psutil",
     ):
         try:
             distribution = importlib.metadata.distribution(name)
@@ -60,6 +62,17 @@ def package(bundle, output, commit, *, embedded=False):
     if examples.is_dir():
         shutil.copytree(examples, bundle / "examples" / "maker-stage3b2", dirs_exist_ok=True)
     info = {"commit": commit, "browser_bundled": embedded}
+    launchers = {"maker": "Poster.exe", "service": "PosterService.exe", "worker": "PosterWorker.exe"}
+    if embedded:
+        launchers["gui"] = "PosterDispatcher.exe"
+    info.update(
+        modes=list(launchers),
+        shared_runtime="_internal",
+        launchers={
+            role: {"file": name, "sha256": hashlib.sha256((bundle / name).read_bytes()).hexdigest()}
+            for role, name in launchers.items()
+        },
+    )
     if embedded:
         info["browser_provider"] = "qt"
         info["ui"] = "qt"
@@ -85,6 +98,9 @@ def package(bundle, output, commit, *, embedded=False):
         "zip_bytes": target.stat().st_size,
         "unpacked_bytes": sum(p.stat().st_size for p in bundle.rglob("*") if p.is_file()),
         "browser_bundled": embedded,
+        "launcher_bytes": {name: (bundle / name).stat().st_size for name in launchers.values()},
+        "python_runtime_files": [str(p.relative_to(bundle)) for p in bundle.rglob("python3*.dll")],
+        "shared_runtime": "_internal (one Python DLL and one Qt tree; independent OS processes)",
     }
     if embedded and sys.platform == "win32":
         from PySide6.QtCore import qVersion
@@ -106,47 +122,30 @@ def main(output, *, embedded=False):
         raise ValueError("The Windows application must be built on Windows")
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     work = ROOT / ".poster" / ("freeze-maker" if embedded else "freeze")
+    work.mkdir(parents=True, exist_ok=True)
+    hook = work / "rth_build.py"
+    hook.write_text(
+        "import os\nos.environ['POSTER_FROZEN_COMMIT'] = " + repr(commit) + "\n", encoding="utf-8"
+    )
     command = [
         sys.executable,
         "-m",
         "PyInstaller",
         "--noconfirm",
         "--clean",
-        "--onedir",
-        "--windowed",
-        "--python-option",
-        "X utf8",
-        "--noupx",
-        "--name",
-        "Poster",
         "--distpath",
         str(work / "dist"),
         "--workpath",
         str(work / "build"),
-        "--specpath",
-        str(work),
-        "--paths",
-        str(ROOT),
-        "--collect-all",
-        "playwright",
-        "--collect-data",
-        "poster",
+        str(ROOT / "scripts/windows_dispatcher.spec"),
     ]
-    if embedded:
-        command += ["--hidden-import", "poster.maker.qt_host", "--hidden-import", "poster.maker.qt_app"]
-    else:
-        command += [
-            "--exclude-module",
-            "poster.maker.qt_host",
-            "--exclude-module",
-            "poster.maker.qt_app",
-            "--exclude-module",
-            "PySide6",
-        ]
-    for distribution in ("playwright", "httpx", "pydantic", "cryptography", "filelock"):
-        command += ["--copy-metadata", distribution]
-    command.append(str(ROOT / "poster" / "desktop_entry.py"))
-    subprocess.run(command, cwd=ROOT, check=True)
+    env = {
+        **os.environ,
+        "POSTER_BUILD_ROOT": str(ROOT),
+        "POSTER_BUILD_EMBEDDED": str(int(embedded)),
+        "POSTER_BUILD_HOOK": str(hook),
+    }
+    subprocess.run(command, cwd=ROOT, check=True, env=env)
     package(work / "dist" / "Poster", output, commit, embedded=embedded)
 
 

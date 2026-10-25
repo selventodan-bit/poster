@@ -3,12 +3,12 @@
 import os
 import signal
 import subprocess
-import sys
 import time
 
 import psutil
 
 from .models import DispatcherError
+from .launcher import command, environment, process_options
 
 
 def same_process(pid, birth):
@@ -158,41 +158,28 @@ class WindowsJob:
 
 class WorkerProcess:
     def __init__(self, store, execution):
-        if getattr(sys, "frozen", False):
-            raise DispatcherError("PROCESS_CONTROL_FAILED")
         self.execution = execution
         self.created = time.monotonic()
         self.process = self.job = None
         self.cancelled_at = self.reason = None
         self.started = False
-        env = {
-            k: v for k, v in os.environ.items() if k not in {"POSTER_SESSION_KEY", "PYTHONHOME", "PYTHONPATH"}
-        }
-        env["PYTHONUTF8"] = "1"
-        options = (
-            {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
-            if os.name == "nt"
-            else {"start_new_session": True}
-        )
         try:
             self.process = subprocess.Popen(
-                [
-                    sys.executable,
-                    "-m",
-                    "poster.dispatcher.worker",
+                command(
+                    "worker",
                     "--db",
                     str(store.path),
                     "--run",
                     execution["run_id"],
                     "--owner",
                     execution["owner"],
-                ],
+                ),
                 cwd=store.root,
-                env=env,
+                env=environment(),
                 stdin=subprocess.PIPE,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                **options,
+                **process_options(),
             )
             self.birth = psutil.Process(self.process.pid).create_time()
             if os.name == "nt":

@@ -27,13 +27,49 @@ def enqueue(
     profile_root=None,
     profile_id=None,
     key_file=None,
+    project_key=None,
 ):
     if key is not None and (previous := store.find_key(key)):
         return previous
     key_setup(store.root, key_file)
     snapshots = Snapshots(store.root)
     project_id, version = snapshots.create(source)
+    return enqueue_snapshot(
+        store,
+        project_id,
+        version,
+        source,
+        inputs=inputs,
+        secrets=secrets,
+        key=key,
+        timeout=timeout,
+        profile_root=profile_root,
+        profile_id=profile_id,
+        project_key=project_key,
+    )
+
+
+def enqueue_snapshot(
+    store,
+    project_id,
+    version,
+    source,
+    *,
+    inputs=None,
+    secrets=None,
+    key=None,
+    timeout=300,
+    profile_root=None,
+    profile_id=None,
+    project_key=None,
+):
+    """Admit the inspected immutable version, never recapture a moving source."""
+    if key is not None and (previous := store.find_key(key)):
+        return previous
+    snapshots = Snapshots(store.root)
     manifest, files = snapshots.read(version)
+    if manifest["project_id"] != project_id:
+        raise DispatcherError("SNAPSHOT_INVALID")
     graph = Graph.model_validate_json(files[manifest["main"]])
     inputs, secrets = inputs or {}, secrets or {}
     if set(inputs) & set(secrets):
@@ -52,6 +88,15 @@ def enqueue(
     except Exception as exc:
         raise DispatcherError("INPUT_INVALID") from exc
     envelope = {"inputs": inputs, "secrets": secrets}
+    if project_key:
+        from cryptography.fernet import Fernet
+
+        try:
+            Fernet(project_key.encode())
+        except Exception as exc:
+            raise DispatcherError("KEY_INVALID") from exc
+        # Encrypted with the queue key; never an argv/environment hand-off.
+        envelope["project_key"] = project_key
     if profile_id:
         if not profile_root:
             raise DispatcherError("PARAMETERS_INVALID")
@@ -76,7 +121,7 @@ def enqueue(
 
 
 class Dispatcher:
-    def __init__(self, store, *, max_workers=2, max_per_project=1, poll=0.03, key_file=None):
+    def __init__(self, store, *, max_workers=2, max_per_project=1, poll=0.03, key_file=None, on_started=None):
         if not 1 <= max_workers <= 32 or not 1 <= max_per_project <= 32 or not 0.01 <= poll <= 5:
             raise DispatcherError("PARAMETERS_INVALID")
         self.store = store
@@ -85,6 +130,7 @@ class Dispatcher:
         self.owner = uuid.uuid4().hex
         self.workers = {}
         self.stop_requested = False
+        self.on_started = on_started
 
     def lock(self):
         return FileLock(str(plain_path(Path(str(self.store.path) + ".dispatcher.lock"))), timeout=0)
@@ -167,6 +213,8 @@ class Dispatcher:
                 self.recover()
                 self.store.begin_service(self.owner)
                 try:
+                    if self.on_started:
+                        self.on_started()
                     while True:
                         self.tick()
                         stopping = self.stop_requested or self.store.stopping()
