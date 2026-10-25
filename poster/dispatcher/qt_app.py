@@ -439,7 +439,8 @@ class DispatcherWindow(QMainWindow):
                     )
                     return
         else:
-            self.last_error = None
+            if label != "dashboard":
+                self.last_error = None
             if label == "connect":
                 self.connected, self.service = True, value
                 for key, number in value["settings"].items():
@@ -502,6 +503,9 @@ class DispatcherWindow(QMainWindow):
                 self.banner.setStyleSheet("")
                 if self.service.get("error"):
                     self.banner.setText(MESSAGES[self.service["error"]])
+                elif self.last_error:
+                    self.banner.setText(MESSAGES[self.last_error])
+                    self.banner.setStyleSheet("color: #b02828")
         self.update_buttons()
         self.observe()
         if self.pending:

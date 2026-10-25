@@ -110,6 +110,14 @@ async def execute(store, execution, owner, controls):
             for n in main_graph.nodes
         )
         sys.meta_path.insert(0, HeadlessGuard(browser))
+        if browser:
+            from ..browser import find_browser
+
+            try:
+                if not find_browser():
+                    raise ValueError()
+            except ValueError as exc:
+                raise DispatcherError("BROWSER_UNAVAILABLE") from exc
         source = snapshots.materialize(job["version"], run_dir / "project")
         from ..maker.storage import load_graph
         from ..maker.runtime import GraphRunner

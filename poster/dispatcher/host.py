@@ -382,7 +382,10 @@ class Host:
                 except AuthenticationError:
                     continue
                 except (OSError, EOFError):
-                    return
+                    if self.done.is_set():
+                        return
+                    time.sleep(0.05)
+                    continue  # A client dying during authentication is not host shutdown.
                 with connection:
                     try:
                         if not connection.poll(5):

@@ -22,6 +22,14 @@ from windows_gui_launch import open_portable
 @contextmanager
 def controlled():
     class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(
+                b"""<button id="ok" onclick="fetch('/browser-hit',{method:'POST'}).then(()=>{document.body.insertAdjacentHTML('beforeend','<p id=done>done</p>')})">Go</button>"""
+            )
+
         def do_POST(self):
             raw = self.rfile.read(int(self.headers.get("Content-Length", "0")))
             label = self.path.strip("/")
@@ -503,6 +511,51 @@ def check(executable, output):
             stop()
             scenarios.append("maker_gui_protected_typed_value_to_frozen_worker")
             window.capture_as_image().save(output / "04-maker-secret-succeeded.png")
+            browser_path = sources / "browser.postergraph.json"
+            save_graph(
+                browser_path,
+                chain(
+                    "Frozen installed Chrome",
+                    [
+                        ("Browser.OpenURL", {"url": base + "/browser"}),
+                        ("Browser.Click", {"selector": "#ok"}),
+                        ("Browser.WaitElement", {"selector": "#done", "timeout_ms": 60000}),
+                        ("Files.WriteText", {"path": "browser.txt", "text": "real browser"}),
+                    ],
+                ),
+                Vault(),
+            )
+            add(browser_path, "Frozen installed Chrome")
+            browser_job = enqueue("Frozen installed Chrome")
+            start()
+            wait(
+                lambda _: any(c["label"] == "browser-hit" for c in server.calls),
+                "real installed browser POST",
+            )
+            browser_worker = assert_worker(browser_job)
+            browser_children = browser_worker.children(recursive=True)
+            chromium = [
+                p
+                for p in browser_children
+                if p.name().lower() in {"chrome.exe", "msedge.exe", "chromium.exe"}
+            ]
+            assert chromium
+            for child in browser_children:
+                owned[child.pid] = child.create_time()
+            proofs["browser"] = {
+                "provider": "existing ChromiumProvider",
+                "executable": chromium[0].exe(),
+                "pids": [p.pid for p in chromium],
+                "downloaded": False,
+            }
+            server.gates["browser-hit"].set()
+            assert state_job(browser_job, {"SUCCEEDED", "FAILED", "UNKNOWN"}) == "SUCCEEDED"
+            assert (
+                Path(evidence(browser_job)["public_report"]["workdir"]) / "browser.txt"
+            ).read_text() == "real browser"
+            stop()
+            wait(lambda _: all(not p.is_running() for p in browser_children), "browser descendants closed")
+            scenarios.append("frozen_worker_existing_chrome_no_download_and_cleanup")
             # Move the app directory after explicit service shutdown. User data
             # and the original Maker folder remain intact, with no migration.
             click("shutdown_service")

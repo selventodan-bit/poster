@@ -18,6 +18,14 @@ from poster.maker.storage import Vault, save_graph
 from test_dispatcher_service import controlled_server, wait
 
 
+def stopped(info):
+    try:
+        process = same_process(info["pid"], info["birth"])
+        return process is None or process.status() == psutil.STATUS_ZOMBIE
+    except psutil.NoSuchProcess:
+        return True  # Exit between create_time() and status() is confirmed exit.
+
+
 @pytest.fixture
 def host(tmp_path):
     root = tmp_path / "Служба с пробелом"
@@ -27,12 +35,7 @@ def host(tmp_path):
     finally:
         try:
             request(root, "shutdown")
-            wait(
-                lambda: (
-                    not same_process(info["pid"], info["birth"])
-                    or psutil.Process(info["pid"]).status() == psutil.STATUS_ZOMBIE
-                )
-            )
+            wait(lambda: stopped(info))
         except (DispatcherError, AssertionError):
             terminate_tree(info["pid"], info["birth"])
 
@@ -114,12 +117,7 @@ def test_service_crash_recovers_without_post_retry(host, tmp_path):
         wait(lambda: server.calls)
         # Kill only the host: Windows Job Object / control-pipe EOF owns cleanup.
         psutil.Process(info["pid"]).kill()
-        wait(
-            lambda: (
-                not same_process(info["pid"], info["birth"])
-                or psutil.Process(info["pid"]).status() == psutil.STATUS_ZOMBIE
-            )
-        )
+        wait(lambda: stopped(info))
         time.sleep(0.2)
         replacement = ensure_service(root)
         try:
@@ -131,12 +129,7 @@ def test_service_crash_recovers_without_post_retry(host, tmp_path):
         finally:
             server.gates["0"].set()
             request(root, "shutdown")
-            wait(
-                lambda: (
-                    not same_process(replacement["pid"], replacement["birth"])
-                    or psutil.Process(replacement["pid"]).status() == psutil.STATUS_ZOMBIE
-                )
-            )
+            wait(lambda: stopped(replacement))
 
 
 def test_missing_existing_queue_key_never_replaced(tmp_path, monkeypatch):
