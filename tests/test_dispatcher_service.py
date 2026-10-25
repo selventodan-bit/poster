@@ -317,3 +317,84 @@ def test_repeated_stop_start_cycles_keep_history(tmp_path):
     store = Store(path)
     assert store.counts() == {"SUCCEEDED": 3}
     store.close()
+
+
+def test_explicit_profile_is_serialized_across_independent_queues(tmp_path):
+    from poster.maker.profiles import Profiles
+
+    profiles = Profiles(tmp_path / "profiles")
+    profile_id = profiles.create("Controlled profile")
+    with controlled_server() as (server, base):
+        stores = [Store(tmp_path / f"{i}.sqlite") for i in range(2)]
+        sources = [
+            graph_file(tmp_path, [("Browser.OpenURL", {"url": base + "/hold/" + str(i)})], name=str(i))
+            for i in range(2)
+        ]
+        jobs = [
+            enqueue(store, source, profile_root=profiles.root, profile_id=profile_id)
+            for store, source in zip(stores, sources, strict=True)
+        ]
+        processes = []
+        try:
+            processes.append(launch(stores[0]))
+            wait(lambda: any(c["path"] == "/hold/0" for c in server.calls))
+            processes.append(launch(stores[1]))
+            wait(lambda: stores[1].show(jobs[1])["status"] == "RUNNING")
+            assert not any(c["path"] == "/hold/1" for c in server.calls)
+            server.gates["0"].set()
+            finish(processes[0])
+            wait(lambda: any(c["path"] == "/hold/1" for c in server.calls))
+            server.gates["1"].set()
+            finish(processes[1])
+            assert all(
+                store.show(job)["status"] == "SUCCEEDED" for store, job in zip(stores, jobs, strict=True)
+            )
+            assert (
+                profiles.open(profile_id).data["revision"] == 0
+            )  # Dispatcher never implicitly saves a session.
+        finally:
+            for gate in server.gates.values():
+                gate.set()
+            for process in processes:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait()
+            for store in stores:
+                store.close()
+
+
+def test_worker_browser_crash_reaps_owned_browser_descendants(tmp_path):
+    with controlled_server() as (server, base):
+        source = graph_file(tmp_path, [("Browser.OpenURL", {"url": base + "/hold/0"})])
+        store = Store(tmp_path / "q.sqlite")
+        job = enqueue(store, source)
+        process = launch(store)
+        try:
+            wait(lambda: any(c["path"] == "/hold/0" for c in server.calls))
+            worker = psutil.Process(store.history(job)[0]["pid"])
+            descendants = [(child.pid, child.create_time()) for child in worker.children(recursive=True)]
+            assert descendants  # Real Chromium / Playwright processes, no mock provider.
+            worker.kill()
+            finish(process)
+            assert store.show(job)["status"] == "UNKNOWN"
+
+            def gone():
+                for pid, birth in descendants:
+                    try:
+                        candidate = psutil.Process(pid)
+                        if (
+                            abs(candidate.create_time() - birth) < 0.01
+                            and candidate.status() != psutil.STATUS_ZOMBIE
+                        ):
+                            return False
+                    except psutil.NoSuchProcess:
+                        pass
+                return True
+
+            wait(gone)
+        finally:
+            server.gates["0"].set()
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+            store.close()

@@ -201,6 +201,8 @@ async def execute(store, execution, owner, controls):
             )
     except Exception as exc:
         code = exc.code if isinstance(exc, DispatcherError) else "EXECUTION_FAILED"
+        if getattr(exc, "code", None):
+            node_code = safe_code(exc.code)
         state = Status.FAILED
     finally:
         if runner:
@@ -222,6 +224,8 @@ async def execute(store, execution, owner, controls):
                     path.chmod(0o600)
             shutil.rmtree(run_dir / "project")
     current = store.execution(execution["run_id"])
+    from ..maker.runtime import ERRORS
+
     report = {
         "format": "poster.dispatcher.report",
         "version": 1,
@@ -238,6 +242,7 @@ async def execute(store, execution, owner, controls):
         "code": code,
         "message": MESSAGES.get(code, ""),
         "node_error_code": node_code,
+        "node_message": ERRORS.get(node_code, ""),
         "last_confirmed_step": current["last_confirmed_step"],
         "effects_may_have_occurred": bool(current["effects_possible"]),
         "workdir": str(workdir),

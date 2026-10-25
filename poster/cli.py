@@ -18,6 +18,9 @@ from .storage.local import Registry
 def parser():
     p = argparse.ArgumentParser(prog="poster", description="Recorder → YAML → HTTP automation")
     sub = p.add_subparsers(dest="command", required=True)
+    from .dispatcher.cli import register as register_dispatcher
+
+    register_dispatcher(sub)
     sub.add_parser("keygen", help="Generate a session encryption key; keep it outside project folders")
     sub.add_parser("recorder", help="Open the local Tk Recorder UI")
     sub.add_parser("maker", help="Open the visual ProjectMaker")
@@ -155,7 +158,11 @@ def main(argv=None):
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
     try:
-        if a.command == "keygen":
+        if a.command == "dispatcher":
+            from .dispatcher.cli import main as dispatcher_main
+
+            return dispatcher_main(a)
+        elif a.command == "keygen":
             from cryptography.fernet import Fernet
 
             print(Fernet.generate_key().decode())
