@@ -98,7 +98,7 @@ def reap_detached(run_id, birth=0):
 
     A launch-only run marker survives reparenting and is not graph-controlled.
     Restrict discovery to this UID, then recheck exact process birth before
-    signalling. Never inspect/publish command lines or environment contents.
+    signalling. Only consume the run marker; never log environment or argv.
     Windows uses the existing kernel Job Object instead.
     """
     if sys.platform != "linux" or not run_id:

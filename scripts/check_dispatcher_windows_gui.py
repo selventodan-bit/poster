@@ -217,6 +217,21 @@ def check(executable, output):
         process.wait(timeout=25)
         process = None
 
+    def service_exited():
+        # Windows retains a PID while another process holds a handle to its
+        # exited kernel object. Confirm termination with WaitForSingleObject
+        # through psutil.wait(), and guard reuse with the recorded birth.
+        try:
+            candidate = psutil.Process(service["pid"])
+            if candidate.create_time() != service["birth"]:
+                return True
+            candidate.wait(timeout=0)
+            return True
+        except psutil.NoSuchProcess:
+            return True
+        except psutil.TimeoutExpired:
+            return False
+
     def add(path, name):
         tab(0)
         fill("dispatcher_search", "")
@@ -609,7 +624,7 @@ def check(executable, output):
             # Move the app directory after explicit service shutdown. User data
             # and the original Maker folder remain intact, with no migration.
             click("shutdown_service")
-            wait(lambda _: not psutil.pid_exists(service["pid"]), "service explicit shutdown")
+            wait(lambda _: service_exited(), "service explicit shutdown")
             close_gui()
             previous = executable.parent
             moved = previous.with_name(previous.name + " Перенесён")
@@ -633,7 +648,7 @@ def check(executable, output):
             stop()
             scenarios.append("missing_browser_path_diagnosed_without_download")
             click("shutdown_service")
-            wait(lambda _: not psutil.pid_exists(service["pid"]), "final service shutdown")
+            wait(lambda _: service_exited(), "final service shutdown")
             close_gui()
             # A missing role must be diagnosed before claiming a job, with no
             # fallback to the harness's installed Python.
@@ -652,7 +667,7 @@ def check(executable, output):
             click("cancel_jobs")
             state_job(missing_worker_job, {"CANCELLED"})
             click("shutdown_service")
-            wait(lambda _: not psutil.pid_exists(service["pid"]), "missing-worker host shutdown")
+            wait(lambda _: service_exited(), "missing-worker host shutdown")
             close_gui()
             disabled_worker.rename(worker_file)
             disabled_worker = None
