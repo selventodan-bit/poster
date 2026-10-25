@@ -345,38 +345,55 @@ def test_explicit_profile_is_serialized_across_independent_queues(tmp_path):
             graph_file(tmp_path, [("Browser.OpenURL", {"url": base + "/hold/" + str(i)})], name=str(i))
             for i in range(2)
         ]
-        jobs = [
-            enqueue(store, source, profile_root=profiles.root, profile_id=profile_id)
-            for store, source in zip(stores, sources, strict=True)
-        ]
         processes = []
         try:
-            processes.append(launch(stores[0]))
-            wait(lambda: any(c["path"] == "/hold/0" for c in server.calls))
-            processes.append(launch(stores[1]))
-            wait(lambda: stores[1].show(jobs[1])["status"] == "RUNNING")
-            assert not any(c["path"] == "/hold/1" for c in server.calls)
-            server.gates["0"].set()
-            finish(processes[0])
-            wait(lambda: any(c["path"] == "/hold/1" for c in server.calls))
-            server.gates["1"].set()
-            finish(processes[1])
-            if any(store.show(job)["status"] != "SUCCEEDED" for store, job in zip(stores, jobs, strict=True)):
-                diagnostic = []
-                for store, job in zip(stores, jobs, strict=True):
-                    execution = store.history(job)[0]
-                    safe = {key: execution[key] for key in ("status", "code", "exit_code")}
-                    if execution["report"]:
-                        report = json.loads(Path(execution["report"]).read_bytes())
-                        safe.update({key: report.get(key) for key in ("node_error_code", "cleanup_failure")})
-                    diagnostic.append(safe)
-                print("\n::error title=Profile worker states::" + json.dumps(diagnostic), flush=True)
-            assert all(
-                store.show(job)["status"] == "SUCCEEDED" for store, job in zip(stores, jobs, strict=True)
-            )
-            assert (
-                profiles.open(profile_id).data["revision"] == 0
-            )  # Dispatcher never implicitly saves a session.
+            for cycle in range(5):
+                with server.condition:
+                    server.calls.clear()
+                    for gate in server.gates.values():
+                        gate.clear()
+                jobs = [
+                    enqueue(store, source, profile_root=profiles.root, profile_id=profile_id)
+                    for store, source in zip(stores, sources, strict=True)
+                ]
+                first = launch(stores[0])
+                processes.append(first)
+                wait(lambda: any(c["path"] == "/hold/0" for c in server.calls))
+                second = launch(stores[1])
+                processes.append(second)
+                wait(
+                    lambda jobs=jobs: any(
+                        e["code"] == "PROFILE_BUSY" for e in stores[1].show(jobs[1])["events"]
+                    )
+                )
+                assert not any(c["path"] == "/hold/1" for c in server.calls)
+                server.gates["0"].set()
+                finish(first)
+                wait(lambda: any(c["path"] == "/hold/1" for c in server.calls))
+                server.gates["1"].set()
+                finish(second)
+                if any(
+                    store.show(job)["status"] != "SUCCEEDED" for store, job in zip(stores, jobs, strict=True)
+                ):
+                    diagnostic = []
+                    for store, job in zip(stores, jobs, strict=True):
+                        execution = store.history(job)[0]
+                        safe = {key: execution[key] for key in ("status", "code", "exit_code")}
+                        if execution["report"]:
+                            report = json.loads(Path(execution["report"]).read_bytes())
+                            safe.update(
+                                {key: report.get(key) for key in ("node_error_code", "cleanup_failure")}
+                            )
+                        diagnostic.append(safe)
+                    print(
+                        "\n::error title=Profile worker states::"
+                        + json.dumps({"cycle": cycle, "states": diagnostic}),
+                        flush=True,
+                    )
+                assert all(
+                    store.show(job)["status"] == "SUCCEEDED" for store, job in zip(stores, jobs, strict=True)
+                )
+            assert profiles.open(profile_id).data["revision"] == 0
         finally:
             for gate in server.gates.values():
                 gate.set()

@@ -120,11 +120,15 @@ async def execute(store, execution, owner, controls):
 
                 value = envelope["profile"]
                 profile_lock = FileLock(value["lock"])
+                wait_reported = False
                 while not controls.reason:
                     try:
                         profile_lock.acquire(timeout=0)
                         break
                     except Timeout:
+                        if not wait_reported:
+                            store.note(execution["run_id"], "PROFILE_BUSY")
+                            wait_reported = True
                         await asyncio.sleep(0.05)
                 if not controls.reason:
                     profile = Profile(Profiles(private_dir(run_dir / "profile")), value["key"], value["data"])

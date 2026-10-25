@@ -284,6 +284,14 @@ class Store:
                 (confirmed, int(effects), run_id),
             )
 
+    def note(self, run_id, code):
+        if code not in MESSAGES:
+            raise DispatcherError("PARAMETERS_INVALID")
+        with self.transaction():
+            execution = self.execution(run_id)
+            if execution["status"] == Status.RUNNING:
+                self.event(execution["job_id"], Status.RUNNING, code)
+
     def complete(self, run_id, status, *, code="", exit_code=None, report=None, report_sha256=None):
         status = Status(status)
         if status not in TERMINAL or (code and code not in MESSAGES):
