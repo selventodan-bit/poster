@@ -3,12 +3,14 @@
 import subprocess
 import sys
 import time
+import json
+from pathlib import Path
 
 from cryptography.fernet import Fernet
 import psutil
 import pytest
 
-from poster.dispatcher.host import ensure_service, request
+from poster.dispatcher.host import ensure_service, request, endpoint
 from poster.dispatcher.models import DispatcherError
 from poster.dispatcher.processes import same_process, terminate_tree
 from poster.dispatcher.workspace import queue_key
@@ -57,6 +59,11 @@ def test_service_survives_client_exit_and_preserves_catalog_and_history(host, tm
         # A short-lived independent client exits while the real worker is blocked.
         script = "from poster.dispatcher.host import request; import sys; request(__import__('pathlib').Path(sys.argv[1]),'ping')"
         subprocess.run([sys.executable, "-c", script, str(root)], check=True, timeout=15)
+        from multiprocessing import connection
+
+        address, family = endpoint(root)
+        raw = connection.PipeClient(address) if family == "AF_PIPE" else connection.SocketClient(address)
+        raw.close()  # GUI crash in the middle of authentication, before JSON.
         assert request(root, "ping")["pid"] == info["pid"]
         assert request(root, "show", id=job)["status"] == "RUNNING"
         execution = request(root, "show", id=job)["history"][0]
@@ -155,3 +162,59 @@ def test_incorrect_maker_key_does_not_register_or_replace_it(host, tmp_path, mon
         request(root, "add", source=str(path))
     assert error.value.code == "PROJECT_KEY_REQUIRED"
     assert request(root, "projects") == []
+
+
+def test_registered_snapshot_survives_source_removal_and_report_tampering_is_rejected(host, tmp_path):
+    root, _ = host
+    source = tmp_path / "immutable.postergraph.json"
+    item = register(root, source, [("Files.WriteText", {"path": "out.txt", "text": "original version"})])
+    source.unlink()  # No live-file fallback when queueing an inspected version.
+    job = request(root, "enqueue", ids=[item["id"]], request_id="immutable")[0]
+    request(root, "start")
+    wait(lambda: request(root, "show", id=job)["status"] == "SUCCEEDED")
+    request(root, "stop")
+    wait(lambda: not request(root, "ping")["running"])
+    report = request(root, "show", id=job)
+    assert (Path(report["workdir"]) / "out.txt").read_text() == "original version"
+    path = Path(report["history"][0]["report"])
+    raw = path.read_bytes()
+    value = json.loads(raw)
+    value["status"] = "FAILED"
+    path.write_text(json.dumps(value))
+    with pytest.raises(DispatcherError) as error:
+        request(root, "show", id=job)
+    assert error.value.code == "REPORT_INVALID"
+    assert request(root, "jobs")["rows"][0]["attempt"] == 1
+    path.write_bytes(raw)
+
+
+def test_service_rejects_live_settings_change_and_bounded_pagination(host, tmp_path):
+    from poster.dispatcher.store import Store
+
+    root, _ = host
+    source = tmp_path / "page.postergraph.json"
+    item = register(root, source, [])
+    store = Store(root / "dispatcher.sqlite")
+    cipher = Fernet((root / "queue.key").read_bytes())
+    try:
+        for _ in range(430):
+            store.enqueue(
+                item["project_id"], item["version"], source, cipher.encrypt(b'{"inputs":{},"secrets":{}}')
+            )
+    finally:
+        store.close()
+    first = request(root, "jobs", search="Рабочий", order="created", descending=False)
+    second = request(root, "jobs", offset=200, status="PENDING", order="created", descending=False)
+    last = request(root, "jobs", offset=400, order="created", descending=False)
+    assert first["total"] == second["total"] == 430
+    assert len(first["rows"]) == len(second["rows"]) == 200 and len(last["rows"]) == 30
+    assert not {r["id"] for r in first["rows"]} & {r["id"] for r in second["rows"]}
+    request(root, "cancel", ids=[r["id"] for page in [first, second, last] for r in page["rows"]])
+    assert request(root, "ping")["counts"] == {"CANCELLED": 430}
+    request(root, "start")
+    with pytest.raises(DispatcherError) as error:
+        request(root, "settings", max_workers=4, max_per_project=2, timeout=13)
+    assert error.value.code == "DISPATCHER_BUSY"
+    request(root, "stop")
+    wait(lambda: not request(root, "ping")["running"])
+    assert request(root, "settings", max_workers=4, max_per_project=2, timeout=13)["max_workers"] == 4

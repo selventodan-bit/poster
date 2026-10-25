@@ -1,4 +1,12 @@
-# Poster 3.0 — ProjectMaker, этап 3B.2
+# Poster 3.0 — ProjectMaker + Dispatcher, этап 4B.1
+
+**Windows Dispatcher:** распакуйте Full ZIP и дважды щёлкните `PosterDispatcher.exe`.
+Добавляйте проекты Maker, задавайте входы и управляйте настоящей очередью из GUI.
+Самостоятельная служба продолжает задания после закрытия окна; каждый граф
+исполняет отдельный упакованный `PosterWorker.exe`, без установленного Python.
+Runtime и Qt общие для EXE. [Запуск, ключи, входные файлы и ограничения](docs/POSTER_STAGE4B1_DISPATCHER_GUI.md).
+HTTP/data/files-only worker не импортирует Qt/Tkinter/Playwright; Browser-кубики
+используют установленный Chrome/Chromium/Edge без автоматической загрузки.
 
 **Единый Full Maker:** Qt Widgets + QGraphicsScene + QWebEngineView в одном окне, поиск/undo/redo, профили, конструктор элементов и прежний Python GraphRunner. [Архитектура, проверки и ограничения](docs/PROJECTMAKER_3_STAGE3B1.md).
 

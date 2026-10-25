@@ -186,6 +186,7 @@ def check(executable, output):
 
     def add(path, name):
         tab(0)
+        fill("dispatcher_search", "")
         click("add_project")
         native_file("Добавить сохранённый проект Maker", path)
         wait(lambda s: any(r["name"] == name for r in s.get("projects", [])), "registered " + name)

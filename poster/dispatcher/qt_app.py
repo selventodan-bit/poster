@@ -445,6 +445,9 @@ class DispatcherWindow(QMainWindow):
                 self.connected, self.service = True, value
                 for key, number in value["settings"].items():
                     getattr(self, key).setValue(number)
+            elif label == "add":
+                self.search.clear()
+                self.tabs.setCurrentIndex(0)
             elif label == "dashboard":
                 self.service = value["service"]
                 projects = [
