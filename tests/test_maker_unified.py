@@ -135,7 +135,9 @@ def scenario(root):
                 raise AssertionError(label + ": " + str(window.last_error))
             if predicate():
                 return
-            QTest.qWait(10)
+            # processEvents above services Qt; explicitly yield Python's worker
+            # between polls, including cold XLSX imports on Windows.
+            time.sleep(0.01)
         import traceback
 
         print(
