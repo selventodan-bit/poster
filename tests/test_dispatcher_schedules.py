@@ -321,3 +321,33 @@ def test_secretref_and_typed_protected_inputs_recur_without_reentry(host, tmp_pa
             assert b"SCHEDULE_INPUT_CANARY" not in raw
             assert b"SCHEDULE_SAVED_CANARY" not in raw
             assert key not in raw
+
+
+def test_real_scheduled_write_service_crash_pauses_without_retry(host, tmp_path):  # noqa: F811
+    import time
+    import psutil
+    from poster.dispatcher.host import ensure_service, request
+    from test_dispatcher_host import register, stopped
+    from test_dispatcher_service import controlled_server, wait
+
+    root, info = host
+    with controlled_server() as (server, base):
+        item = register(root, tmp_path / "write.postergraph.json", [("HTTP.Post", {"url": base + "/hold/0"})])
+        schedule = request(
+            root, "schedule_create", item_id=item["id"], spec=spec(start=int(time.time()), interval=1)
+        )
+        wait(lambda: server.calls)
+        psutil.Process(info["pid"]).kill()
+        wait(lambda: stopped(info))
+        replacement = ensure_service(root)
+        try:
+            wait(lambda: request(root, "schedule_list")["rows"][0]["paused_code"] == "SCHEDULE_REVIEW")
+            history = request(root, "schedule_history", id=schedule)["rows"]
+            assert history[0]["status"] == "UNKNOWN"
+            assert len(server.calls) == 1
+            request(root, "schedule_change", id=schedule, enabled=True)
+            assert request(root, "schedule_list")["rows"][0]["paused_code"] == "SCHEDULE_REVIEW"
+        finally:
+            server.gates["0"].set()
+            request(root, "shutdown")
+            wait(lambda: stopped(replacement))
