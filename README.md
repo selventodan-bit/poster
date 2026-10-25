@@ -152,7 +152,8 @@ ruff format --check .
 Тесты: настоящий Chromium capture → hot load → словари → HTTP → проверка обеих форм; CSRF, таймаут после записи, редиректы/cookies, dry-run без сети, атомарные обновления, Drive pagination/backoff, SQLite recovery/backup. Drive проверяется контролируемым транспортом. Графический Windows и portable EXE проверяются в CI через OS mouse/keyboard; настоящий аккаунт Google и размещённые Colab/Molab не использовались.
 
 Автообучение 2.0 поддерживает URL-encoded, JSON, текстовый multipart и цепочки с доказанной зависимостью через JSON-ID. Неизвестные токены, вычисляемые подписи, непонятные связи и отсутствие независимого подтверждения требуют обучения/проверки. Бинарные uploads, повторяющиеся поля, cross-origin iframe/SSO, произвольные цепочки JS, CAPTCHA и универсальная поддержка всех CMS не заявляются. Legacy-проекты без `recognition` остаются совместимыми; новый непроверенный кандидат имеет REVIEW и блокируется очередью. HTTP 200 отдельно не считается успехом.
-# Universal Dispatcher 4A
+
+## Universal Dispatcher 4A
 
 Сохранённые Maker-графы можно ставить в отдельную SQLite-очередь и исполнять
 изолированными Python-процессами на Windows/Linux:
