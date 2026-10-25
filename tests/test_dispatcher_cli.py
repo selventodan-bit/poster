@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -10,13 +11,14 @@ from poster.maker.model import Variable
 from poster.maker.storage import Vault, save_graph
 
 
-def cli(directory, *args, expected=0):
+def cli(directory, *args, expected=0, env=None):
     process = subprocess.run(
         [sys.executable, "-m", "poster", "dispatcher", *map(str, args)],
         cwd=directory,
         capture_output=True,
         text=True,
         timeout=60,
+        env=env,
     )
     assert process.returncode == expected, (process.stdout, process.stderr)
     return json.loads(process.stdout)
@@ -89,3 +91,40 @@ def test_cli_cancel_stop_reconcile_and_idempotent_enqueue(tmp_path):
     with_key = Store(db)
     assert with_key.db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     with_key.close()
+
+
+def test_first_cli_enqueues_share_a_durable_generated_key(tmp_path):
+    env = {key: value for key, value in os.environ.items() if key != "POSTER_SESSION_KEY"}
+    db = tmp_path / "fresh.sqlite"
+    source = source_directory() / EXAMPLES[1][1]
+    processes = [
+        subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "poster",
+                "dispatcher",
+                "enqueue",
+                str(source),
+                "--db",
+                str(db),
+                "--key",
+                str(i),
+            ],
+            cwd=tmp_path,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        for i in range(2)
+    ]
+    jobs = []
+    for process in processes:
+        out, err = process.communicate(timeout=20)
+        assert process.returncode == 0, (out, err)
+        jobs.append(json.loads(out)["id"])
+    assert len(set(jobs)) == 2
+    assert cli(tmp_path, "run", "--db", db, "--once", "--max-per-project", 2, env=env)["counts"] == {
+        "SUCCEEDED": 2
+    }

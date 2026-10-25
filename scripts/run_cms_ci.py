@@ -438,6 +438,32 @@ async def publication(install, directory, kb_path):
         trial = await session.verify_http(
             "HTTP " + unique, "Independent HTTP Unicode Ж & body " + unique, confirmed=True
         )
+        if trial.status != "SUCCEEDED":
+            known = {
+                "Read-only recovery could not confirm write": "RECOVERY_UNCONFIRMED",
+                "Authentication/authorization rejected (401/403)": "AUTH_REJECTED",
+                "Expected confirmation/extraction element is absent": "ELEMENT_ABSENT",
+                "Assertion/verification failed": "VERIFY_FAILED",
+                "Write returned an error; confirm result before retry": "WRITE_ERROR",
+                "Invalid extraction/session data": "EXTRACTION_INVALID",
+                "HTTP read transport failure": "READ_TRANSPORT",
+                "Write outcome unknown; no automatic resubmission": "WRITE_UNKNOWN",
+            }
+            print(
+                "::error title=Original CMS verification::"
+                + json.dumps(
+                    {
+                        "engine": engine,
+                        "status": trial.status,
+                        "reason": known.get(trial.reason, "OTHER_SAFE_REASON"),
+                        "operations": [
+                            {"method": op.get("method"), "status": op.get("status")}
+                            for op in trial.operations
+                        ],
+                    }
+                ),
+                flush=True,
+            )
         assert trial.status == "SUCCEEDED", (trial.status, trial.reason, trial.operations)
         project_path = directory / "project"
         session.save(project_path)

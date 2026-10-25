@@ -3,6 +3,7 @@ import json
 import os
 import sqlite3
 import subprocess
+import threading
 
 import pytest
 
@@ -221,3 +222,20 @@ def test_imported_graph_cannot_register_or_execute_python(tmp_path):
         Snapshots(store.root).create(source)
     assert store.counts() == {} and not (tmp_path / "executed").exists()
     store.close()
+
+
+def test_simultaneous_first_creation_is_a_single_schema_migration(tmp_path):
+    for iteration in range(5):
+        path = tmp_path / str(iteration) / "new.sqlite"
+        barrier = threading.Barrier(4)
+
+        def first_open(_, path=path, barrier=barrier):
+            barrier.wait()
+            store = Store(path)
+            try:
+                return store.db.execute("PRAGMA user_version").fetchone()[0], store.counts()
+            finally:
+                store.close()
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+            assert list(pool.map(first_open, range(4))) == [(1, {})] * 4

@@ -6,6 +6,8 @@ from pathlib import Path
 import stat
 import subprocess
 
+from filelock import FileLock
+
 from ..auth import decrypt_bytes, encrypt_session, ensure_local_key
 from .models import DispatcherError
 
@@ -103,7 +105,9 @@ def key_setup(root, key_file=None):
             raw = plain_path(key_file).read_bytes().strip()
             Fernet(raw)
             os.environ["POSTER_SESSION_KEY"] = raw.decode("ascii")
-        ensure_local_key(private_dir(root / "private"))
+        private = private_dir(root / "private")
+        with FileLock(str(plain_path(private / "session.key.lock")), timeout=30):
+            ensure_local_key(private)
     except Exception as exc:
         raise DispatcherError("KEY_INVALID") from exc
 

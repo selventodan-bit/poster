@@ -8,6 +8,8 @@ import sqlite3
 import time
 import uuid
 
+from filelock import FileLock
+
 from .models import ACTIVE, MESSAGES, TERMINAL, TRANSITIONS, DispatcherError, Status
 from .security import plain_path, private_dir, restrict
 
@@ -64,47 +66,54 @@ class Store:
         self.db = sqlite3.connect(self.path, timeout=30, isolation_level=None)
         self.db.row_factory = sqlite3.Row
         try:
-            self.db.execute("PRAGMA busy_timeout=30000")
-            tables = {r[0] for r in self.db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-            app = self.db.execute("PRAGMA application_id").fetchone()[0]
-            version = self.db.execute("PRAGMA user_version").fetchone()[0]
-            if (tables and (app != APPLICATION_ID or version != SCHEMA_VERSION)) or (
-                not tables and (app or version)
-            ):
-                raise DispatcherError("STORE_INVALID")
-            self.db.execute("PRAGMA foreign_keys=ON")
-            self.db.execute("PRAGMA journal_mode=WAL")
-            self.db.execute("PRAGMA synchronous=FULL")
-            with self.transaction():
-                # Recheck under the write lock: concurrent first opens are harmless.
-                if self.db.execute("PRAGMA user_version").fetchone()[0] == 0:
-                    for statement in SCHEMA.split(";"):
-                        if statement.strip():
-                            self.db.execute(statement)
-                    states = ",".join("'" + s.value + "'" for s in Status)
-                    allowed = " OR ".join(
-                        "(OLD.status='"
-                        + old.value
-                        + "' AND NEW.status IN ("
-                        + ",".join("'" + s.value + "'" for s in targets)
-                        + "))"
-                        for old, targets in TRANSITIONS.items()
-                    )
-                    self.db.execute(
-                        f"CREATE TRIGGER jobs_insert BEFORE INSERT ON jobs WHEN NEW.status NOT IN ({states}) BEGIN SELECT RAISE(ABORT,'INVALID_STATE'); END"
-                    )
-                    self.db.execute(
-                        f"CREATE TRIGGER jobs_transition BEFORE UPDATE OF status ON jobs WHEN OLD.status!=NEW.status AND NOT ({allowed}) BEGIN SELECT RAISE(ABORT,'INVALID_TRANSITION'); END"
-                    )
-                    self.db.execute(f"PRAGMA application_id={APPLICATION_ID}")
-                    self.db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
-            for suffix in ("", "-wal", "-shm"):
-                item = Path(str(self.path) + suffix)
-                if item.exists():
-                    restrict(item)
+            # Serialize identity reads, journal configuration and DDL together.
+            # BEGIN IMMEDIATE alone cannot protect earlier PRAGMA/header reads.
+            lock_path = plain_path(Path(str(self.path) + ".schema.lock"))
+            with FileLock(str(lock_path), timeout=30):
+                self._initialize()
         except Exception:
             self.db.close()
             raise
+
+    def _initialize(self):
+        self.db.execute("PRAGMA busy_timeout=30000")
+        tables = {r[0] for r in self.db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        app = self.db.execute("PRAGMA application_id").fetchone()[0]
+        version = self.db.execute("PRAGMA user_version").fetchone()[0]
+        if (tables and (app != APPLICATION_ID or version != SCHEMA_VERSION)) or (
+            not tables and (app or version)
+        ):
+            raise DispatcherError("STORE_INVALID")
+        self.db.execute("PRAGMA foreign_keys=ON")
+        self.db.execute("PRAGMA journal_mode=WAL")
+        self.db.execute("PRAGMA synchronous=FULL")
+        with self.transaction():
+            # Recheck under the write lock: concurrent first opens are harmless.
+            if self.db.execute("PRAGMA user_version").fetchone()[0] == 0:
+                for statement in SCHEMA.split(";"):
+                    if statement.strip():
+                        self.db.execute(statement)
+                states = ",".join("'" + s.value + "'" for s in Status)
+                allowed = " OR ".join(
+                    "(OLD.status='"
+                    + old.value
+                    + "' AND NEW.status IN ("
+                    + ",".join("'" + s.value + "'" for s in targets)
+                    + "))"
+                    for old, targets in TRANSITIONS.items()
+                )
+                self.db.execute(
+                    f"CREATE TRIGGER jobs_insert BEFORE INSERT ON jobs WHEN NEW.status NOT IN ({states}) BEGIN SELECT RAISE(ABORT,'INVALID_STATE'); END"
+                )
+                self.db.execute(
+                    f"CREATE TRIGGER jobs_transition BEFORE UPDATE OF status ON jobs WHEN OLD.status!=NEW.status AND NOT ({allowed}) BEGIN SELECT RAISE(ABORT,'INVALID_TRANSITION'); END"
+                )
+                self.db.execute(f"PRAGMA application_id={APPLICATION_ID}")
+                self.db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+        for suffix in ("", "-wal", "-shm"):
+            item = Path(str(self.path) + suffix)
+            if item.exists():
+                restrict(item)
 
     def close(self):
         self.db.close()
