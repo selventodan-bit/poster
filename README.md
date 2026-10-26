@@ -1,4 +1,6 @@
-# Poster 3.0 — ProjectMaker + Dispatcher, этап 4B.2
+# Poster 3.0 — ProjectMaker + Dispatcher, этап 5A
+
+**Remote Linux Agent 5A:** [TLS relay, подключение доверенного Agent, секреты и recovery](docs/POSTER_STAGE5A_REMOTE_LINUX_WORKER.md).
 
 **Расписания 4B.2:** [создание, DST, пропуски, мониторинг и автозапуск службы](docs/POSTER_STAGE4B2_SCHEDULER_MONITORING.md).
 

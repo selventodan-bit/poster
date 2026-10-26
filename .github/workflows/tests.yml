@@ -594,3 +594,84 @@ jobs:
             .poster/scheduler-windows-autostart/report.json
           include-hidden-files: true
           if-no-files-found: error
+
+  remote-protocol:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install ".[dev]"
+      - name: Pinned identities crypto protocol routing migrations risk fence and revoked access
+        run: python -m pytest -q tests/test_remote_protocol.py tests/test_remote_registry.py --junitxml=.poster/remote-protocol.xml
+      - if: always()
+        run: python scripts/summarize_pytest.py .poster/remote-protocol.xml .poster/remote-protocol-report.json --label 'Remote protocol ${{ runner.os }}'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: remote-protocol-${{ matrix.os }}
+          path: .poster/remote-protocol-report.json
+          include-hidden-files: true
+          if-no-files-found: error
+
+  remote-linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install ".[dev,recorder]"
+      - run: python -m playwright install --with-deps chromium
+      - name: Real isolated TLS relay Controller Agent subprocesses browser and crash recovery
+        run: python -m pytest -q tests/remote_linux_e2e.py --junitxml=.poster/remote-linux.xml
+      - if: always()
+        run: python scripts/summarize_pytest.py .poster/remote-linux.xml .poster/remote-linux-report.json --label 'Remote Linux real processes TLS GraphRunner recovery'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: remote-linux-e2e
+          path: .poster/remote-linux-report.json
+          include-hidden-files: true
+          if-no-files-found: error
+
+  remote-windows-graphs:
+    needs: maker-windows-package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      POSTER_REMOTE_WINDOWS_DIR: windows-data
+      POSTER_REMOTE_BROWSER_GRAPH: windows-graph/windows-maker-demo.postergraph.json
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install ".[dev,recorder]"
+      - run: python -m playwright install --with-deps chromium
+      - uses: actions/download-artifact@v4
+        with:
+          name: maker-windows-data-graph
+          path: windows-data
+      - uses: actions/download-artifact@v4
+        with:
+          name: maker-windows-graph
+          path: windows-graph
+      - name: Exact Windows-generated graphs through Linux Controller TLS relay and Linux Agent
+        run: python -m pytest -q -s tests/remote_windows_graph.py --junitxml=.poster/remote-windows-graphs.xml
+      - if: always()
+        run: python scripts/summarize_pytest.py .poster/remote-windows-graphs.xml .poster/remote-windows-graphs-report.json --label 'Windows graph format to Linux remote Agent; both protocol endpoints on Linux'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: remote-windows-graphs
+          path: .poster/remote-windows-graphs-report.json
+          include-hidden-files: true
+          if-no-files-found: error
