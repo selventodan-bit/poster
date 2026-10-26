@@ -43,6 +43,7 @@ from .host import ensure_service, request
 from .models import DispatcherError, MESSAGES
 from .workspace import workspace_path
 from .schedule_dialog import ScheduleDialog
+from .remote_widgets import RemoteTarget
 
 LABELS = {
     "ENABLED": "Включено",
@@ -98,7 +99,7 @@ class TableModel(QAbstractTableModel):
             return value
         if role == Qt.ItemDataRole.DisplayRole:
             key = self.columns[index.column()][0]
-            if key in {"created", "updated", "last_run", "next_due", "due", "started"} and value:
+            if key in {"created", "updated", "last_run", "next_due", "due", "started", "last_seen"} and value:
                 return datetime.fromtimestamp(
                     value, ZoneInfo(row["spec"]["timezone"]) if "spec" in row else None
                 ).strftime("%d.%m %H:%M:%S %Z")
@@ -144,6 +145,8 @@ class InputsDialog(QDialog):
         )
         note.setWordWrap(True)
         layout.addWidget(note)
+        self.remote_target = RemoteTarget(parent.agent_items, self)
+        layout.addWidget(self.remote_target)
         content = QWidget()
         form = QFormLayout(content)
         self.timeout = QSpinBox()
@@ -272,6 +275,7 @@ class DispatcherWindow(QMainWindow):
         self.schedule_offset = self.history_offset = 0
         self.schedule_order, self.schedule_descending = "next_due", False
         self.project_items = []
+        self.agent_items = []
         self.schedule_total = 0
         self.history_schedule = None
         self.root = workspace_path()
@@ -365,6 +369,7 @@ class DispatcherWindow(QMainWindow):
                 ("started", "Фактическое время"),
                 ("next_due", "Следующий запуск проекта"),
                 ("schedule_id", "Расписание"),
+                ("agent_id", "Удалённый агент"),
             ],
             self,
         )
@@ -376,6 +381,7 @@ class DispatcherWindow(QMainWindow):
         self.tabs.addTab(self.projects, "Проекты")
         self.tabs.addTab(self.jobs, "Задания и история")
         self.build_schedules()
+        self.build_remote_agents()
         self.projects.doubleClicked.connect(self.inspect)
         self.jobs.doubleClicked.connect(self.show_job)
         self.projects.horizontalHeader().sectionClicked.connect(self.sort_projects)
@@ -430,6 +436,83 @@ class DispatcherWindow(QMainWindow):
         note.setWordWrap(True)
         layout.addWidget(note)
 
+    def build_remote_agents(self):
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        self.remote_agents_model = TableModel(
+            [
+                ("name", "Агент"),
+                ("id", "Идентичность"),
+                ("state", "Доверие"),
+                ("online", "Online"),
+                ("os", "ОС"),
+                ("version", "Версия"),
+                ("protocol", "Протокол"),
+                ("last_seen", "Последний heartbeat"),
+                ("active", "Активные"),
+                ("projects", "Проекты"),
+                ("last_error", "Ошибка"),
+            ],
+            self,
+        )
+        self.remote_agents = self.table("remote_agents_table", self.remote_agents_model)
+        layout.addWidget(self.remote_agents)
+        actions = QHBoxLayout()
+        self.button("remote_export", "Ключ Controller…", self.remote_export, actions)
+        self.button("remote_register", "Загрузить заявку…", self.remote_register, actions)
+        self.button("remote_approve", "Подтвердить агента…", self.remote_approve, actions)
+        self.button("remote_revoke", "Отозвать доступ…", self.remote_revoke, actions)
+        layout.addLayout(actions)
+        note = QLabel(
+            "Controller и Linux Agent соединяются исходящими HTTPS-запросами с отдельно развёрнутым relay. SQLite остаётся на Controller. Перед подтверждением сравните полный ID агента с registration.json на Linux. Подтверждение запускает обслуживание общей очереди."
+        )
+        note.setWordWrap(True)
+        layout.addWidget(note)
+        self.tabs.addTab(panel, "Удалённые Workers")
+
+    def remote_export(self):
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Экспорт публичной идентичности Controller", "controller-public.json", "JSON (*.json)"
+        )
+        if path:
+            self.call("remote_identity", path=path)
+
+    def remote_register(self):
+        registration, _ = QFileDialog.getOpenFileName(
+            self, "Публичная заявка Linux Agent", "", "JSON (*.json)"
+        )
+        if not registration:
+            return
+        relay, _ = QFileDialog.getOpenFileName(self, "Приватный controller-relay.json", "", "JSON (*.json)")
+        if relay:
+            self.call("remote_register", registration=registration, relay_profile=relay)
+
+    def remote_approve(self):
+        rows = self.selected(self.remote_agents)
+        if (
+            rows
+            and QMessageBox.question(
+                self,
+                "Доверенный Linux Agent",
+                f"Подтвердить {rows[0]['name']}?\nПолный ID: {rows[0]['id']}\nАгент получит необходимые секреты исполняемых проектов. Запустить обслуживание?",
+            )
+            == QMessageBox.StandardButton.Yes
+        ):
+            self.call("remote_approve", id=rows[0]["id"])
+
+    def remote_revoke(self):
+        rows = self.selected(self.remote_agents)
+        if (
+            rows
+            and QMessageBox.question(
+                self,
+                "Отзыв доступа",
+                "Отозвать доступ? Активные удалённые запуски потребуют проверки UNKNOWN; автоматического повтора не будет. Повторное подключение потребует новой идентичности.",
+            )
+            == QMessageBox.StandardButton.Yes
+        ):
+            self.call("remote_revoke", id=rows[0]["id"])
+
     def build_schedules(self):
         panel = QWidget()
         layout = QVBoxLayout(panel)
@@ -455,6 +538,7 @@ class DispatcherWindow(QMainWindow):
             [
                 ("name", "Проект"),
                 ("version", "Версия"),
+                ("agent_id", "Агент (пусто — локально)"),
                 ("mode", "Режим"),
                 ("timing", "Дни / время / интервал"),
                 ("timezone", "Часовой пояс"),
@@ -546,7 +630,7 @@ class DispatcherWindow(QMainWindow):
         dialog.debounce.stop()
         self.schedule_dialog = None
         if result == QDialog.DialogCode.Accepted:
-            value = (items[dialog.project.currentIndex()], dialog.values())
+            value = (items[dialog.project.currentIndex()], dialog.values(), dialog.remote_target.values())
         else:
             value = None
         dialog.deleteLater()
@@ -559,7 +643,7 @@ class DispatcherWindow(QMainWindow):
         value = self.schedule_form(self.project_items)
         if not value:
             return
-        item, spec = value
+        item, spec, target = value
         dialog = InputsDialog(item, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             inputs, secrets = dialog.values()
@@ -567,6 +651,7 @@ class DispatcherWindow(QMainWindow):
                 "schedule_create",
                 item_id=item["id"],
                 spec=spec,
+                **target,
                 options=dict(
                     inputs=inputs,
                     secrets=secrets,
@@ -588,7 +673,7 @@ class DispatcherWindow(QMainWindow):
             item = dict(id=row["id"], name=row["name"], version=row["version"])
             value = self.schedule_form([item], row)
             if value:
-                self.call("schedule_change", id=row["id"], spec=value[1])
+                self.call("schedule_change", id=row["id"], spec=value[1], target=value[2])
 
     def schedule_change(self, **options):
         rows = self.selected(self.schedules)
@@ -747,6 +832,8 @@ class DispatcherWindow(QMainWindow):
             elif label == "dashboard":
                 self.service = value["service"]
                 self.project_items = value["projects"]
+                self.agent_items = value["agents"]
+                self.replace_rows(self.remote_agents, self.agent_items)
                 self.replace_rows(self.schedules, value["schedules"]["rows"])
                 self.schedule_total = value["schedules"]["total"]
                 self.schedule_page.setText(
@@ -931,6 +1018,7 @@ class DispatcherWindow(QMainWindow):
             batch.append(
                 {
                     "id": item["id"],
+                    **dialog.remote_target.values(),
                     "inputs": inputs,
                     "secrets": secrets,
                     "timeout": dialog.timeout.value(),

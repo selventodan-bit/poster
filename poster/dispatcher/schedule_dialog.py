@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QSpinBox,
+    QScrollArea,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -23,6 +24,7 @@ from PySide6.QtWidgets import (
 from .host import request
 from .models import DispatcherError, MESSAGES
 from .schedule_time import parse_spec
+from .remote_widgets import RemoteTarget
 
 MODES = [
     ("Однократно", "once"),
@@ -41,6 +43,15 @@ class ScheduleDialog(QDialog):
         self.resize(650, 600)
         self.items = items
         layout = QVBoxLayout(self)
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        self.remote_target = RemoteTarget(
+            parent.agent_items,
+            self,
+            agent_id=row.get("agent_id") if row else None,
+            outputs=row.get("outputs", []) if row else [],
+        )
+        content_layout.addWidget(self.remote_target)
         form = QFormLayout()
         self.project = QComboBox()
         self.project.setObjectName("schedule_project")
@@ -96,16 +107,21 @@ class ScheduleDialog(QDialog):
         self.grace.setValue(60)
         self.grace.setObjectName("schedule_grace")
         form.addRow("Допустимое опоздание, секунд", self.grace)
-        layout.addLayout(form)
+        content_layout.addLayout(form)
         note = QLabel(
             "Версия и защищённые входы закрепляются. Исходный файл не перечитывается при запуске. "
             "Несуществующее календарное время DST пропускается; повторяющийся час исполняется один раз. "
             "Сохранение запускает службу; закрытие окна её не останавливает."
         )
         note.setWordWrap(True)
-        layout.addWidget(note)
+        content_layout.addWidget(note)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(content)
+        layout.addWidget(scroll, 1)
         self.events = QTextEdit()
         self.events.setReadOnly(True)
+        self.events.setMaximumHeight(100)
         self.events.setObjectName("schedule_preview_text")
         layout.addWidget(self.events)
         self.error = QLabel()
