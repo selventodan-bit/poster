@@ -342,6 +342,7 @@ class DispatcherWindow(QMainWindow):
         self.button("enqueue_projects", "В очередь", self.enqueue, actions)
         self.button("remove_projects", "Убрать из списка", self.remove, actions)
         self.button("inspect_project", "Сведения о проекте", self.inspect, actions)
+        self.button("cloud_projects", "Google Drive…", self.open_cloud, actions)
         actions.addStretch()
         self.button("reconnect", "Переподключиться", self.reconnect, actions)
         self.button("refresh", "Обновить", self.refresh, actions)
@@ -375,6 +376,7 @@ class DispatcherWindow(QMainWindow):
                 ("nodes", "Кубики"),
                 ("browser", "Исполнение"),
                 ("source", "Исходный файл"),
+                ("cloud_version", "Версия Google Drive"),
             ],
             self,
         )
@@ -1065,11 +1067,23 @@ class DispatcherWindow(QMainWindow):
         if source:
             self.submit("add", lambda: request(self.root, "add", source=source), source)
 
+    def open_cloud(self):
+        from poster.cloud.qt_panel import CloudDialog
+
+        self.cloud_dialog = CloudDialog(self, opened=self.cloud_project_imported)
+        self.cloud_dialog.show()
+
+    def cloud_project_imported(self, value):
+        cloud = {k: value[k] for k in ("project_id", "version", "folder_id")}
+        self.submit("add", lambda: request(self.root, "add", source=value["source"], cloud=cloud))
+
     def inspect(self, *_):
         selected = self.selected(self.projects)
         if selected:
             item = selected[0]
             text = f"{item['name']}\nВерсия снимка: {item['version']}\nИсходник: {item['source']}\nКубиков: {item['nodes']}\n"
+            if item.get("cloud"):
+                text += "Google Drive: " + item["cloud"]["version"] + "\n"
             text += "Входы: " + ", ".join(
                 v["name"] + (" (защищён)" if v["secret"] else "") for v in item["inputs"]
             )

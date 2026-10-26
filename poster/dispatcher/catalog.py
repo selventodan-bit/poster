@@ -21,7 +21,8 @@ from .snapshots import Snapshots
 RESOURCE_NOTICE = (
     "Рабочая папка каждого задания изначально пуста. CSV/XLSX и другие входные файлы "
     "из Maker не копируются. Создайте их действиями графа или передайте содержимое через входы. "
-    "Абсолютные пути Maker и выход за рабочую папку запрещены. Импорт ресурсов — следующий этап."
+    "Абсолютные пути Maker и выход за рабочую папку запрещены. "
+    "Явно выбранные ресурсы подключаются через переносимый пакет Google Drive."
 )
 
 
@@ -128,7 +129,10 @@ class Catalog:
 
     @staticmethod
     def public(item):
-        return {k: v for k, v in item.items() if k != "project_key"}
+        value = {k: v for k, v in item.items() if k != "project_key"}
+        if item.get("cloud"):
+            value["cloud_version"] = item["cloud"]["version"]
+        return value
 
     def rows(self):
         return [self.public(v) for v in self.items.values()]

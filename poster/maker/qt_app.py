@@ -182,6 +182,7 @@ class MakerWindow(QMainWindow, ToolsMixin):
         self.observation_browser = {}
         self.probe_busy = False
         self.probe_serial = 0
+        self.build_cloud_menu()
 
     def guard(self, operation):
         try:
@@ -255,6 +256,7 @@ class MakerWindow(QMainWindow, ToolsMixin):
                 ("example", "Пример с циклом", self.example, ""),
                 ("data_examples", "Примеры 3B.2…", self.data_examples, ""),
                 ("dispatcher", "Dispatcher", self.open_dispatcher, ""),
+                ("cloud_save", "Сохранить на Google Drive", lambda: self.open_cloud(publish=True), ""),
             ],
         )
         self.addToolBarBreak()
@@ -288,6 +290,60 @@ class MakerWindow(QMainWindow, ToolsMixin):
         self.node_search.setPlaceholderText("Найти кубик: название / тип")
         self.node_search.returnPressed.connect(lambda: self.canvas.find(self.node_search.text()))
         toolbar.addWidget(self.node_search)
+
+    def build_cloud_menu(self):
+        menu = self.menuBar().addMenu("Google Drive")
+        menu.setObjectName("google_drive_menu")
+        for key, title, callback in [
+            ("connect", "Подключить Google Drive", lambda: self.open_cloud()),
+            ("publish", "Сохранить проект на Google Drive", lambda: self.open_cloud(publish=True)),
+            ("open", "Открыть проект с Google Drive", lambda: self.open_cloud(browse=True)),
+            ("update", "Обновить облачную версию", lambda: self.open_cloud(publish=True)),
+            ("folder", "Открыть папку проекта…", lambda: self.open_cloud()),
+            ("history", "История версий…", lambda: self.open_cloud()),
+            ("sync", "Синхронизировать", lambda: self.open_cloud()),
+        ]:
+            action = menu.addAction(title)
+            action.setObjectName("maker_cloud_" + key)
+            action.triggered.connect(lambda checked=False, cb=callback: self.guard(cb))
+
+    def open_cloud(self, *, publish=False, browse=False):
+        if not self.params_editable() or browse and not self.discard():
+            return
+        from poster.cloud.qt_panel import CloudDialog
+
+        if not browse:
+            self.save()
+        graph = self.document.graph
+        outputs = graph.metadata.get("poster.outputs", [])
+        if not outputs and hasattr(self, "project_outputs"):
+            outputs = [
+                v.strip() for v in self.project_outputs.text().replace(",", ";").split(";") if v.strip()
+            ]
+        self.cloud_dialog = CloudDialog(
+            self,
+            source=None if browse else self.path,
+            resources=list(graph.metadata.get("poster.resources", {})),
+            outputs=outputs,
+            opened=self.cloud_opened,
+            published=self.cloud_published,
+            auto_publish=publish,
+        )
+        self.cloud_dialog.show()
+
+    def cloud_opened(self, value):
+        graph, vault = load_graph(value["source"])
+        self.stop()
+        self.replace(graph, vault=vault)
+        self.path = Path(value["source"])
+        self.canvas.fit()
+        self.status_label.setText("Открыта облачная версия " + value["version"][:12])
+
+    def cloud_published(self, value):
+        self.document.graph.metadata["poster.resources"] = value["resources"]
+        self.document.graph.metadata["poster.outputs"] = value["outputs"]
+        self.save()
+        self.status_label.setText("Google Drive: сохранено, версия " + value["version"][:12])
 
     def page_changed(self):
         maker = self.pages.currentWidget() is self.maker_page

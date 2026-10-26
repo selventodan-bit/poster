@@ -97,3 +97,57 @@ commit slot, имена/rename/pagination, immutable history, прерванны
 потерянный ACK run claim без unsafe retry, checksum corruption, symlink/traversal,
 недопустимые Windows-пути и отсутствие secret sidecars в portable package.
 Живой Google Drive E2E: **CLOUD_PROVIDER_NOT_EXECUTED**.
+
+## Подключение Google Drive и интерфейс Windows
+
+В Maker появилось меню **Google Drive**: подключить, сохранить, открыть, обновить,
+открыть папку, история версий и синхронизация. Кнопка сохранения на верхней панели
+после подключения начинает публикацию текущего сохранённого проекта. В окне
+Google Drive можно явно добавить файлы данных, выбрать возвращаемые файлы,
+проект и точную версию. Ресурс вне папки проекта копируется приложением только
+после явного выбора; всю папку приложение не загружает. Каждое открытие создаёт
+новую локальную рабочую копию, не изменяя опубликованный snapshot.
+
+В Dispatcher кнопка **Google Drive…** открывает тот же каталог, загружает и
+проверяет выбранную версию, затем регистрирует её через существующий Catalog и
+Store. Происхождение и cloud version сохраняются отдельно от внутреннего
+snapshot fingerprint. Новый сетевой код работает в отдельном Qt worker loop;
+публикация и OAuth не блокируют Qt event loop.
+
+Для первой настройки владелец приложения:
+
+1. Создаёт проект в Google Cloud Console, включает **Google Drive API**.
+2. Настраивает OAuth consent screen и пользователей тестового приложения либо
+   проходит требуемую Google проверку перед публичным распространением.
+3. Создаёт OAuth client типа **Desktop app**, скачивает его JSON.
+4. В Poster нажимает **Подключить Google Drive**, выбирает этот файл и разрешает
+   доступ в обычном браузере Google. Access/refresh tokens вручную не копируются.
+
+Собственного универсального production OAuth client в EXE нет. Web-client
+configuration отклоняется. Используется официальный desktop loopback flow с
+PKCE S256, случайным state и одноразовым callback на 127.0.0.1. Client configuration
+и tokens защищены **Windows DPAPI текущего пользователя**, затем private ACL.
+Открытого authorized-user JSON на Windows не создаётся. На явно выбранных обычных
+Linux-хостах доступен private local Fernet store; он не называется Windows DPAPI.
+
+Scope `drive.file` разрешает запись app-created файлов. Для чтения результатов,
+созданных **другими OAuth clients Colab/Molab**, дополнительно нужен
+`drive.readonly`: одного `drive.file` для такого импорта недостаточно. Приложение
+использует чтение только каталога Poster3, но Google permission технически даёт
+чтение Drive; это отражается на экране согласия. Legacy credentials/scopes не
+меняются. При частично выданных разрешениях подключение не считается готовым.
+
+**Отключить аккаунт** удаляет локальную авторизацию и пытается отозвать Google
+credential. Если сеть недоступна, приложение честно сообщает, что сетевой отзыв
+не подтверждён; локальные tokens всё равно удаляются. Независимый приватный ключ
+для расшифровки уже полученных результатов не стирается при отключении Drive.
+Он никогда не является Windows queue.key и не отправляется в notebook.
+
+Проверки текущего блока: **31 backend tests PASSED**, отдельно **2 genuine Qt tests
+PASSED** с actual HTTP Drive fixture и продолжающим работать Qt event loop.
+Loopback OAuth callback, проверка state/PKCE, ciphertext credentials, offline
+X25519/AES-GCM result encryption и Ed25519 signatures проверены настоящим кодом.
+Google OAuth token endpoint в этих тестах контролируемый: Google account E2E
+остаётся **CLOUD_PROVIDER_NOT_EXECUTED**. Добавлены обязательные Windows/Linux CI
+matrix jobs для OS key store и Qt. Реальный frozen Windows E2E всего Stage 5C
+будет выполнен после завершения notebook/runtime блока.

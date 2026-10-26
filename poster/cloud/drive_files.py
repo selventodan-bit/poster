@@ -5,10 +5,12 @@ retried after an ambiguous POST. Upload retries concern data bytes, never graphs
 """
 
 import asyncio
+import json
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from filelock import FileLock
+from cryptography.fernet import Fernet
 
 from poster.dispatcher.security import private_dir, restrict, seal, unseal
 from poster.maker.storage import atomic
@@ -25,22 +27,34 @@ BINARY = "application/octet-stream"
 class Journal:
     """Private encrypted transport recovery; never a Drive queue or public state."""
 
-    def __init__(self, root):
+    def __init__(self, root, *, key=None):
         self.path = private_dir(Path(root)) / "drive-uploads.enc"
+        self.cipher = Fernet(key.encode() if isinstance(key, str) else key) if key else None
+
+    def _read(self):
+        if not self.path.exists():
+            return {}
+        raw = self.path.read_bytes()
+        if len(raw) > 5_000_000:
+            raise CloudError("PACKAGE_LIMIT")
+        value = json.loads(self.cipher.decrypt(raw)) if self.cipher else unseal(raw)
+        if not isinstance(value, dict):
+            raise CloudError("INTEGRITY")
+        return value
 
     def get(self, key):
         with FileLock(str(self.path) + ".lock"):
-            data = unseal(self.path.read_bytes()) if self.path.exists() else {}
+            data = self._read()
             return data.get(key)
 
     def set(self, key, value):
         with FileLock(str(self.path) + ".lock"):
-            data = unseal(self.path.read_bytes()) if self.path.exists() else {}
+            data = self._read()
             if value is None:
                 data.pop(key, None)
             else:
                 data[key] = value
-            raw = seal(data)
+            raw = self.cipher.encrypt(canonical(data)) if self.cipher else seal(data)
             if len(raw) > 5_000_000:
                 raise CloudError("PACKAGE_LIMIT")
             atomic(self.path, raw)
@@ -238,6 +252,28 @@ class DriveFiles:
                     raise CloudError("DRIVE_CONFLICT")
                 self.journal.set(file_id, None)
                 return existing
+            if not raw:
+                # A metadata-only binary create represents an empty resource;
+                # a resumable status query with */0 is not an upload body.
+                value = dict(
+                    id=file_id, name=name, parents=[parent], mimeType=mime, properties=properties or {}
+                )
+                try:
+                    await self.transport.api(
+                        "POST",
+                        "files",
+                        retry=False,
+                        accepted=(409,),
+                        params={"supportsAllDrives": "true"},
+                        json=value,
+                        max_bytes=MAX_METADATA,
+                    )
+                except ValueError:
+                    if await self.info(file_id) is None:
+                        raise CloudError("DRIVE_UNAVAILABLE") from None
+                if await self.read(file_id) != b"":
+                    raise CloudError("DRIVE_CONFLICT")
+                return await self.info(file_id)
             record = self.journal.get(file_id)
             if record and record["sha256"] != expected:
                 raise CloudError("DRIVE_CONFLICT")

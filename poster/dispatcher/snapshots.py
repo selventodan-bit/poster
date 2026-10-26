@@ -36,7 +36,7 @@ class Snapshots:
         manifest, files = self.capture(source)
         return self.publish(manifest, files)
 
-    def capture(self, source):
+    def capture(self, source, *, include_resources=True):
         """Capture with the existing dependency/path contract, without changing the source."""
         source = plain_path(source)
         if not source.is_file() or source.suffix != ".json":
@@ -106,7 +106,7 @@ class Snapshots:
         # Detect a source edit during capture instead of assigning a misleading identity.
         if source.read_bytes() != files[source.name]:
             raise DispatcherError("SNAPSHOT_INVALID")
-        resources = graph.metadata.get("poster.resources", {})
+        resources = graph.metadata.get("poster.resources", {}) if include_resources else {}
         if not isinstance(resources, dict):
             raise DispatcherError("SNAPSHOT_INVALID")
         if resources:

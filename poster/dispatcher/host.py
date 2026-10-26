@@ -453,7 +453,23 @@ class Host:
                 "agents": Registry(self.store).rows(),
             }
         if op == "add":
-            return self.catalog.inspect(**value)
+            cloud = value.pop("cloud", None)
+            item = self.catalog.inspect(**value)
+            if cloud is not None:
+                from poster.cloud.format import identifier, version_id
+
+                if cloud.get("project_id") != item["project_id"] or set(cloud) != {
+                    "project_id",
+                    "version",
+                    "folder_id",
+                }:
+                    raise DispatcherError("PARAMETERS_INVALID")
+                version_id(cloud["version"])
+                identifier(cloud["folder_id"])
+                self.catalog.items[item["id"]]["cloud"] = cloud
+                self.catalog.save()
+                item["cloud"] = cloud
+            return item
         if op == "remove":
             self.catalog.remove(value["ids"])
             return True

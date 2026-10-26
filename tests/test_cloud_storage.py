@@ -203,3 +203,23 @@ def test_portable_does_not_publish_unrelated_graphs_or_symlink_resources(tmp_pat
     (source.parent / "linked.csv").symlink_to(outside)
     with pytest.raises(ValueError):
         PortableBundle.capture(source, resources=["linked.csv"])
+
+
+async def test_empty_resource_and_republish_refresh_declared_resource_bytes(library, tmp_path):
+    lib, api = library
+    source, graph = project(tmp_path)
+    data = source.parent / "empty.csv"
+    data.write_bytes(b"")
+    first = PortableBundle.capture(source, resources=["empty.csv"])
+    await lib.publish(first, name=graph.name)
+    assert (await lib.fetch(first.project_id)).files["empty.csv"] == b""
+    from poster.maker.storage import load_graph
+
+    graph, vault = load_graph(source)
+    graph.metadata["poster.resources"] = {"empty.csv": first.manifest["files"]["empty.csv"]}
+    save_graph(source, graph, vault)
+    data.write_bytes(b"new data")
+    second = PortableBundle.capture(source)
+    assert second.files["empty.csv"] == b"new data"
+    await lib.publish(second, name=graph.name, expected_version=first.version)
+    assert (await lib.fetch(first.project_id)).version == second.version

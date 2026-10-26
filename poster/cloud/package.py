@@ -146,13 +146,17 @@ class PortableBundle:
             raise CloudError("INTEGRITY") from exc
 
     @classmethod
-    def capture(cls, source, *, resources=(), outputs=(), recipient=None):
+    def capture(cls, source, *, resources=None, outputs=(), recipient=None):
         source = plain_path(source)
         from poster.maker.http_actions import protect_graph
 
         with tempfile.TemporaryDirectory(prefix="poster-portable-") as temporary:
             capture = Snapshots(Path(temporary))
-            snapshot, captured = capture.capture(source)
+            snapshot, captured = capture.capture(source, include_resources=False)
+        if resources is None:
+            resources = list(
+                Graph.model_validate_json(captured[source.name]).metadata.get("poster.resources", {})
+            )
         # Publish only reachable graphs and explicitly chosen dependencies.
         pending, reachable = [source.name], set()
         explicit_graphs = {n for n in resources if n.endswith(".postergraph.json")}

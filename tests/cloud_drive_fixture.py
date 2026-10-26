@@ -161,3 +161,66 @@ class DriveFixture:
 
 async def fixture_token():
     return "DRIVE_FIXTURE_ONLY"
+
+
+def serve_drive_fixture():
+    """Actual HTTP fixture for separate frozen processes; synthetic credentials only."""
+    from contextlib import contextmanager
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    @contextmanager
+    def serve():
+        api = DriveFixture()
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *_):
+                pass
+
+            def do_GET(self):
+                self.dispatch()
+
+            def do_POST(self):
+                self.dispatch()
+
+            def do_PUT(self):
+                self.dispatch()
+
+            def do_PATCH(self):
+                self.dispatch()
+
+            def dispatch(self):
+                length = int(self.headers.get("Content-Length", "0"))
+                if not 0 <= length <= 25_000_000:
+                    self.send_error(413)
+                    return
+                request = httpx.Request(
+                    self.command,
+                    "https://www.googleapis.com" + self.path,
+                    headers=dict(self.headers),
+                    content=self.rfile.read(length),
+                )
+                try:
+                    response = api(request)
+                except httpx.ReadError:
+                    self.close_connection = True
+                    return
+                self.send_response(response.status_code)
+                for key, value in response.headers.items():
+                    if key.lower() not in {"content-length", "transfer-encoding", "connection"}:
+                        self.send_header(key, value)
+                self.send_header("Content-Length", str(len(response.content)))
+                self.end_headers()
+                self.wfile.write(response.content)
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        server.daemon_threads = True
+        thread = threading.Thread(target=server.serve_forever, daemon=True, name="drive-http-fixture")
+        thread.start()
+        try:
+            yield api, "http://127.0.0.1:" + str(server.server_port)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(3)
+
+    return serve()
