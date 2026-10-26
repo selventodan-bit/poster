@@ -62,3 +62,38 @@ GitHub runner; он не входит в аккаунты и не запуска
 Соответствующий provider E2E до реального исполнения имеет статус
 **CLOUD_PROVIDER_NOT_EXECUTED**. Контролируемый Drive fixture и настоящий локальный
 Jupyter/marimo не будут называться E2E настоящего Google аккаунта.
+
+## Реализованный storage и переносимый пакет
+
+Transport Google Drive остаётся общим с Legacy. Новые `DriveFiles` и `Library`
+используют его для настоящих file IDs, MIME, постраничного каталога, bounded
+resumable uploads, проверки размера и SHA256. Recovery journal локальный,
+зашифрованный, с приватными правами; он не публикуется на Drive и не является
+очередью выполнения. Завершённые transport-записи удаляются, чтобы число проектов
+не ограничивалось размером локального журнала.
+
+Обновления проекта — append-only цепочка immutable commit manifest. Конкуренты
+создают **один и тот же заранее выданный сервером Drive file ID**. Успешная atomic
+create — точка публикации; 409 и несовпадающее содержимое означают конфликт.
+Это опирается на уникальность серверного ID, а не на имя lock-файла или условно
+поддерживаемый ETag. Недогруженные blobs не попадают в историю до commit manifest.
+Старые версии и отдельная results-папка не перезаписываются. Rename использует
+folder ID; одинаковые отображаемые имена допустимы для разных project IDs.
+
+Portable package сохраняет один исходный формат GraphRunner, отдельный manifest
+с SHA256 и только достижимые графы плюс явно выбранные зависимости/ресурсы.
+Динамический Project.Run требует явного списка разрешённых зависимостей.
+Не отправляются все соседние файлы, encrypted secret sidecars, private keys,
+cookies, browser profiles или приватное состояние Dispatcher. Защищённые refs
+сохраняются как ссылки без значений. Не настроенные секреты впоследствии должны
+останавливать запуск, а не заменяться открытым текстом.
+
+Каждый original Worker получает собственные копии задекларированных ресурсов
+в FileSandbox. Существующий GraphRunner и исходные действия не дублируются.
+
+Подтверждено локально: **36 tests PASSED** (Drive protocol fixtures + Legacy Drive +
+Dispatcher Store/Worker). Среди новых проверок — два синхронных конкурента одного
+commit slot, имена/rename/pagination, immutable history, прерванный resumable upload,
+потерянный ACK run claim без unsafe retry, checksum corruption, symlink/traversal,
+недопустимые Windows-пути и отсутствие secret sidecars в portable package.
+Живой Google Drive E2E: **CLOUD_PROVIDER_NOT_EXECUTED**.

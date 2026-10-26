@@ -124,6 +124,10 @@ async def execute(store, execution, owner, controls):
         from ..maker.runtime import GraphRunner
 
         graph, vault = load_graph(source)
+        if graph.metadata.get("poster.resources"):
+            from poster.cloud.package import stage_resources
+
+            stage_resources(graph, files, workdir)
         envelope = unseal(job["inputs_cipher"])
         if envelope.get("project_key"):
             from ..auth import _legacy_keys

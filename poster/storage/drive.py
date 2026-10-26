@@ -18,13 +18,22 @@ log = logging.getLogger(__name__)
 FOLDER = "application/vnd.google-apps.folder"
 
 
+class DriveAPIError(ValueError):
+    def __init__(self, status_code):
+        self.status_code = status_code
+        super().__init__(f"Drive API rejected operation: HTTP {status_code}")
+
+
 class GoogleToken:
-    def __init__(self, credentials_file: str | None = None):
+    def __init__(self, credentials_file: str | None = None, *, scopes=None, credential=None):
         import google.auth
         from google.oauth2 import credentials, service_account
 
-        scopes = ["https://www.googleapis.com/auth/drive"]
-        if credentials_file:
+        scopes = scopes or ["https://www.googleapis.com/auth/drive"]
+        self.refresh_lock = asyncio.Lock()
+        if credential is not None:
+            self.credentials = credential
+        elif credentials_file:
             kind = json.loads(Path(credentials_file).read_text())["type"]
             if kind == "service_account":
                 self.credentials = service_account.Credentials.from_service_account_file(
@@ -38,11 +47,12 @@ class GoogleToken:
             self.credentials, _ = google.auth.default(scopes=scopes)
 
     async def __call__(self):
-        if not self.credentials.valid:
-            from google.auth.transport.requests import Request
+        async with self.refresh_lock:
+            if not self.credentials.valid:
+                from google.auth.transport.requests import Request
 
-            await asyncio.to_thread(self.credentials.refresh, Request())
-        return self.credentials.token
+                await asyncio.to_thread(self.credentials.refresh, Request())
+            return self.credentials.token
 
 
 class Drive:
@@ -56,14 +66,33 @@ class Drive:
         if self.own_client:
             await self.client.aclose()
 
-    async def api(self, method, path, **kwargs):
-        for attempt in range(5):
+    async def api(self, method, path, *, retry=True, accepted=(), max_bytes=None, **kwargs):
+        # New project storage uses this same authenticated transport, but never
+        # retries an ambiguous mutation unless its fixed Drive ID proves safety.
+        headers = dict(kwargs.pop("headers", {}))
+        headers = {k: v for k, v in headers.items() if k.lower() != "authorization"}
+        attempts = 5 if retry else 1
+        for attempt in range(attempts):
             try:
-                response = await self.client.request(
-                    method, path, headers={"Authorization": f"Bearer {await self.token()}"}, **kwargs
-                )
+                headers["Authorization"] = f"Bearer {await self.token()}"
+                if max_bytes is None:
+                    response = await self.client.request(method, path, headers=headers, **kwargs)
+                else:
+                    async with self.client.stream(method, path, headers=headers, **kwargs) as stream:
+                        chunks, size = [], 0
+                        async for chunk in stream.aiter_bytes():
+                            size += len(chunk)
+                            if size > max_bytes:
+                                raise ValueError("Drive response exceeds limit")
+                            chunks.append(chunk)
+                        response = httpx.Response(
+                            stream.status_code,
+                            headers=stream.headers,
+                            content=b"".join(chunks),
+                            request=stream.request,
+                        )
             except httpx.TransportError:
-                if attempt == 4:
+                if attempt == attempts - 1:
                     raise ValueError("Drive transport unavailable") from None
                 await asyncio.sleep(min(2**attempt, 16))
                 continue
@@ -74,11 +103,15 @@ class Drive:
                     retryable = any(x in {"rateLimitExceeded", "userRateLimitExceeded"} for x in reasons)
                 except (ValueError, KeyError):
                     pass
-            if retryable and attempt < 4:
-                await asyncio.sleep(min(2**attempt, 16))
+            if retryable and attempt < attempts - 1:
+                try:
+                    delay = min(max(float(response.headers.get("Retry-After", 0)), 2**attempt), 60)
+                except ValueError:
+                    delay = min(2**attempt, 16)
+                await asyncio.sleep(delay)
                 continue
-            if response.status_code >= 400:
-                raise ValueError(f"Drive API rejected operation: HTTP {response.status_code}")
+            if response.status_code >= 400 and response.status_code not in accepted:
+                raise DriveAPIError(response.status_code)
             return response
         raise ValueError("Drive retries exhausted")
 

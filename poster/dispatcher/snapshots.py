@@ -33,6 +33,11 @@ class Snapshots:
         self.root = private_dir(root / "snapshots")
 
     def create(self, source):
+        manifest, files = self.capture(source)
+        return self.publish(manifest, files)
+
+    def capture(self, source):
+        """Capture with the existing dependency/path contract, without changing the source."""
         source = plain_path(source)
         if not source.is_file() or source.suffix != ".json":
             raise DispatcherError("PROJECT_INVALID")
@@ -101,12 +106,37 @@ class Snapshots:
         # Detect a source edit during capture instead of assigning a misleading identity.
         if source.read_bytes() != files[source.name]:
             raise DispatcherError("SNAPSHOT_INVALID")
+        resources = graph.metadata.get("poster.resources", {})
+        if not isinstance(resources, dict):
+            raise DispatcherError("SNAPSHOT_INVALID")
+        if resources:
+            from poster.cloud.package import public_resource
+
+            for name, expected in resources.items():
+                try:
+                    public_resource(name)
+                    resource = plain_path(root / name)
+                    if not resource.is_relative_to(root) or not resource.is_file():
+                        raise ValueError()
+                    if resource.stat().st_size > MAX_BYTES:
+                        raise ValueError()
+                    raw = resource.read_bytes()
+                    if digest(raw) != expected or name in files:
+                        raise ValueError()
+                    files[name] = raw
+                except Exception as exc:
+                    raise DispatcherError("SNAPSHOT_INVALID") from exc
+            if len(files) > MAX_FILES or sum(map(len, files.values())) > MAX_BYTES:
+                raise DispatcherError("SNAPSHOT_LIMIT")
         manifest = {
             "version": 1,
             "main": source.name,
             "project_id": graph.id,
             "files": {name: digest(raw) for name, raw in sorted(files.items())},
         }
+        return manifest, files
+
+    def publish(self, manifest, files):
         version = digest(canonical(manifest))
         target = self.root / version
         with FileLock(str(self.root / ".publication.lock")):
