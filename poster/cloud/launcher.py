@@ -11,6 +11,31 @@ from .providers import connect, resolve_bindings
 from .runtime import NotebookSession
 
 
+def project_inputs(bundle):
+    from poster.maker.model import Graph, graph_secret_refs
+
+    aliases, definitions = {}, []
+    for name in bundle.manifest["graphs"]:
+        graph = Graph.model_validate_json(bundle.files[name])
+        for key, value in graph.variables.items():
+            if name == bundle.manifest["main"] and value.input:
+                definitions.append(
+                    dict(
+                        name=key,
+                        protected=value.secret,
+                        required=value.required,
+                        has_default=value.value is not None,
+                    )
+                )
+            if isinstance(value.value, dict) and set(value.value) == {"secret_ref"}:
+                label = key if name == bundle.manifest["main"] else name + " / " + key
+                aliases[label] = value.value["secret_ref"]
+        for ref in graph_secret_refs(graph):
+            if ref not in aliases.values():
+                aliases[ref] = ref
+    return dict(inputs=definitions, bindings=aliases)
+
+
 class Launcher:
     def __init__(self, provider="generic", *, connection=None, root=None):
         self.provider = provider
@@ -35,6 +60,9 @@ class Launcher:
         self.history = await self.session.versions(project_id)
         return self.history
 
+    async def inspect(self, project_id, version):
+        return project_inputs(await self.connection.library.fetch(project_id, version))
+
     def prepare(self):
         if self.ticket and not self.ticket.finished:
             raise CloudError("RUN_UNCERTAIN")
@@ -46,7 +74,9 @@ class Launcher:
         if not self.session:
             raise CloudError("AUTH_REQUIRED")
         bundle = await self.connection.library.fetch(project_id, version)
-        values = resolve_bindings(self.provider, bindings or {})
+        inspection = project_inputs(bundle)
+        raw = resolve_bindings(self.provider, bindings or {})
+        values = {inspection["bindings"].get(k, k): v for k, v in raw.items()}
         required = set(bundle.manifest["required_secret_refs"])
         graph = __import__("poster.maker.model", fromlist=["Graph"]).Graph.model_validate_json(
             bundle.files[bundle.manifest["main"]]
@@ -90,6 +120,7 @@ class JupyterLauncher:
         self.inputs = w.Textarea(value="{}", description="Входы JSON")
         self.bindings = w.Textarea(value="{}", description="Имена secrets")
         self.status = w.HTML("Подключите Drive. Автономный режим DETACHED; Windows может быть выключен.")
+        self.requirements = w.HTML("")
         self.connect_button = w.Button(description="Подключить Drive")
         self.run_button = w.Button(description="Выполнить", button_style="primary")
         self.prepare_button = w.Button(description="Подготовить новый запуск")
@@ -101,6 +132,7 @@ class JupyterLauncher:
                 self.connect_button,
                 self.projects,
                 self.versions,
+                self.requirements,
                 self.count,
                 self.parallel,
                 w.HTML(
@@ -118,6 +150,9 @@ class JupyterLauncher:
         self.stop_button.on_click(lambda _: self.spawn(backend.close()))
         self.projects.observe(
             lambda change: self.spawn(self.select(change["new"])) if change["new"] else None, names="value"
+        )
+        self.versions.observe(
+            lambda change: self.spawn(self.inspect(change["new"])) if change["new"] else None, names="value"
         )
 
     def spawn(self, coroutine):
@@ -150,6 +185,17 @@ class JupyterLauncher:
         rows = await self.backend.versions(project_id)
         self.versions.options = [(p["version"][:12], p["version"]) for p in reversed(rows)]
 
+    async def inspect(self, version):
+        from html import escape
+
+        value = await self.backend.inspect(self.projects.value, version)
+        self.requirements.value = (
+            "Входы: "
+            + escape(", ".join(d["name"] + (" (защищён)" if d["protected"] else "") for d in value["inputs"]))
+            + "<br>Защищённые bindings: "
+            + escape(", ".join(value["bindings"]))
+        )
+
     def prepare(self):
         try:
             self.backend.prepare()
@@ -159,6 +205,7 @@ class JupyterLauncher:
 
     async def run(self):
         self.run_button.disabled = True
+        self.status.value = "EXECUTING — выполняется автономный запуск."
         try:
             inputs, bindings = json.loads(self.inputs.value), json.loads(self.bindings.value)
             if not isinstance(inputs, dict) or not isinstance(bindings, dict):

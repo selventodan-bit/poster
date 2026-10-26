@@ -18,6 +18,7 @@ class MarimoLauncher:
         self.count, self.parallel = 1, 1
         self.input_json, self.binding_json = "{}", "{}"
         self.tasks = set()
+        self.inspection = dict(inputs=[], bindings={})
 
     def changed(self, message):
         self.message = message
@@ -50,6 +51,8 @@ class MarimoLauncher:
         self.project_id = project_id
         rows = await self.backend.versions(project_id)
         self.version = rows[-1]["version"] if rows else None
+        if self.version:
+            self.inspection = await self.backend.inspect(project_id, self.version)
         self.changed(
             "Проект выбран. Максимум одновременно: " + str(self.backend.session.capacity.max_parallel)
         )
@@ -65,6 +68,11 @@ class MarimoLauncher:
             bindings=json.loads(self.binding_json),
         )
         self.changed("Drive: " + ", ".join(r["status"] for r in result["runs"]))
+
+    async def choose_version(self, version):
+        self.version = version
+        self.inspection = await self.backend.inspect(self.project_id, version)
+        self.changed("Версия выбрана; проверьте входы и имена защищённых bindings.")
 
     def prepare(self):
         try:
@@ -101,7 +109,7 @@ class MarimoLauncher:
                     version_options,
                     value=version_label,
                     label="Версия",
-                    on_change=lambda v: setattr(self, "version", v),
+                    on_change=lambda v: self.spawn(self.choose_version(v)) if v else None,
                 ),
                 mo.ui.number(
                     1,
@@ -121,6 +129,12 @@ class MarimoLauncher:
                     value=self.input_json,
                     label="Обычные входы JSON",
                     on_change=lambda v: setattr(self, "input_json", v),
+                ),
+                mo.plain_text(
+                    "Входы: "
+                    + ", ".join(d["name"] for d in self.inspection["inputs"])
+                    + "; защищённые bindings: "
+                    + ", ".join(self.inspection["bindings"])
                 ),
                 mo.md(
                     "Защищённые значения — в private environment Molab. Здесь только соответствия ref/вход → POSTER_SECRET_имя, без значений."

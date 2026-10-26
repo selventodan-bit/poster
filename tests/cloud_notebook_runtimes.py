@@ -16,6 +16,7 @@ from cloud_drive_fixture import serve_drive_fixture
 from poster.cloud.desktop import DesktopCloud
 from poster.maker.example_projects import chain
 from poster.maker.storage import Vault, save_graph
+from poster.maker.model import Variable
 
 
 @pytest.mark.parametrize("kind", ["jupyter", "marimo"])
@@ -28,17 +29,19 @@ async def test_installed_notebook_runtime_executes_original_workers_and_returns_
         monkeypatch.setenv("POSTER_CLOUD_TEST_CONFIG", str(config))
         facade = DesktopCloud()
         source = tmp_path / "project.postergraph.json"
-        save_graph(
-            source,
-            chain(
-                "Genuine runtime",
-                [
-                    ("CSV.Read", {"path": "data.csv"}),
-                    ("Files.WriteText", {"path": "out.txt", "text": "native GraphRunner"}),
-                ],
-            ),
-            Vault(),
+        graph = chain(
+            "Genuine runtime",
+            [
+                ("CSV.Read", {"path": "data.csv"}),
+                ("Files.WriteText", {"path": "out.txt", "text": "native GraphRunner"}),
+            ],
         )
+        vault = Vault()
+        graph.variables["password"] = Variable(
+            secret=True, value=vault.put_value("NOTEBOOK_PRIVATE_CANARY", "runtime-ref")
+        )
+        save_graph(source, graph, vault)
+        monkeypatch.setenv("POSTER_SECRET_RUNTIME", "NOTEBOOK_PRIVATE_CANARY")
         (tmp_path / "data.csv").write_text("n\n42\n")
         await facade.connect()
         published = await facade.publish(source, resources=["data.csv"], outputs=["out.txt"])
@@ -58,7 +61,9 @@ rows = await backend.connect()
 assert rows[0]['project_id'] == {published["project_id"]!r}
 versions = await backend.versions(rows[0]['project_id'])
 assert versions[-1]['version'] == {published["version"]!r}
-result = await backend.run(rows[0]['project_id'],versions[-1]['version'])
+inspection = await backend.inspect(rows[0]['project_id'],versions[-1]['version'])
+assert inspection['bindings']['password'] == 'runtime-ref'
+result = await backend.run(rows[0]['project_id'],versions[-1]['version'],bindings={{'password':'POSTER_SECRET_RUNTIME'}})
 assert result['runs'][0]['status'] == 'SUCCEEDED', result
 assert result['runs'][0]['pid'] is not None
 Path({str(proof)!r}).write_text(json.dumps(result))
@@ -113,4 +118,5 @@ await backend.close()
         assert proof.exists()
         assert json.loads(proof.read_text())["results_committed"]
         assert "POSTER_SESSION_KEY" not in public and "DRIVE_FIXTURE_ONLY" not in public
+        assert "NOTEBOOK_PRIVATE_CANARY" not in public
         await facade.close()
