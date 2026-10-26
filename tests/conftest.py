@@ -86,7 +86,7 @@ def pytest_runtest_logreport(report):
 def pytest_runtest_makereport(item, call):
     result = yield
     report = result.get_result()
-    if not report.failed or not item.path.name.startswith("test_dispatcher"):
+    if not report.failed or not item.path.name.startswith(("test_dispatcher", "remote_")):
         return
     # Hosted Windows logs are not always downloadable. Publish only fixed codes
     # and locations, never inputs, exception text, stdout/stderr or graph values.

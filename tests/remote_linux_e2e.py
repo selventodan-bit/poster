@@ -474,13 +474,17 @@ def test_wrong_relay_credentials_and_untrusted_tls_are_rejected(remote):
         unknown_ca.close()
 
 
-def test_committed_loop_csv_excel_and_nested_projects_run_unchanged(remote, tmp_path):
-    from poster.maker.example_projects import definitions
+@pytest.mark.parametrize("line_ending", ["LF", "CRLF"])
+def test_committed_loop_csv_excel_and_nested_projects_run_unchanged(remote, tmp_path, line_ending):
+    from poster.maker.example_projects import source_directory
 
     directory = tmp_path / "saved"
     directory.mkdir()
-    for name, graph in definitions().items():
-        save_graph(directory / name, graph, Vault())
+    for path in source_directory().glob("*.postergraph.json"):
+        raw = path.read_bytes()
+        if line_ending == "CRLF":
+            raw = raw.replace(b"\n", b"\r\n")
+        (directory / path.name).write_bytes(raw)
     for name, outputs in [
         ("02-lists-loop.postergraph.json", ["lists/result.json"]),
         ("03-csv-excel.postergraph.json", ["tables/output.csv", "tables/output.xlsx"]),

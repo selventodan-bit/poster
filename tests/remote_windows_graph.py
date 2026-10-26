@@ -5,6 +5,7 @@ This proves graph portability, NOT a simultaneous Windows/Linux controller link.
 
 from contextlib import nullcontext
 import hashlib
+import json
 import os
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -63,6 +64,19 @@ def test_exact_windows_maker_graphs_through_remote_agent(remote):
             )
             assert not queued["errors"]
             result = terminal(remote, queued["jobs"][0])
+            if result["status"] != "SUCCEEDED":
+                print(
+                    "::error title=Remote Windows graph result::"
+                    + json.dumps(
+                        dict(
+                            file=path.name,
+                            status=result["status"],
+                            code=result["history"][0]["code"],
+                            node_code=(result.get("report") or {}).get("node_error_code"),
+                        )
+                    ),
+                    flush=True,
+                )
             assert result["status"] == "SUCCEEDED" and result["report"]["remote_agent"] == remote["agent_id"]
             for output in outputs:
                 assert (Path(result["workdir"]) / output).is_file()
