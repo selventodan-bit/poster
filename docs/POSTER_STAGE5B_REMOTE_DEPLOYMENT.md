@@ -6,12 +6,16 @@ GraphRunner. Scheduler, локальные Workers, snapshots, FileSandbox и п
 сохранены. Agent хранит replay journal, Relay — opaque mailboxes; собственной
 авторитетной очереди у них нет. На Windows новый сетевой порт не открывается.
 
-**Статус межмашинной приёмки: NOT_EXECUTED.** Доступная облачная машина — Linux.
-GitHub jobs Windows и Linux по отдельности, перенос графов Windows Maker и
-Linux/Linux TLS E2E не доказывают одновременную связь frozen Windows Controller с
-Linux Agent. Ни зелёный job `remote-crosshost-harness`, ни наличие harness не
-означают прохождения этого критерия. Для него нужны две доверенные машины и
-общий доступный Relay; процедура приведена ниже.
+**Межмашинная приёмка исходных f411 пакетов: 18/18 PASSED.**
+[Настоящий E2E run](https://github.com/selventodan-bit/poster/actions/runs/40374290381)
+одновременно исполнил frozen Windows Server 2022 Controller и непривилегированный
+Linux Agent/GraphRunner в отдельной Ubuntu WSL2 VM по TCP/TLS. Это один стандартный
+GitHub hosted runner с двумя ОС, без Windows drive sharing/interop; публичный WAN
+и два физических сервера не проверялись. Подробные доказательства и точные команды
+для GitHub Actions и внешних машин — в
+[POSTER_STAGE5B_CROSSHOST_ACCEPTANCE.md](POSTER_STAGE5B_CROSSHOST_ACCEPTANCE.md).
+Обычный job `remote-crosshost-harness` по-прежнему записывает NOT_EXECUTED:
+сам по себе он и Linux/Linux CI не доказывают межмашинную работоспособность.
 
 ## Требования и доверие
 
@@ -431,5 +435,5 @@ python scripts/check_remote_crosshost.py --not-executed --output .poster/remote-
   таймаут браузера и запрет повторного POST. Ещё один Linux тест проверяет реальные
   процессы/helper/fixture приватного cross-host control канала, не заявляя Windows.
 - Финальные SHA, CI counts, ссылки на артефакты/скриншоты и Full Windows ZIP SHA256
-  приведены в отчёте задачи. До настоящего запуска harness Windows/Linux полная
-  межмашинная приёмка остаётся открытой.
+  приведены в отчёте задачи. Отдельный реальный Windows/Linux workflow и его
+  18/18 PASSED результаты описаны в POSTER_STAGE5B_CROSSHOST_ACCEPTANCE.md.

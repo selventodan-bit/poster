@@ -1,0 +1,264 @@
+{
+  "format": "poster.crosshost.record.v1",
+  "source": "Public GitHub Actions annotations; complete binary artifact linked below",
+  "run_url": "https://github.com/selventodan-bit/poster/actions/runs/40374290381",
+  "artifact": {
+    "id": 12674131949,
+    "url": "https://github.com/selventodan-bit/poster/actions/runs/40374290381/artifacts/12674131949",
+    "sha256": "3ca4412ea36a0ae4e372fd61f86fc21373aa23c4a2d965b50bc53754b45fc829"
+  },
+  "verdict": {
+    "format": "poster.crosshost.v1",
+    "status": "PASSED",
+    "full_cross_host_acceptance": true,
+    "scenarios": {
+      "frozen_windows_processes": "PASSED",
+      "linux_processes": "PASSED",
+      "tls_hostname_certificate_auth": "PASSED",
+      "pairing_fingerprints_approval": "PASSED",
+      "signed_heartbeat": "PASSED",
+      "exact_maker_snapshot": "PASSED",
+      "typed_and_protected_inputs": "PASSED",
+      "linux_graphrunner_output": "PASSED",
+      "windows_history": "PASSED",
+      "two_parallel_executions": "PASSED",
+      "global_and_project_limits": "PASSED",
+      "cancellation": "PASSED",
+      "browser_timeout_cleanup": "PASSED",
+      "agent_disconnect_reconnect": "PASSED",
+      "post_partition_unknown_no_resend": "PASSED",
+      "secret_and_queue_key_boundary": "PASSED",
+      "no_orphan_browsers": "PASSED",
+      "revoke_without_fallback": "PASSED"
+    },
+    "commit": "f411f806d5d0fa498b556bd4e4d2c6a955bcd992",
+    "windows_frozen": true,
+    "linux_non_root": true,
+    "separate_hosts": true,
+    "real_tcp_tls": true
+  },
+  "provenance": {
+    "status": "PASSED",
+    "full_cross_host_acceptance": true,
+    "topology": "Windows hosted runner + separate WSL2 Linux VM (private TCP)",
+    "production_commit": "f411f806d5d0fa498b556bd4e4d2c6a955bcd992",
+    "harness_commit": "e72ee1657fe5a52d5cd217fd324f622207f00dae",
+    "artifacts": {
+      "windows": {
+        "file": "poster-maker-windows.zip",
+        "sha256": "4fabdfd5581133624cdb26e70ae6aeaa9563311bc1754dc825a7736b1af02e54",
+        "bytes": 306590780
+      },
+      "linux": {
+        "file": "poster-linux.tar.gz",
+        "sha256": "bcafbd27f20d8f7f8ddb32222b68efada9870d9c2a67e92c4fe473055859e731",
+        "bytes": 59830734
+      }
+    },
+    "linux_manifest": {
+      "commit": "f411f806d5d0fa498b556bd4e4d2c6a955bcd992",
+      "files_verified": 36,
+      "wheelhouse_python": "3.12",
+      "wheelhouse_platform": "Linux/x86_64"
+    },
+    "infrastructure": {
+      "status": "WSL2_READY",
+      "full_cross_host_acceptance": false,
+      "topology": "Windows hosted runner + separate WSL2 Linux VM",
+      "windows": {
+        "os": "Windows",
+        "release": "2022Server",
+        "version": "10.0.20348",
+        "pid": 4260
+      },
+      "linux": {
+        "os": "Linux",
+        "kernel": "6.18.54.1-microsoft-standard-WSL2",
+        "arch": "x86_64",
+        "pid": 280,
+        "boot_id": "8594dd9f-2f6d-4932-9051-cd00857d7d43",
+        "mount_types": [
+          "9p",
+          "binfmt_misc",
+          "cgroup2",
+          "configfs",
+          "debugfs",
+          "devpts",
+          "devtmpfs",
+          "ext4",
+          "fusectl",
+          "hugetlbfs",
+          "mqueue",
+          "overlay",
+          "proc",
+          "rootfs",
+          "sysfs",
+          "tmpfs",
+          "tracefs"
+        ],
+        "windows_mountpoints": [],
+        "windows_drives_mounted": false,
+        "interop_enabled": false
+      }
+    },
+    "ssh": {
+      "hostname": "poster-linux.test",
+      "port": 22,
+      "host_key_sha256": "SHA256:ayvZXSH8OxlrmsSEjUF6Oz/tJyjPQOnDTRfKnpW8pA8",
+      "strict_host_key_checking": true,
+      "uid": 1000,
+      "windows_drive_sharing": false,
+      "interop": false
+    },
+    "scenario_counts": {
+      "PASSED": 18,
+      "FAILED": 0,
+      "NOT_EXECUTED": 0
+    },
+    "acceptance_phase": null,
+    "failure_line": null
+  },
+  "available_annotation_evidence": {
+    "windows": {
+      "os": "Windows",
+      "release": "2022Server",
+      "version": "10.0.20348",
+      "processes": [
+        {
+          "pid": 980,
+          "birth": 1793038040.3000476,
+          "executable": "PosterService.exe"
+        },
+        {
+          "pid": 1432,
+          "birth": 1793038040.919109,
+          "executable": "PosterDispatcher.exe"
+        }
+      ]
+    },
+    "production_commit": "f411f806d5d0fa498b556bd4e4d2c6a955bcd992",
+    "launchers": {
+      "maker": {
+        "file": "Poster.exe",
+        "sha256": "0eab54100ad2e1ecb9851abeef49110c903571a992537172e352b35e12c54afc"
+      },
+      "service": {
+        "file": "PosterService.exe",
+        "sha256": "9e8db3f510eb3ca0f630c52a2dc940764fe1266337080877eb12fb0f330b32ac"
+      },
+      "worker": {
+        "file": "PosterWorker.exe",
+        "sha256": "efc14fd6bd6d6e66802cc0925937699a0cbb311405bf44c07466d08add5c994a"
+      },
+      "gui": {
+        "file": "PosterDispatcher.exe",
+        "sha256": "3b89c6fb4b6a9ac1e8f1ed9d21d697dbf80122cded2a1c3fde87c6c33fca72cf"
+      }
+    },
+    "jobs": [
+      {
+        "id": "270fff1f305e4175ac597a202aacf901",
+        "status": "SUCCEEDED",
+        "attempt": 1
+      },
+      {
+        "id": "92c573cc0d514bfa867d72dc2d46f197",
+        "status": "SUCCEEDED",
+        "attempt": 1
+      },
+      {
+        "id": "b45110ed3a4f484792aee91bf30349d2",
+        "status": "SUCCEEDED",
+        "attempt": 1
+      },
+      {
+        "id": "26edc1ecab1d496399a31bda824fd400",
+        "status": "SUCCEEDED",
+        "attempt": 1
+      },
+      {
+        "id": "fe7050d39e5d47c0a7cfa55ba04091f0",
+        "status": "CANCELLED",
+        "attempt": 1
+      },
+      {
+        "id": "218303b9ff9a4c0aa1e33d1772a1c536",
+        "status": "UNKNOWN",
+        "attempt": 1
+      },
+      {
+        "id": "97fc60d0607645fb9e7c2f57f20f833a",
+        "status": "UNKNOWN",
+        "attempt": 1
+      }
+    ],
+    "returned_files": [
+      {
+        "name": "out.txt",
+        "sha256": "56a6f93cfc941d4975cb4e5c8bfd399c13dd8088836221061fdc187aee489282",
+        "bytes": 17
+      },
+      {
+        "name": "third.txt",
+        "sha256": "b1e99324505bd32da0e1f85dcf5e19a09db0481e8a15f62c41eb320304a8e927",
+        "bytes": 5
+      }
+    ],
+    "tls": {
+      "url": "https://poster-linux.test:18443",
+      "verified": true,
+      "rejected": [
+        "bad_credential",
+        "untrusted_CA",
+        "wrong_hostname"
+      ]
+    },
+    "linux": {
+      "os": {
+        "system": "Linux",
+        "kernel": "6.18.54.1-microsoft-standard-WSL2",
+        "arch": "x86_64",
+        "distribution": "Ubuntu 24.04.5 LTS",
+        "boot_id": "8594dd9f-2f6d-4932-9051-cd00857d7d43",
+        "python": "3.12.3"
+      },
+      "packages": {
+        "poster-http": "0.2.0",
+        "httpx": "0.28.1",
+        "cryptography": "50.0.2",
+        "psutil": "7.2.2",
+        "playwright": "1.64.0",
+        "pydantic": "2.14.1",
+        "PyYAML": "6.0.3",
+        "filelock": "3.32.7"
+      },
+      "uid": 1000,
+      "program_commit": "f411f806d5d0fa498b556bd4e4d2c6a955bcd992",
+      "helper_sha256": "dcfff82b5c1327cd0fa59bb1a7c270742d0e9732e78f1b6dcc7850b58a3ad583",
+      "roles": {
+        "agent": {
+          "birth": 1793038042.83,
+          "pid": 7807,
+          "alive": true
+        },
+        "relay": {
+          "birth": 1793038039.76,
+          "pid": 7727,
+          "alive": true
+        },
+        "fixture": {
+          "birth": 1793038039.77,
+          "pid": 7728,
+          "alive": true
+        }
+      }
+    },
+    "snapshot": {
+      "version": "8f71af259cd0bb0ab410519b7375f31516d94e3bf2288fc65e8ddb54d12eee97",
+      "sha256": "0b2af41ad3d9c84a1afd3810ea6c6e0fdf6a5c96b49d9baad4469958ee873dd3",
+      "original_bytes_equal": true,
+      "run_id": "387afb99b64c4df39041baffc413180d"
+    }
+  },
+  "annotation_note": "GitHub truncated this original annotation at 5000 characters. Only complete original fields are retained here; full proof and SQLite export are in the linked artifact."
+}

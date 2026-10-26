@@ -278,7 +278,14 @@ def main():
             timeout=1000,
         )
         report = json.loads((private / "run/report.json").read_bytes())
-        print("::notice title=Cross-host 18-scenario report::" + json.dumps(report))
+        # Actions truncates annotation bodies at 5,000 characters. Keep the
+        # verdict and each safe evidence section independently readable.
+        print(
+            "::notice title=Cross-host 18-scenario report::"
+            + json.dumps({k: v for k, v in report.items() if k != "proof"})
+        )
+        for name, value in report.get("proof", {}).items():
+            print("::notice title=Cross-host evidence " + name + "::" + json.dumps(value))
         shutil.copyfile(private / "run/report.json", public / "report.json")
         if (private / "run/windows-history-safe.sqlite").exists():
             shutil.copyfile(

@@ -5,7 +5,24 @@
 `codex/poster-5b-crosshost-acceptance`. Исходные frozen Controller/Service и
 Linux Agent/Relay/GraphRunner должны остаться из принятой сборки 5B.
 
-Статус 18 сценариев: **NOT_EXECUTED** до фактического Windows/Linux прогона.
+Статус: **18/18 PASSED**, `NOT_EXECUTED=0`, `full_cross_host_acceptance=true`.
+Первый полный прогон исходных f411 пакетов:
+https://github.com/selventodan-bit/poster/actions/runs/40374290381
+([safe artifact](https://github.com/selventodan-bit/poster/actions/runs/40374290381/artifacts/12674131949)).
+Закреплённая запись результата:
+[`poster-5b-crosshost-2026-10-26.json`](benchmarks/poster-5b-crosshost-2026-10-26.json).
+
+Фактические ОС: Windows Server 2022 (10.0.20348) и Ubuntu 24.04.5 LTS x86_64,
+отдельное настоящее ядро `6.18.54.1-microsoft-standard-WSL2`, Python 3.12.3,
+Agent UID 1000. Native Service/GUI PID 980/1432; Linux Agent/Relay PID 7807/7727;
+одновременно наблюдались Worker PID 7949/8166. Это две одновременно работающие
+ОС на одном стандартном hosted runner с отдельной Linux VM и приватной TCP-сетью.
+Испытание двух физических серверов, публичного WAN и личного Windows ПК не проводилось.
+
+Исправлен только тест revoke: он теперь подаёт обязательные typed/protected
+входы, чтобы корректное задание доходило до проверки отозванного Agent;
+требование ошибки `REMOTE_REVOKED` сохранено, число jobs не увеличивается.
+Production код и исходные пакеты f411 не изменялись.
 
 ## Проверка бесплатной инфраструктуры
 
