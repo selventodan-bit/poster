@@ -278,13 +278,22 @@ def main():
             timeout=1000,
         )
         report = json.loads((private / "run/report.json").read_bytes())
-        # Actions truncates annotation bodies at 5,000 characters. Keep the
-        # verdict and each safe evidence section independently readable.
+        # Actions truncates bodies at 5,000 characters and retains only ten
+        # notices per step. Publish the verdict plus five bounded groups;
+        # provenance below is the seventh notice. Full JSON remains in artifact.
         print(
             "::notice title=Cross-host 18-scenario report::"
             + json.dumps({k: v for k, v in report.items() if k != "proof"})
         )
-        for name, value in report.get("proof", {}).items():
+        groups = dict(
+            windows=("windows", "production_commit", "launchers"),
+            linux=("linux", "parallel"),
+            history=("jobs", "sqlite_history"),
+            graph=("fixture", "snapshot", "returned_files", "tls"),
+            lifecycle=("browser", "reconnect", "partition", "secret_boundary", "revoke"),
+        )
+        for name, fields in groups.items():
+            value = {k: report["proof"][k] for k in fields if k in report.get("proof", {})}
             print("::notice title=Cross-host evidence " + name + "::" + json.dumps(value))
         shutil.copyfile(private / "run/report.json", public / "report.json")
         if (private / "run/windows-history-safe.sqlite").exists():
