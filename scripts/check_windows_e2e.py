@@ -32,6 +32,13 @@ async def check(directory, case="topic"):
             result = await session.recognize()
             assert result.state == "DETECTED", result.summary()
             title = "Windows Ж 日本語" if case not in {"reply", "comment"} else ""
+            # Wait for cold Chromium's compositor/actionability while still read-only.
+            # trial dispatches no click. Publication retains its original one-attempt
+            # guard and 5s deadline; never retry after a possible external write.
+            form = next(f for f in session.result.forms if f.key == session.result.selected)
+            submit = form.fields["submit"]
+            await session.page.frames[submit.frame].locator(submit.selector).click(trial=True, timeout=30000)
+            assert not session.browser_attempted and not session.write_admitted and not server.writes
             await session.test_publish(title, "Браузер & <literal>\nسطر 日本語", "acceptance", confirmed=True)
             if session.result.state != "HTTP_CANDIDATE":
                 diagnostic_path = session.profile.parent / "diagnostics.jsonl"
