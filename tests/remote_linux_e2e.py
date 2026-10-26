@@ -160,6 +160,32 @@ def test_real_remote_graph_and_output_are_returned_to_authoritative_queue(remote
     assert value["history"][0]["pid"] != remote["info"]["pid"]
 
 
+def test_completed_workers_keep_agent_online_and_deliver_every_report(remote, tmp_path):
+    root = remote["controller"]
+    job, item = enqueue(
+        remote,
+        tmp_path,
+        [("Files.WriteText", {"path": "out.txt", "text": "fast completion"})],
+        outputs=["out.txt"],
+    )
+    jobs = []
+    for index in range(20):
+        if index:
+            queued = request(
+                root,
+                "enqueue_batch",
+                items=[dict(id=item["id"], agent_id=remote["agent_id"], remote_outputs=["out.txt"])],
+                request_id="sequential-" + str(index),
+            )
+            assert not queued["errors"]
+            job = queued["jobs"][0]
+        jobs.append(job)
+        assert terminal(remote, job)["status"] == "SUCCEEDED"
+        assert remote["agent"].poll() is None
+        assert (Path(request(root, "show", id=job)["workdir"]) / "out.txt").read_text() == "fast completion"
+    assert len(set(jobs)) == 20
+
+
 def test_protected_types_parallel_limits_and_cancellation(remote, tmp_path):
     from poster.maker.model import Variable
     from test_dispatcher_service import controlled_server

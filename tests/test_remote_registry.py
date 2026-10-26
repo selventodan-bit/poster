@@ -170,6 +170,18 @@ def test_agent_replay_journal_never_resets_after_corruption_or_key_loss(tmp_path
     assert not path.exists()
 
 
+def test_completed_child_input_closes_with_a_buffered_undelivered_lease():
+    from poster.remote.agent import close_input
+
+    child = subprocess.Popen([sys.executable, "-c", "pass"], stdin=subprocess.PIPE)
+    child.wait(timeout=15)
+    # Real anonymous OS pipe: write buffers successfully, close() then flushes
+    # into a closed reader. This race used to abort Agent after saving DONE.
+    child.stdin.write(b"LEASE 0\n")
+    close_input(child)
+    assert child.stdin.closed
+
+
 def test_schema2_schedule_migration_keeps_local_target_and_encrypted_inputs(tmp_path):
     import sqlite3
     from poster.dispatcher.store import SCHEMA, MIGRATION_2, APPLICATION_ID, SCHEMA_VERSION

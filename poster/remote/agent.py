@@ -28,6 +28,15 @@ from .relay import Client
 OUTPUT_LIMIT = 4_000_000
 
 
+def close_input(process):
+    # BufferedWriter.close flushes a pending lease even after the child exits.
+    # A broken pipe is confirmed EOF, never grounds for losing a saved report.
+    try:
+        process.stdin.close()
+    except OSError:
+        pass
+
+
 class Agent:
     def __init__(self, root):
         if sys.platform != "linux":
@@ -78,14 +87,14 @@ class Agent:
             for key, worker in self.workers.items():
                 if key not in permitted:
                     self.cancel(worker, "DISPATCHER_LOST")
-                elif worker["reason"] is None:
+                elif worker["reason"] is None and not worker["process"].stdin.closed:
                     try:
                         worker["process"].stdin.write(
                             ("LEASE " + str(packet["issued"] + LEASE) + "\n").encode()
                         )
                         worker["process"].stdin.flush()
                     except OSError:
-                        pass
+                        close_input(worker["process"])
         elif kind == "offer":
             if self.journal.db.execute("SELECT 1 FROM meta WHERE id='revoked'").fetchone():
                 return
@@ -186,11 +195,6 @@ class Agent:
             key=grant["key"],
         )
         self.workers[run_id] = worker
-        process.stdin.write(
-            raw_json(dict(key=grant["key"], job=job, execution=execution, lease=self.last_pulse + LEASE))
-            + b"\n"
-        )
-        process.stdin.flush()
 
         def read():
             try:
@@ -207,6 +211,11 @@ class Agent:
 
         worker["reader"] = threading.Thread(target=read, daemon=True)
         worker["reader"].start()
+        process.stdin.write(
+            raw_json(dict(key=grant["key"], job=job, execution=execution, lease=self.last_pulse + LEASE))
+            + b"\n"
+        )
+        process.stdin.flush()
 
     def cancel(self, worker, reason):
         if worker["reason"] is not None:
@@ -215,13 +224,13 @@ class Agent:
             raise DispatcherError("REMOTE_PROTOCOL")
         worker["reason"], worker["cancelled"] = reason, time.monotonic()
         if reason == "DISPATCHER_LOST":
-            worker["process"].stdin.close()  # Existing worker control EOF/watchdog.
-        else:
+            close_input(worker["process"])  # Existing worker control EOF/watchdog.
+        elif not worker["process"].stdin.closed:
             try:
                 worker["process"].stdin.write(reason.encode() + b"\n")
                 worker["process"].stdin.flush()
             except OSError:
-                pass
+                close_input(worker["process"])
 
     def finish(self, run_id, worker, event):
         path = plain_path(event["report"])
@@ -293,8 +302,7 @@ class Agent:
                 finally:
                     reap_detached(run_id, worker["birth"])
                     process.stdout.close()
-                    if not process.stdin.closed:
-                        process.stdin.close()
+                    close_input(process)
                     process.wait()
                     del self.workers[run_id]
 
