@@ -76,6 +76,35 @@ def wait(predicate, timeout=65):
     raise AssertionError("Cross-host deadline")
 
 
+def export_history(source, output):
+    """Keep a private backup and a separate SQLite allowlist export for review."""
+    with sqlite3.connect(source.resolve().as_uri() + "?mode=ro", uri=True) as db:
+        with sqlite3.connect(output / "windows-history-private.sqlite") as backup:
+            db.backup(backup)
+        db.row_factory = sqlite3.Row
+        executions = [
+            dict(row)
+            for row in db.execute(
+                "SELECT run_id,job_id,attempt,status,pid,birth,leased,started,finished,code,effects_possible "
+                "FROM executions ORDER BY leased"
+            )
+        ]
+        jobs = [dict(row) for row in db.execute("SELECT id,status,attempt FROM jobs ORDER BY created")]
+    with sqlite3.connect(output / "windows-history-safe.sqlite") as safe:
+        safe.execute("CREATE TABLE jobs(id TEXT,status TEXT,attempt INTEGER)")
+        safe.execute(
+            "CREATE TABLE executions(run_id TEXT,job_id TEXT,attempt INTEGER,status TEXT,"
+            "pid INTEGER,birth REAL,leased REAL,started REAL,finished REAL,code TEXT,effects_possible INTEGER)"
+        )
+        safe.executemany("INSERT INTO jobs VALUES(:id,:status,:attempt)", jobs)
+        safe.executemany(
+            "INSERT INTO executions VALUES(:run_id,:job_id,:attempt,:status,:pid,:birth,"
+            ":leased,:started,:finished,:code,:effects_possible)",
+            executions,
+        )
+    return dict(sqlite_history=executions, jobs=jobs)
+
+
 class Peer:
     def __init__(self, config):
         self.config = config
@@ -311,7 +340,7 @@ def check(config, output):
         )
         ok("linux_processes", "pairing_fingerprints_approval", "signed_heartbeat")
         proof["linux"] = {
-            k: observation[k] for k in ("os", "uid", "program_commit", "helper_sha256", "roles")
+            k: observation[k] for k in ("os", "packages", "uid", "program_commit", "helper_sha256", "roles")
         }
         window.capture_as_image().save(output / "windows-controller.png")
         fixture_url = observation["url"]
@@ -469,28 +498,28 @@ def check(config, output):
         )
         call("remote_revoke", id=agent_id)
         assert not online()
+        count_before_revoke_check = call("jobs")["total"]
         refused = call(
-            "enqueue_batch", items=[dict(id=item["id"], agent_id=agent_id)], request_id=uuid.uuid4().hex
+            "enqueue_batch",
+            items=[
+                dict(
+                    id=item["id"],
+                    agent_id=agent_id,
+                    secrets={"protected": secret},
+                    inputs={"typed_count": 17},
+                    remote_outputs=["out.txt"],
+                )
+            ],
+            request_id=uuid.uuid4().hex,
         )
         assert not refused["jobs"] and refused["errors"][0]["code"] == "REMOTE_REVOKED"
+        assert call("jobs")["total"] == count_before_revoke_check
+        proof["revoke"] = dict(error="REMOTE_REVOKED", admitted_jobs=0, queue_count_unchanged=True)
         ok("revoke_without_fallback")
         proof["fixture"] = peer.call("observe")["calls"]
         # Preserve the complete database only in private output. Publish an
         # explicit safe column allowlist; inputs and key/profile ciphers stay local.
-        with sqlite3.connect(root / "dispatcher.sqlite") as db:
-            with sqlite3.connect(output / "windows-history-private.sqlite") as backup:
-                db.backup(backup)
-            db.row_factory = sqlite3.Row
-            proof["sqlite_history"] = [
-                dict(row)
-                for row in db.execute(
-                    "SELECT run_id,job_id,attempt,status,pid,birth,leased,started,finished,code,effects_possible "
-                    "FROM executions ORDER BY leased"
-                )
-            ]
-            proof["jobs"] = [
-                dict(row) for row in db.execute("SELECT id,status,attempt FROM jobs ORDER BY created")
-            ]
+        proof.update(export_history(root / "dispatcher.sqlite", output))
         assert set(passed) == set(SCENARIOS)
         return report(
             output / "report.json",
@@ -504,6 +533,11 @@ def check(config, output):
             proof=proof,
         )
     except Exception as exc:
+        if (root / "dispatcher.sqlite").exists() and not (output / "windows-history-safe.sqlite").exists():
+            try:
+                proof.update(export_history(root / "dispatcher.sqlite", output))
+            except Exception as history_error:
+                proof["history_export_error"] = type(history_error).__name__
         report(
             output / "report.json",
             status="FAILED",

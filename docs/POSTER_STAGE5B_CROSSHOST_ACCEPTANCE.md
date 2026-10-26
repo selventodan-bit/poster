@@ -14,11 +14,31 @@ Linux Agent/Relay/GraphRunner должны остаться из принято�
 отдельная VM с настоящим Linux-ядром. Это один hosted runner с двумя ОС;
 он не изображает два физических компьютера или испытание публичного WAN.
 
-Начальный workflow `crosshost-acceptance` проверяет только доступность WSL2.
-Он требует настоящее ядро WSL2 и отключает automount Windows-дисков и interop.
-Проба не запускает 18 сценариев и всегда сохраняет
-`full_cross_host_acceptance=false`, даже при статусе `WSL2_READY`.
-Доступность WSL2 проверяется фактически, а не выводится из документации action.
+Workflow `crosshost-acceptance` скачивает исходные пакеты из принятого run,
+проверяет SHA256 архивов, manifest и frozen launchers и запускает существующий
+18-сценарный harness. Перед этим он требует настоящее ядро WSL2 и отключает
+automount Windows-дисков и interop. Отдельная capability-проба всегда сохраняет
+`full_cross_host_acceptance=false`, даже при статусе `WSL2_READY`: доступность VM
+ещё не означает прохождения E2E. Kernel-wide WSLInterop также явно выключается
+bootstrap root до создания обычного пользователя; он не может включить его обратно.
+
+Для повторения в Actions выберите workflow **crosshost-acceptance → Run workflow →
+codex/poster-5b-crosshost-acceptance**. Все входы закреплены в коде; вводить
+пользовательские secrets, настраивать личный ПК или покупать VM не требуется.
+Job отказывается запускаться для private repository. Он устанавливает Ubuntu,
+OpenSSH и browser OS libraries администратором гостя, после чего runtime выполняет
+обычный `postercheck`. Windows передаёт через SCP только hash-verified Linux
+archive и проверяемый helper. SSH host key получают публичной частью через
+доверенный VM control plane и закрепляют до первого SSH подключения.
+Private IP гостя имеет DNS alias в hosts обеих ОС; Relay действительно принимает
+TCP/TLS с Windows на этом IP, без HTTP-туннелей и переноса заданий через artifacts.
+
+Артефакт **crosshost-safe-evidence** (7 дней) содержит только capability-пробу,
+provenance, безопасный harness report, screenshot, проверенные returned files и
+`windows-history-safe.sqlite`. Последний — отдельный SQLite export выбранных
+столбцов исходной Windows истории. Полная DB с зашифрованными приватными полями,
+ключи, профили и raw child logs в artifact не включаются. По завершении guest VM
+останавливается и удаляется вместе с ephemeral runner.
 
 setup-wsl закреплён на upstream commit
 `4c48163d9f981914dd8caa0fc335fe19cca5bff4` (v7.2.0), cache отключён.
@@ -45,6 +65,29 @@ requirements-remote.txt внутри hash-verified Linux release.
 Локальный архив с manifest другого SHA не допускается независимо от имени папки.
 SHA256 архивов выше сверены с аннотациями принятого CI. На фактических машинах
 скачанные bytes и BUILD_INFO/release.json проверяются повторно перед запуском.
+
+## Что подтверждают 18 сценариев
+
+| Сценарий | Проверяемое доказательство |
+| --- | --- |
+| frozen_windows_processes | SHA исходных launchers, native exe path, PID/birth, окно GUI |
+| linux_processes | Linux OS/kernel, UID≠0, release commit, PID/birth Agent и Relay |
+| tls_hostname_certificate_auth | Настоящий TLS probe; отказ bad token, unknown CA и IP вместо DNS SAN |
+| pairing_fingerprints_approval | Отказ неправильного pin, PENDING до явного approval |
+| signed_heartbeat | Relay доступен при OFFLINE, ONLINE только после Agent heartbeat |
+| exact_maker_snapshot | Расшифрованный per-run snapshot побайтно равен исходному graph |
+| typed_and_protected_inputs | HTTP fixture получил ожидаемый hash и int/bool типы protected JSON |
+| linux_graphrunner_output | Исходный GraphRunner вернул ожидаемые `out.txt`/`third.txt` на Windows |
+| windows_history | Одна execution/history запись на job в исходной Windows SQLite |
+| two_parallel_executions | Два одновременно RUNNING job с разными настоящими Linux Worker PID |
+| global_and_project_limits | Повтор проекта и третий job остаются PENDING при занятых лимитах |
+| cancellation | Отмена работающего Linux графа через Windows queue |
+| browser_timeout_cleanup | Реальный Chromium наблюдался, после timeout UNKNOWN и нет живых descendants |
+| agent_disconnect_reconnect | STOPPED/OFFLINE, повторный ONLINE, прежняя identity |
+| post_partition_unknown_no_resend | Relay аварийно убит после POST; UNKNOWN, одна history и ровно один POST после восстановления |
+| secret_and_queue_key_boundary | Canary не попал в публичные данные, Windows master key отсутствует на Linux |
+| no_orphan_browsers | Наблюдавшиеся owned Worker/Chromium процессы завершены |
+| revoke_without_fallback | После revoke новые выдачи отказаны; локальный fallback не запускается |
 
 ## Если hosted VM недоступна: минимальные внешние машины
 

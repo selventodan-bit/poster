@@ -8,6 +8,7 @@ import argparse
 import base64
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from importlib.metadata import version as package_version
 import json
 import os
 from pathlib import Path
@@ -214,7 +215,21 @@ def action(root, name, data):
             arch=platform.machine(),
             distribution=platform.freedesktop_os_release().get("PRETTY_NAME"),
             boot_id=Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
+            python=platform.python_version(),
         )
+        info["packages"] = {
+            name: package_version(name)
+            for name in (
+                "poster-http",
+                "httpx",
+                "cryptography",
+                "psutil",
+                "playwright",
+                "pydantic",
+                "PyYAML",
+                "filelock",
+            )
+        }
         info["roles"] = {}
         for role in ("agent", "relay", "fixture"):
             path = root / (role + "-process.json")

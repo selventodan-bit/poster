@@ -278,7 +278,12 @@ def main():
             timeout=1000,
         )
         report = json.loads((private / "run/report.json").read_bytes())
+        print("::notice title=Cross-host 18-scenario report::" + json.dumps(report))
         shutil.copyfile(private / "run/report.json", public / "report.json")
+        if (private / "run/windows-history-safe.sqlite").exists():
+            shutil.copyfile(
+                private / "run/windows-history-safe.sqlite", public / "windows-history-safe.sqlite"
+            )
         if (private / "run/returned-files").exists():
             shutil.copytree(private / "run/returned-files", public / "returned-files")
         screenshot = private / "run/windows-controller.png"
