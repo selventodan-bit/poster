@@ -78,21 +78,21 @@ def remote(tmp_path):
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
+    context = dict(
+        controller=controller,
+        info=info,
+        agent=agent,
+        agent_id=agent_id,
+        agent_root=agent_root,
+        relay=relay,
+        transport=root,
+        cert=cert,
+        key=key,
+        port=port,
+    )
     try:
         request(controller, "remote_approve", id=agent_id)
         wait(lambda: request(controller, "remote_agents")[0]["online"])
-        context = dict(
-            controller=controller,
-            info=info,
-            agent=agent,
-            agent_id=agent_id,
-            agent_root=agent_root,
-            relay=relay,
-            transport=root,
-            cert=cert,
-            key=key,
-            port=port,
-        )
         yield context
     finally:
         try:
@@ -314,7 +314,7 @@ def test_crash_or_partition_never_repeats_accepted_post(remote, tmp_path, victim
 
             wait(lambda: stopped(remote["info"]))
             remote["info"] = ensure_service(root)
-            request(root, "start")
+            assert request(root, "ping")["running"]  # Trusted transport resumes on Service restart.
         else:
             remote["relay"].kill()
             remote["relay"].wait(10)

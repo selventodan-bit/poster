@@ -600,7 +600,8 @@ def main():
 
             atexit.register(host.trace, "finalizing")
             if host.store.db.execute(
-                "SELECT 1 FROM schedules WHERE enabled=1 AND deleted=0 LIMIT 1"
+                "SELECT 1 FROM schedules WHERE enabled=1 AND deleted=0 "
+                "UNION ALL SELECT 1 FROM remote_agents WHERE state='TRUSTED' LIMIT 1"
             ).fetchone():
                 host.start()
             host.serve()

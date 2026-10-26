@@ -200,15 +200,17 @@ class Controller:
                 }:
                     root = private_dir(self.store.root / "runs" / run_id)
                     # Preserve late authenticated evidence privately; never clear UNKNOWN.
-                    atomic(
-                        root / "late-result.enc",
-                        seal(
-                            {
-                                "message": value,
-                                "key": unseal(row["key_cipher"]) if row["key_cipher"] else None,
-                            }
-                        ),
-                    )
+                    path = root / "late-result.enc"
+                    if not path.exists():
+                        atomic(
+                            path,
+                            seal(
+                                {
+                                    "message": value,
+                                    "key": unseal(row["key_cipher"]) if row["key_cipher"] else None,
+                                }
+                            ),
+                        )
                 with self.store.transaction():
                     for suffix in [":offer", ":grant", ":cancel"]:
                         self.drop(run_id + suffix)

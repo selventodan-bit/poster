@@ -1,4 +1,6 @@
 import copy
+import subprocess
+import sys
 import pytest
 
 from poster.remote.protocol import Identity, pack, unpack, LEASE
@@ -24,3 +26,20 @@ def test_corrupt_saved_identity_is_rejected_instead_of_replaced():
     for private in [{}, {"sign": "broken", "box": "broken"}]:
         with pytest.raises(DispatcherError):
             Identity(private)
+
+
+def test_tls_and_identity_validation_remain_enabled_with_python_optimization():
+    script = """
+from poster.dispatcher.models import DispatcherError
+from poster.remote.protocol import Identity, validate_peer
+from poster.remote.registry import profile
+peer = dict(Identity().public(), id='0' * 64)
+insecure = dict(url='http://relay.invalid', channel='a' * 32, token='x' * 40)
+for validate, value in [(validate_peer, peer), (profile, insecure)]:
+    try:
+        validate(value)
+    except DispatcherError:
+        continue
+    raise SystemExit(1)
+"""
+    subprocess.run([sys.executable, "-O", "-c", script], check=True, timeout=15)

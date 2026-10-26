@@ -8,7 +8,7 @@ import psutil
 import pytest
 
 from poster.dispatcher.models import DispatcherError
-from poster.dispatcher.security import key_setup, seal
+from poster.dispatcher.security import key_setup, seal, unseal
 from poster.dispatcher.service import Dispatcher, prepare_snapshot
 from poster.dispatcher.store import Store
 from poster.remote.protocol import Identity, pack, b64
@@ -83,9 +83,13 @@ def test_durable_risk_precedes_key_release_and_corrupt_report_becomes_unknown(ad
     network.handle(agent_row, pack(agent, controller.public(), broken))
     assert store.payload(job)["status"] == "UNKNOWN"
     assert store.history(job)[0]["code"] == "REPORT_INVALID"
+    evidence = store.root / "runs" / execution["run_id"] / "late-result.enc"
+    original = evidence.read_bytes()
+    assert unseal(original)["key"]["key"]
     # A correctly authenticated duplicate response cannot alter a terminal result or re-execute.
     network.handle(agent_row, pack(agent, controller.public(), broken))
     assert store.payload(job)["status"] == "UNKNOWN" and store.claim("owner", 2, 1) is None
+    assert evidence.read_bytes() == original  # Preserve the private review key after receipt loss.
 
 
 def test_controller_recovery_never_signals_an_agent_pid_or_reissues_grant(admitted):
@@ -140,6 +144,30 @@ def test_never_exports_master_key_even_when_reused_as_maker_key(admitted):
 def test_output_allowlist_cannot_escape(names):
     with pytest.raises(DispatcherError):
         output_names(names)
+
+
+def test_agent_replay_journal_never_resets_after_corruption_or_key_loss(tmp_path):
+    from cryptography.fernet import Fernet
+    from poster.remote.journal import Journal
+
+    key = Fernet.generate_key()
+    journal = Journal(tmp_path, key, create=True)
+    journal.db.execute("INSERT INTO runs(id,state) VALUES('permanent-run','STARTED')")
+    journal.close()
+    with pytest.raises(DispatcherError, match="Ключ"):
+        Journal(tmp_path, Fernet.generate_key())
+    journal = Journal(tmp_path, key)
+    assert journal.db.execute("SELECT state FROM runs").fetchone()[0] == "STARTED"
+    journal.close()
+    path = tmp_path / "agent-journal.sqlite"
+    path.write_bytes(b"")
+    with pytest.raises(DispatcherError, match="Ключ"):
+        Journal(tmp_path, key)
+    assert path.read_bytes() == b""  # No replacement schema or empty replay ledger.
+    path.unlink()
+    with pytest.raises(DispatcherError, match="Ключ"):
+        Journal(tmp_path, key)
+    assert not path.exists()
 
 
 def test_schema2_schedule_migration_keeps_local_target_and_encrypted_inputs(tmp_path):

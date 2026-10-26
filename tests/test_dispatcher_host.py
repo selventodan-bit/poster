@@ -81,7 +81,7 @@ def test_service_survives_client_exit_and_preserves_catalog_and_history(host, tm
 
 
 def test_maker_distinct_key_secret_types_through_service_and_worker(host, tmp_path, monkeypatch):
-    root, _ = host
+    root, info = host
     maker = tmp_path / "Maker Ж" / ".poster"
     private = maker / "private"
     private.mkdir(parents=True)
@@ -104,6 +104,10 @@ def test_maker_distinct_key_secret_types_through_service_and_worker(host, tmp_pa
     value = request(root, "show", id=job)
     assert value["status"] == "SUCCEEDED", value
     assert value["report"]["gui_imports_forbidden"] and value["report"]["browser_imports_forbidden"]
+    # Audit a closed workspace. A terminal report can precede worker harvest;
+    # concurrent SQLite/atomic-file handles can deny reads on Windows.
+    request(root, "shutdown")
+    wait(lambda: stopped(info))
     for path in root.rglob("*"):
         if path.is_file() and path.suffix not in {".key"}:
             if path.suffix == ".lock":

@@ -99,7 +99,7 @@ def _agent_init(root, name, controller_file, relay_file):
     relay = profile(read_json(relay_file))
     identity = Identity()
     storage_key = Fernet.generate_key()
-    Journal(root, storage_key).close()
+    Journal(root, storage_key, create=True).close()
     safe_json(
         root / "agent.json",
         dict(

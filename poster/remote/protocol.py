@@ -65,10 +65,12 @@ class Identity:
 
 def validate_peer(value):
     try:
-        assert set(value) == {"id", "sign", "box"}
+        if set(value) != {"id", "sign", "box"}:
+            raise ValueError()
         ed25519.Ed25519PublicKey.from_public_bytes(un64(value["sign"]))
         x25519.X25519PublicKey.from_public_bytes(un64(value["box"]))
-        assert value["id"] == hashlib.sha256(raw_json({k: value[k] for k in ["sign", "box"]})).hexdigest()
+        if value["id"] != hashlib.sha256(raw_json({k: value[k] for k in ["sign", "box"]})).hexdigest():
+            raise ValueError()
         return value
     except Exception as exc:
         raise DispatcherError("REMOTE_IDENTITY") from exc

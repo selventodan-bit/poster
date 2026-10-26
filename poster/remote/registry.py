@@ -23,11 +23,22 @@ def read_json(path):
 def profile(value):
     try:
         url = urlsplit(value["url"])
-        assert url.scheme == "https" and url.hostname and not url.username and not url.password
-        assert url.port is None or 1 <= url.port <= 65535
-        assert not url.query and not url.fragment and url.path in ("", "/")
-        assert isinstance(value["token"], str) and len(value["token"]) >= 32
-        assert len(value["channel"]) == 32 and all(c in "0123456789abcdef" for c in value["channel"])
+        if (
+            url.scheme != "https"
+            or not url.hostname
+            or url.username
+            or url.password
+            or url.port is not None
+            and not 1 <= url.port <= 65535
+            or url.query
+            or url.fragment
+            or url.path not in ("", "/")
+            or not isinstance(value["token"], str)
+            or len(value["token"]) < 32
+            or len(value["channel"]) != 32
+            or any(c not in "0123456789abcdef" for c in value["channel"])
+        ):
+            raise ValueError()
         if value.get("ca"):
             plain_path(value["ca"]).read_bytes()
         ssl.create_default_context(cafile=value.get("ca"), cadata=value.get("ca_pem"))
