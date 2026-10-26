@@ -356,9 +356,11 @@ def test_explicit_profile_is_serialized_across_independent_queues(tmp_path):
                     enqueue(store, source, profile_root=profiles.root, profile_id=profile_id)
                     for store, source in zip(stores, sources, strict=True)
                 ]
+                # Real Chromium startup on a loaded hosted Windows VM can exceed
+                # the generic 20s polling budget; still require an actual HTTP hit.
                 first = launch(stores[0])
                 processes.append(first)
-                wait(lambda: any(c["path"] == "/hold/0" for c in server.calls))
+                wait(lambda: any(c["path"] == "/hold/0" for c in server.calls), timeout=60)
                 second = launch(stores[1])
                 processes.append(second)
                 wait(
@@ -369,7 +371,7 @@ def test_explicit_profile_is_serialized_across_independent_queues(tmp_path):
                 assert not any(c["path"] == "/hold/1" for c in server.calls)
                 server.gates["0"].set()
                 finish(first)
-                wait(lambda: any(c["path"] == "/hold/1" for c in server.calls))
+                wait(lambda: any(c["path"] == "/hold/1" for c in server.calls), timeout=60)
                 server.gates["1"].set()
                 finish(second)
                 if any(
@@ -418,9 +420,9 @@ def test_worker_browser_crash_reaps_owned_browser_descendants(tmp_path, independ
             second_job = enqueue(store, other)
         process = launch(store)
         try:
-            wait(lambda: any(c["path"] == "/hold/0" for c in server.calls))
+            wait(lambda: any(c["path"] == "/hold/0" for c in server.calls), timeout=60)
             if independent:
-                wait(lambda: any(c["path"] == "/hold/1" for c in server.calls))
+                wait(lambda: any(c["path"] == "/hold/1" for c in server.calls), timeout=60)
             worker = psutil.Process(store.history(job)[0]["pid"])
             descendants = [(child.pid, child.create_time()) for child in worker.children(recursive=True)]
             assert descendants  # Real Chromium / Playwright processes, no mock provider.
