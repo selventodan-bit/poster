@@ -221,6 +221,7 @@ class ScheduleDialog(QDialog):
     def validate(self):
         try:
             self.values()
+            self.remote_target.values()
             if not self.items:
                 raise DispatcherError("PROJECT_INVALID")
             self.accept()

@@ -15,7 +15,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from poster.dispatcher.models import DispatcherError
 
 MAX_MESSAGE = 40_000_000
-LEASE = 8
+LEASE = 30
 
 
 def raw_json(value):
@@ -36,17 +36,17 @@ def public_key(key):
 
 class Identity:
     def __init__(self, private=None):
-        private = private or {}
-        self.sign = (
-            ed25519.Ed25519PrivateKey.from_private_bytes(un64(private["sign"]))
-            if private
-            else ed25519.Ed25519PrivateKey.generate()
-        )
-        self.box = (
-            x25519.X25519PrivateKey.from_private_bytes(un64(private["box"]))
-            if private
-            else x25519.X25519PrivateKey.generate()
-        )
+        if private is None:
+            self.sign = ed25519.Ed25519PrivateKey.generate()
+            self.box = x25519.X25519PrivateKey.generate()
+        else:
+            try:
+                if set(private) != {"sign", "box"}:
+                    raise ValueError()
+                self.sign = ed25519.Ed25519PrivateKey.from_private_bytes(un64(private["sign"]))
+                self.box = x25519.X25519PrivateKey.from_private_bytes(un64(private["box"]))
+            except Exception as exc:
+                raise DispatcherError("REMOTE_IDENTITY") from exc
 
     def public(self):
         values = dict(sign=public_key(self.sign), box=public_key(self.box))
@@ -132,7 +132,12 @@ def unpack(identity, peer, packet, *, now=None):
             un64(packet["signature"]), raw_json(signed)
         )
         now = time.time() if now is None else now
-        if packet["protocol"] != 1 or packet["src"] != peer["id"] or packet["dst"] != identity.public()["id"]:
+        if (
+            type(packet["protocol"]) is not int
+            or packet["protocol"] != 1
+            or packet["src"] != peer["id"]
+            or packet["dst"] != identity.public()["id"]
+        ):
             raise ValueError()
         if (
             not packet["issued"] - 3 <= now <= packet["expires"]

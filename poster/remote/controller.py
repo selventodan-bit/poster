@@ -1,6 +1,7 @@
 """Network sidecar to the ONE Dispatcher queue; never claims jobs or runs graphs."""
 
 import json
+import re
 import threading
 import time
 
@@ -58,10 +59,10 @@ class Controller:
 
         master = session_key()
         if master in raw_json(payload) or any(master in raw for raw in files.values()):
-            raise DispatcherError("REMOTE_CONFIG")
+            raise DispatcherError("REMOTE_MASTER_KEY")
         self.steps[job["version"]] = {n["id"] for n in json.loads(files[manifest["main"]])["nodes"]}
         if payload.get("profile"):
-            raise DispatcherError("REMOTE_CONFIG")
+            raise DispatcherError("REMOTE_PROFILE")
         key = Fernet.generate_key()
         cipher = Fernet(key)
         encrypted_bundle = cipher.encrypt(
@@ -97,7 +98,8 @@ class Controller:
             return
         if kind == "heartbeat":
             if (
-                value.get("os") != "linux"
+                not re.fullmatch(r"[A-Za-z0-9_.-]{1,40}", str(value.get("version", "")))
+                or value.get("os") != "linux"
                 or value.get("protocol") != 1
                 or not isinstance(value.get("runs"), list)
                 or len(value["runs"]) > 32
@@ -144,7 +146,15 @@ class Controller:
                     current = self.store.db.execute(
                         "SELECT state FROM remote_agents WHERE id=?", (agent["id"],)
                     ).fetchone()[0]
-                    if current != "TRUSTED" or job["cancel_requested"]:
+                    fresh_job = self.store.payload(execution["job_id"], private=False)
+                    fresh_run = self.store.is_remote(run_id)
+                    if (
+                        current != "TRUSTED"
+                        or fresh_job["cancel_requested"]
+                        or fresh_job["status"] != "LEASED"
+                        or fresh_run["state"] != "OFFERED"
+                        or fresh_run["lease_until"] <= time.time()
+                    ):
                         return
                     # Atomic risk fence and grant outbox, BEFORE key release over any network.
                     now = time.time()
@@ -174,13 +184,20 @@ class Controller:
             elif kind in {"report", "lost"}:
                 if execution["status"] in ACTIVE:
                     if kind == "lost":
-                        self.store.complete(run_id, Status.UNKNOWN, code="DISPATCHER_LOST")
+                        self.store.complete(
+                            run_id,
+                            Status.FAILED if row["state"] == "OFFERED" else Status.UNKNOWN,
+                            code="NOT_STARTED" if row["state"] == "OFFERED" else "DISPATCHER_LOST",
+                        )
                     else:
                         try:
                             self.import_report(row, execution, job, value)
                         except Exception:
                             self.store.complete(run_id, Status.UNKNOWN, code="REPORT_INVALID")
-                if kind == "report" and execution["status"] in {"UNKNOWN", "REVIEW_REQUIRED"}:
+                if kind == "report" and self.store.execution(run_id)["status"] in {
+                    "UNKNOWN",
+                    "REVIEW_REQUIRED",
+                }:
                     root = private_dir(self.store.root / "runs" / run_id)
                     # Preserve late authenticated evidence privately; never clear UNKNOWN.
                     atomic(
@@ -232,6 +249,18 @@ class Controller:
             or result["gui_imports_forbidden"] is not True
         ):
             raise DispatcherError("REPORT_INVALID")
+        worker_id = result.get("worker_id")
+        birth = value.get("birth")
+        if (
+            type(worker_id) is not int
+            or not 0 < worker_id < 2**31
+            or type(birth) not in (float, int)
+            or not 0 < birth <= time.time() + 3
+        ):
+            raise DispatcherError("REPORT_INVALID")
+        self.store.db.execute(
+            "UPDATE executions SET pid=?,birth=? WHERE run_id=?", (worker_id, birth, row["run_id"])
+        )
         confirmed = result.get("last_confirmed_step")
         if confirmed in self.steps.get(job["version"], set()):
             self.store.progress(row["run_id"], confirmed=confirmed)
@@ -343,6 +372,7 @@ class Controller:
         if self.agent_id is not None:
             return self.run_channel()
         children = {}
+        launched = {}
         try:
             with FileLock(str(self.path) + ".remote.lock", timeout=0):
                 store = Store(self.path)
@@ -353,9 +383,15 @@ class Controller:
                             for r in store.db.execute("SELECT id FROM remote_agents WHERE state!='PENDING'")
                         ]
                         for agent_id in ids:
-                            if agent_id not in children:
+                            if agent_id not in children or (
+                                not children[agent_id].thread.is_alive()
+                                and time.monotonic() - launched[agent_id] > 2
+                            ):
                                 child = children[agent_id] = Controller(self.path, agent_id)
                                 child.start()
+                                launched[agent_id] = time.monotonic()
+                        for agent_id in set(children) - set(ids):
+                            children.pop(agent_id).close()
                         self.done.wait(0.25)
                 finally:
                     for child in children.values():
@@ -369,13 +405,18 @@ class Controller:
     def run_channel(self):
         try:
             self.store = Store(self.path)
-            self.identity = Registry(self.store).identity()
             try:
+                self.identity = Registry(self.store).identity()
                 while not self.done.is_set():
                     agents = self.store.db.execute(
                         "SELECT * FROM remote_agents WHERE id=?", (self.agent_id,)
                     ).fetchall()
                     for agent in agents:
+                        if (
+                            agent["state"] == "REVOKED"
+                            and time.time() - (agent["revoked_at"] or 0) > LEASE * 2
+                        ):
+                            return
                         self.maintain(agent)
                         peer = json.loads(agent["peer"])
                         runs = [
@@ -434,3 +475,11 @@ class Controller:
                 self.store.close()
         except Exception:
             self.last_error = "REMOTE_TRANSPORT"
+            try:
+                db = Store(self.path)
+                db.db.execute(
+                    "UPDATE remote_agents SET last_error='REMOTE_TRANSPORT' WHERE id=?", (self.agent_id,)
+                )
+                db.close()
+            except Exception:
+                pass

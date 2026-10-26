@@ -179,6 +179,68 @@ def scenario(root):
             click("pause_schedule")
             wait(lambda: not window.schedules_model.rows[0]["enabled"] and not window.busy)
             window.grab().save(str(root / "scheduler-native.png"))
+            # Enroll through the real UI/IPC. No agent runs here: OFFLINE must stay real.
+            from poster.remote.protocol import Identity
+
+            registration = root / "registration.json"
+            registration.write_text(
+                json.dumps(
+                    dict(
+                        peer=Identity().public(), name="Offline Linux", os="linux", version="5A.1", protocol=1
+                    )
+                )
+            )
+            relay_profile = root / "controller-relay.json"
+            relay_profile.write_text(
+                json.dumps(dict(url="https://127.0.0.1:9", channel="b" * 32, token="test-only-token-" * 4))
+            )
+            files = iter([registration, relay_profile])
+            QFileDialog.getOpenFileName = staticmethod(lambda *args: (str(next(files)), ""))
+            window.tabs.setCurrentIndex(3)
+            click("remote_register")
+            wait(lambda: len(window.remote_agents_model.rows) == 1 and not window.busy)
+            assert window.remote_agents_model.rows[0]["state"] == "PENDING"
+            window.remote_agents.selectRow(0)
+            from PySide6.QtWidgets import QMessageBox
+
+            def consent():
+                active = app.activeModalWidget()
+                if isinstance(active, QMessageBox):
+                    QTest.mouseClick(active.button(QMessageBox.StandardButton.Yes), Qt.MouseButton.LeftButton)
+                else:
+                    QTimer.singleShot(20, consent)
+
+            QTimer.singleShot(20, consent)
+            click("remote_approve")
+            wait(lambda: window.remote_agents_model.rows[0]["state"] == "TRUSTED" and not window.busy)
+            assert window.remote_agents_model.rows[0]["online"] is False
+            agent_id = window.remote_agents_model.rows[0]["id"]
+            window.tabs.setCurrentIndex(0)
+            window.projects.selectRow(0)
+
+            def route():
+                active = app.activeModalWidget()
+                if isinstance(active, InputsDialog):
+                    active.remote_target.agent.setCurrentIndex(active.remote_target.agent.findData(agent_id))
+                    active.validate()
+                else:
+                    QTimer.singleShot(20, route)
+
+            QTimer.singleShot(20, route)
+            click("enqueue_projects")
+            wait(
+                lambda: any(r.get("agent_id") == agent_id for r in window.jobs_model.rows) and not window.busy
+            )
+            assert (
+                next(r for r in window.jobs_model.rows if r.get("agent_id") == agent_id)["status"]
+                == "PENDING"
+            )
+            window.tabs.setCurrentIndex(3)
+            window.remote_agents.selectRow(0)
+            QTimer.singleShot(20, consent)
+            click("remote_revoke")
+            wait(lambda: window.remote_agents_model.rows[0]["state"] == "REVOKED" and not window.busy)
+            window.grab().save(str(root / "remote-workers-native.png"))
             print(json.dumps({"qt_dispatcher": "passed", "workers": pids, "closed_gui_survives": True}))
     finally:
         request(window.root, "shutdown")

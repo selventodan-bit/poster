@@ -36,6 +36,8 @@ class Agent:
         self.config = read_json(self.root / "agent.json")
         self.identity = Identity(self.config["identity"])
         self.peer = validate_peer(self.config["controller"])
+        if not (self.root / "agent-journal.sqlite").is_file():
+            raise DispatcherError("KEY_INVALID")
         self.journal = Journal(root, self.config["storage_key"].encode())
         self.client = Client(self.config["relay"], "agent")
         self.workers = {}
@@ -245,6 +247,7 @@ class Agent:
         value = dict(
             kind="report",
             run_id=run_id,
+            birth=worker["birth"],
             report=b64(raw),
             sha256=event["sha256"],
             files=files,

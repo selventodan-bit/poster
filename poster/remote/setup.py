@@ -59,7 +59,9 @@ def relay_profiles(root, url, ca=None):
         path = root / (role + "-relay.json")
         if path.exists():
             raise FileExistsError()
-        safe_json(path, profile(dict(url=url, channel=channel, token=token, ca=str(ca) if ca else None)))
+        safe_json(
+            path, profile(dict(url=url, channel=channel, token=token, ca_pem=ca.read_text() if ca else None))
+        )
     config = root / "relay.json"
     if config.exists():
         raise FileExistsError()
@@ -75,19 +77,36 @@ def relay_profiles(root, url, ca=None):
 
 
 def agent_init(root, name, controller_file, relay_file):
+    from filelock import FileLock
+
+    root = private_dir(root)
+    with FileLock(str(root / "agent-init.lock"), timeout=0):
+        return _agent_init(root, name, controller_file, relay_file)
+
+
+def _agent_init(root, name, controller_file, relay_file):
     from cryptography.fernet import Fernet
 
     root = private_dir(root)
     if (root / "agent.json").exists():
         raise FileExistsError()
+    if (root / "agent-journal.sqlite").exists() or (root / "registration.json").exists():
+        raise FileExistsError()
+    from .journal import Journal
+    from .protocol import validate_peer
+
+    controller = validate_peer(read_json(controller_file))
+    relay = profile(read_json(relay_file))
     identity = Identity()
+    storage_key = Fernet.generate_key()
+    Journal(root, storage_key).close()
     safe_json(
         root / "agent.json",
         dict(
             identity=identity.private(),
-            storage_key=Fernet.generate_key().decode(),
-            controller=read_json(controller_file),
-            relay=profile(read_json(relay_file)),
+            storage_key=storage_key.decode(),
+            controller=controller,
+            relay=relay,
             name=name,
         ),
     )

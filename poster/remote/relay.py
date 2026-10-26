@@ -5,6 +5,7 @@ import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import sqlite3
+import socket
 import ssl
 import threading
 import time
@@ -12,7 +13,7 @@ import time
 import httpx
 
 from poster.dispatcher.models import DispatcherError
-from .protocol import raw_json, MAX_MESSAGE
+from .protocol import raw_json, MAX_MESSAGE, LEASE
 from .registry import profile
 
 MAX_HTTP = MAX_MESSAGE + 1_000_000
@@ -22,7 +23,7 @@ class Client:
     def __init__(self, configuration, role):
         self.config = profile(configuration)
         self.role = role
-        context = ssl.create_default_context(cafile=self.config.get("ca"))
+        context = ssl.create_default_context(cafile=self.config.get("ca"), cadata=self.config.get("ca_pem"))
         context.minimum_version = ssl.TLSVersion.TLSv1_2
         self.http = httpx.Client(verify=context, timeout=5, follow_redirects=False)
 
@@ -79,6 +80,12 @@ def server(configuration, database, cert, key, *, host="127.0.0.1", port=0):
     context.load_cert_chain(cert, key)
     lock = threading.Lock()
     with sqlite3.connect(database) as db:
+        tables = db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        application = db.execute("PRAGMA application_id").fetchone()[0]
+        if tables and application != 0x50524C59:
+            raise DispatcherError("REMOTE_CONFIG")
+        if not tables:
+            db.execute("PRAGMA application_id=1347570777")
         db.execute(
             "CREATE TABLE IF NOT EXISTS mailbox(id TEXT PRIMARY KEY,channel TEXT,recipient TEXT,packet BLOB,expires REAL)"
         )
@@ -124,7 +131,7 @@ def server(configuration, database, cert, key, *, host="127.0.0.1", port=0):
                         raw = raw_json(packet)
                         if (
                             len(raw) > MAX_MESSAGE
-                            or not time.time() - 3 < packet["expires"] < time.time() + 12
+                            or not time.time() - 3 < packet["expires"] < time.time() + LEASE + 3
                         ):
                             raise ValueError()
                         size = db.execute(
@@ -164,12 +171,39 @@ def server(configuration, database, cert, key, *, host="127.0.0.1", port=0):
 
     class Server(ThreadingHTTPServer):
         daemon_threads = True
+        slots = threading.BoundedSemaphore(64)
+
+        def process_request(self, request, address):
+            if not self.slots.acquire(blocking=False):
+                request.close()
+                return
+            try:
+                super().process_request(request, address)
+            except Exception:
+                self.slots.release()
+                raise
+
+        def process_request_thread(self, request, address):
+            def expire():
+                try:
+                    request.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+
+            deadline = threading.Timer(30, expire)
+            deadline.daemon = True
+            deadline.start()
+            try:
+                super().process_request_thread(request, address)
+            finally:
+                deadline.cancel()
+                self.slots.release()
 
         def get_request(self):
             sock, address = super().get_request()
             sock.settimeout(5)
             try:
-                return context.wrap_socket(sock, server_side=True), address
+                return context.wrap_socket(sock, server_side=True, do_handshake_on_connect=False), address
             except Exception:
                 sock.close()
                 raise

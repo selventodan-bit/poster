@@ -72,7 +72,7 @@ def enqueue_snapshot(
     if key is not None and (previous := store.find_key(key)):
         return previous
     if agent_id and profile_id:
-        raise DispatcherError("REMOTE_CONFIG")
+        raise DispatcherError("REMOTE_PROFILE")
     cipher, names = prepare_snapshot(
         store,
         project_id,

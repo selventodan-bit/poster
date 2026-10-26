@@ -14,7 +14,7 @@ from .models import ACTIVE, MESSAGES, TERMINAL, TRANSITIONS, DispatcherError, St
 from .security import plain_path, private_dir, restrict
 
 APPLICATION_ID = 0x50445350
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 MIGRATION_3 = """
 ALTER TABLE jobs ADD COLUMN agent_id TEXT;
@@ -110,7 +110,7 @@ class Store:
         tables = {r[0] for r in self.db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         app = self.db.execute("PRAGMA application_id").fetchone()[0]
         version = self.db.execute("PRAGMA user_version").fetchone()[0]
-        if (tables and (app != APPLICATION_ID or version not in (1, 2, SCHEMA_VERSION))) or (
+        if (tables and (app != APPLICATION_ID or version not in (1, 2, 3, SCHEMA_VERSION))) or (
             not tables and (app or version)
         ):
             raise DispatcherError("STORE_INVALID")
@@ -149,6 +149,9 @@ class Store:
                 for statement in MIGRATION_3.split(";"):
                     if statement.strip():
                         self.db.execute(statement)
+                self.db.execute("PRAGMA user_version=3")
+            if self.db.execute("PRAGMA user_version").fetchone()[0] == 3:
+                self.db.execute("ALTER TABLE remote_agents ADD COLUMN revoked_at REAL")
                 self.db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
         for suffix in ("", "-wal", "-shm"):
             item = Path(str(self.path) + suffix)
@@ -310,6 +313,8 @@ class Store:
         return dict(row)
 
     def claim(self, owner, max_workers, max_per_project):
+        from poster.remote.protocol import LEASE
+
         with self.transaction():
             if self.stopping():
                 return None
@@ -322,7 +327,7 @@ class Store:
                 return None
             row = self.db.execute(
                 "SELECT * FROM jobs j WHERE status='PENDING' AND (agent_id IS NULL OR EXISTS(SELECT 1 FROM remote_agents a WHERE a.id=j.agent_id AND a.state='TRUSTED' AND a.last_seen>"
-                + str(time.time() - 8)
+                + str(time.time() - LEASE)
                 + ")) AND NOT (EXISTS(SELECT 1 FROM schedule_events se WHERE se.job_id=j.id) AND EXISTS(SELECT 1 FROM jobs u LEFT JOIN schedule_reviews r ON r.job_id=u.id WHERE u.project_id=j.project_id AND u.status IN ('UNKNOWN','REVIEW_REQUIRED') AND r.job_id IS NULL)) AND (SELECT count(*) FROM jobs a WHERE a.project_id=j.project_id AND a.status IN ('LEASED','RUNNING'))<? ORDER BY created LIMIT 1",
                 (max_per_project,),
             ).fetchone()

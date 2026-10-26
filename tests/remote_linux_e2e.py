@@ -111,7 +111,7 @@ def remote(tmp_path):
             pass
 
 
-def enqueue(remote, tmp_path, actions, *, variables=None, secrets=None, outputs=None):
+def enqueue(remote, tmp_path, actions, *, variables=None, secrets=None, outputs=None, timeout=300):
     graph = chain("Remote graph", actions)
     graph.variables.update(variables or {})
     source = tmp_path / (graph.id + ".postergraph.json")
@@ -126,6 +126,7 @@ def enqueue(remote, tmp_path, actions, *, variables=None, secrets=None, outputs=
                 agent_id=remote["agent_id"],
                 remote_outputs=outputs or [],
                 secrets=secrets or {},
+                timeout=timeout,
             )
         ],
         request_id=graph.id,
@@ -139,7 +140,7 @@ def terminal(remote, job):
         value = request(remote["controller"], "show", id=job)
         return value if value["status"] not in {"PENDING", "LEASED", "RUNNING"} else None
 
-    return wait(finished, timeout=30)
+    return wait(finished, timeout=45)
 
 
 def test_real_remote_graph_and_output_are_returned_to_authoritative_queue(remote, tmp_path):
@@ -155,6 +156,7 @@ def test_real_remote_graph_and_output_are_returned_to_authoritative_queue(remote
     assert value["report"]["remote_agent"] == remote["agent_id"]
     assert value["report"]["project_version"] == item["version"]
     assert value["report"]["gui_imports_forbidden"]
+    assert type(value["history"][0]["pid"]) is int
     assert value["history"][0]["pid"] != remote["info"]["pid"]
 
 
@@ -361,3 +363,228 @@ def test_explicit_schedule_remote_target_and_revoke_without_local_fallback(remot
         request_id="must-not-fallback",
     )
     assert not value["jobs"] and value["errors"][0]["code"] == "REMOTE_REVOKED"
+
+
+def test_duplicate_transport_and_fresh_grant_cannot_repeat_a_run(remote, tmp_path):
+    import sqlite3
+    import time
+    from cryptography.fernet import Fernet
+    from poster.remote.protocol import Identity, pack
+    from test_dispatcher_service import controlled_server
+
+    root = remote["controller"]
+    cipher = Fernet((root / "queue.key").read_bytes().strip())
+    controller = Identity(json.loads(cipher.decrypt((root / "remote-identity.enc").read_bytes())))
+    peer = read_json(remote["agent_root"] / "registration.json")["peer"]
+    client = Client(read_json(remote["transport"] / "controller-relay.json"), "controller")
+    try:
+        with controlled_server() as (server, base):
+            job, _ = enqueue(remote, tmp_path, [("HTTP.Post", {"url": base + "/hold/0"})])
+            wait(lambda: server.calls)
+            run_id = request(root, "show", id=job)["history"][0]["run_id"]
+            with sqlite3.connect(root / "dispatcher.sqlite") as db:
+                encrypted = db.execute(
+                    "SELECT key_cipher FROM remote_runs WHERE run_id=?", (run_id,)
+                ).fetchone()[0]
+            grant = dict(
+                kind="grant",
+                run_id=run_id,
+                key=json.loads(cipher.decrypt(encrypted))["key"],
+                deadline=time.time() + 60,
+            )
+            first = pack(controller, peer, grant)
+            second = pack(controller, peer, grant)
+            client.exchange([first, first, second])
+
+            def received():
+                with sqlite3.connect(remote["agent_root"] / "agent-journal.sqlite") as db:
+                    return (
+                        db.execute(
+                            "SELECT count(*) FROM seen WHERE id IN (?,?)", (first["id"], second["id"])
+                        ).fetchone()[0]
+                        == 2
+                    )
+
+            wait(received)
+            assert len(server.calls) == 1 and len(request(root, "show", id=job)["history"]) == 1
+            server.gates["0"].set()
+            assert terminal(remote, job)["status"] == "SUCCEEDED"
+            # A new signed permit for an old run cannot override its durable tombstone.
+            late = pack(controller, peer, grant)
+            client.exchange([pack(controller, peer, dict(kind="pulse", runs=[run_id], revoked=False)), late])
+
+            def late_received():
+                with sqlite3.connect(remote["agent_root"] / "agent-journal.sqlite") as db:
+                    return db.execute("SELECT 1 FROM seen WHERE id=?", (late["id"],)).fetchone()
+
+            wait(late_received)
+            wait(lambda: read_json(remote["agent_root"] / "status.json")["active"] == 0)
+            assert len(server.calls) == 1
+    finally:
+        client.close()
+
+
+def test_browser_timeout_cleans_actual_browser_processes(remote, tmp_path):
+    import psutil
+    from poster.fixtures import serve_fixture
+
+    with serve_fixture() as (_, base):
+        job, _ = enqueue(
+            remote,
+            tmp_path,
+            [("Browser.OpenURL", {"url": base + "/classic/new"}), ("Logic.Delay", {"milliseconds": 120000})],
+            timeout=4,
+        )
+        wait(
+            lambda: (
+                request(remote["controller"], "show", id=job)["history"]
+                and request(remote["controller"], "show", id=job)["history"][0]["pid"]
+            )
+        )
+        pid = request(remote["controller"], "show", id=job)["history"][0]["pid"]
+        descendants = wait(lambda: psutil.Process(pid).children(recursive=True))
+        result = terminal(remote, job)
+        assert result["status"] == "UNKNOWN"
+
+        def gone():
+            for process in descendants:
+                try:
+                    if process.is_running() and process.status() != psutil.STATUS_ZOMBIE:
+                        return False
+                except psutil.NoSuchProcess:
+                    pass
+            return True
+
+        wait(gone)
+
+
+def test_wrong_relay_credentials_and_untrusted_tls_are_rejected(remote):
+    profile = read_json(remote["transport"] / "agent-relay.json")
+    bad = Client({**profile, "token": "bad" * 20}, "agent")
+    try:
+        with pytest.raises(DispatcherError):
+            bad.exchange()
+    finally:
+        bad.close()
+    unknown_ca = Client({**profile, "ca": None, "ca_pem": None}, "agent")
+    try:
+        with pytest.raises(DispatcherError):
+            unknown_ca.exchange()
+    finally:
+        unknown_ca.close()
+
+
+def test_committed_loop_csv_excel_and_nested_projects_run_unchanged(remote, tmp_path):
+    from poster.maker.example_projects import definitions
+
+    directory = tmp_path / "saved"
+    directory.mkdir()
+    for name, graph in definitions().items():
+        save_graph(directory / name, graph, Vault())
+    for name, outputs in [
+        ("02-lists-loop.postergraph.json", ["lists/result.json"]),
+        ("03-csv-excel.postergraph.json", ["tables/output.csv", "tables/output.xlsx"]),
+        ("04-parent.postergraph.json", ["nested/result.txt"]),
+    ]:
+        item = request(remote["controller"], "add", source=str(directory / name))
+        value = request(
+            remote["controller"],
+            "enqueue_batch",
+            items=[dict(id=item["id"], agent_id=remote["agent_id"], remote_outputs=outputs)],
+            request_id=name,
+        )
+        assert not value["errors"]
+        result = terminal(remote, value["jobs"][0])
+        assert result["status"] == "SUCCEEDED", result
+        assert all((Path(result["workdir"]) / output).is_file() for output in outputs)
+        if name.startswith("02"):
+            assert json.loads((Path(result["workdir"]) / outputs[0]).read_text()) == [
+                "ALPHA",
+                "BETA",
+                "ГАММА",
+            ]
+        if name.startswith("04"):
+            assert (Path(result["workdir"]) / outputs[0]).read_text() == "POSTER Ж"
+
+
+def test_secretref_snapshot_bytes_and_master_key_boundary(remote, tmp_path, monkeypatch):
+    import base64
+    import sqlite3
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from cryptography.fernet import Fernet
+    from poster.maker.model import Variable
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.server.value = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            self.server.gate.wait(20)
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"ok")
+
+        def log_message(self, *_):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server.gate = threading.Event()
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        maker_key = Fernet.generate_key()
+        keyfile = tmp_path / "maker.key"
+        keyfile.write_bytes(maker_key)
+        monkeypatch.setenv("POSTER_SESSION_KEY", maker_key.decode())
+        secret = {"n": 23, "ok": True, "token": "SECRETREF_REMOTE_CANARY"}
+        vault = Vault()
+        graph = chain(
+            "Maker SecretRef",
+            [
+                (
+                    "HTTP.Post",
+                    {
+                        "url": f"http://127.0.0.1:{server.server_port}/post",
+                        "body_type": "json",
+                        "body": {"variable": "saved"},
+                    },
+                )
+            ],
+        )
+        graph.variables["saved"] = Variable(secret=True, value=vault.put_value(secret))
+        source = tmp_path / "secret.postergraph.json"
+        save_graph(source, graph, vault)
+        original = source.read_bytes()
+        root = remote["controller"]
+        item = request(root, "add", source=str(source), key_file=str(keyfile))
+        value = request(
+            root,
+            "enqueue_batch",
+            items=[dict(id=item["id"], agent_id=remote["agent_id"])],
+            request_id="secret-ref",
+        )
+        assert not value["errors"]
+        job = value["jobs"][0]
+        wait(lambda: hasattr(server, "value"))
+        assert server.value == secret
+        run = request(root, "show", id=job)["history"][0]["run_id"]
+        master = (root / "queue.key").read_bytes().strip()
+        with sqlite3.connect(root / "dispatcher.sqlite") as db:
+            encrypted = db.execute("SELECT key_cipher FROM remote_runs WHERE run_id=?", (run,)).fetchone()[0]
+        temporary = json.loads(Fernet(master).decrypt(encrypted))["key"].encode()
+        bundle_path = remote["agent_root"] / "runs" / run / "snapshots" / item["version"] / "bundle.enc"
+        bundle = json.loads(Fernet(temporary).decrypt(bundle_path.read_bytes()))
+        assert base64.b64decode(bundle["files"][source.name]) == original
+        for file in remote["agent_root"].rglob("*"):
+            if file.is_file() and file.suffix != ".lock":
+                try:
+                    content = file.read_bytes()
+                except FileNotFoundError:
+                    continue
+                assert master not in content and maker_key not in content
+        server.gate.set()
+        assert terminal(remote, job)["status"] == "SUCCEEDED"
+    finally:
+        server.gate.set()
+        server.shutdown()
+        server.server_close()
+        thread.join(5)

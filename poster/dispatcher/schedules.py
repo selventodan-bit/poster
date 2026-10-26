@@ -31,6 +31,8 @@ class Schedules:
 
         if agent_id:
             validate_target(self.store, agent_id)
+            if unseal(cipher).get("profile"):
+                raise DispatcherError("REMOTE_PROFILE")
         remote_outputs = output_names(remote_outputs)
         spec = parse_spec(spec)
         if type(timeout) not in (int, float) or not 1 <= timeout <= 86400:
@@ -84,6 +86,8 @@ class Schedules:
                 agent_id = target.get("agent_id")
                 if agent_id:
                     validate_target(self.store, agent_id)
+                    if unseal(row["inputs_cipher"]).get("profile"):
+                        raise DispatcherError("REMOTE_PROFILE")
                 outputs = output_names(target.get("remote_outputs", []))
                 self.db.execute(
                     "UPDATE schedules SET agent_id=?,remote_outputs=? WHERE id=?",

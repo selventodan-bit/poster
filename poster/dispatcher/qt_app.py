@@ -132,7 +132,7 @@ class Replies(QObject):
 
 
 class InputsDialog(QDialog):
-    def __init__(self, item, parent):
+    def __init__(self, item, parent, target=None):
         super().__init__(parent)
         self.setObjectName("dispatcher_inputs")
         self.setWindowTitle("Входы — " + item["name"])
@@ -145,7 +145,14 @@ class InputsDialog(QDialog):
         )
         note.setWordWrap(True)
         layout.addWidget(note)
-        self.remote_target = RemoteTarget(parent.agent_items, self)
+        self.remote_target = RemoteTarget(
+            parent.agent_items,
+            self,
+            agent_id=target.get("agent_id") if target else None,
+            outputs=target.get("remote_outputs", []) if target else [],
+        )
+        if target is not None:
+            self.remote_target.setEnabled(False)
         layout.addWidget(self.remote_target)
         content = QWidget()
         form = QFormLayout(content)
@@ -155,10 +162,23 @@ class InputsDialog(QDialog):
         self.timeout.setValue(parent.timeout.value())
         form.addRow("Время этого задания, с", self.timeout)
         self.profile_path, self.profile_key = QLineEdit(), QLineEdit()
+        self.profile_rows = []
         self.profile_path.setObjectName("job_profile")
         self.profile_key.setObjectName("job_profile_key")
         self.profile_path.setPlaceholderText("Необязательно: profile_….enc; иначе новая сессия")
         self.profile_key.setPlaceholderText("session.key Maker для этого профиля")
+
+        def profile_mode():
+            local = self.remote_target.agent.currentData() is None
+            for row in self.profile_rows:
+                row.setEnabled(local)
+            self.profile_path.setEnabled(local)
+            self.profile_key.setEnabled(local)
+            if not local:
+                self.profile_path.clear()
+                self.profile_key.clear()
+
+        self.remote_target.agent.currentIndexChanged.connect(profile_mode)
         if item.get("browser"):
             for title, edit, pattern in [
                 ("Профиль Chrome", self.profile_path, "Профиль (profile_*.enc)"),
@@ -175,6 +195,7 @@ class InputsDialog(QDialog):
                 )
                 row_layout.addWidget(browse)
                 form.addRow(title, row)
+                self.profile_rows.append(row)
         for definition in item["inputs"]:
             row = QWidget()
             line = QHBoxLayout(row)
@@ -224,6 +245,7 @@ class InputsDialog(QDialog):
         buttons.setObjectName("inputs_buttons")
         buttons.button(QDialogButtonBox.StandardButton.Ok).setObjectName("confirm_enqueue")
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setObjectName("cancel_enqueue")
+        profile_mode()
         buttons.accepted.connect(self.validate)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -231,6 +253,10 @@ class InputsDialog(QDialog):
     def validate(self):
         try:
             self.values()
+            self.remote_target.values()
+        except DispatcherError as exc:
+            self.error.setText(MESSAGES[exc.code])
+            return
         except (ValueError, TypeError):
             self.error.setText(
                 "Некорректный JSON. Строки JSON заключайте в кавычки; логические значения: true/false."
@@ -644,7 +670,7 @@ class DispatcherWindow(QMainWindow):
         if not value:
             return
         item, spec, target = value
-        dialog = InputsDialog(item, self)
+        dialog = InputsDialog(item, self, target)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             inputs, secrets = dialog.values()
             self.call(

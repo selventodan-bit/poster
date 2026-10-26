@@ -130,7 +130,7 @@ def test_never_exports_master_key_even_when_reused_as_maker_key(admitted):
     )
     with pytest.raises(DispatcherError) as error:
         network.offer(store.is_remote(execution["run_id"]))
-    assert error.value.code == "REMOTE_CONFIG"
+    assert error.value.code == "REMOTE_MASTER_KEY"
     assert not store.db.execute("SELECT * FROM remote_outbox").fetchall()
 
 
@@ -140,3 +140,26 @@ def test_never_exports_master_key_even_when_reused_as_maker_key(admitted):
 def test_output_allowlist_cannot_escape(names):
     with pytest.raises(DispatcherError):
         output_names(names)
+
+
+def test_schema2_schedule_migration_keeps_local_target_and_encrypted_inputs(tmp_path):
+    import sqlite3
+    from poster.dispatcher.store import SCHEMA, MIGRATION_2, APPLICATION_ID, SCHEMA_VERSION
+
+    path = tmp_path / "old.sqlite"
+    with sqlite3.connect(path) as db:
+        db.executescript(SCHEMA + MIGRATION_2)
+        db.execute(f"PRAGMA application_id={APPLICATION_ID}")
+        db.execute("PRAGMA user_version=2")
+        db.execute(
+            "INSERT INTO schedules(id,project_id,version,name,source,spec,inputs_cipher,input_names,timeout,next_due,created,updated) VALUES('old','p','v','name','src','spec',?,'[]',300,123,1,1)",
+            (b"unchanged encrypted inputs",),
+        )
+    store = Store(path)
+    try:
+        row = store.db.execute("SELECT * FROM schedules").fetchone()
+        assert row["agent_id"] is None and row["remote_outputs"] == "[]"
+        assert row["inputs_cipher"] == b"unchanged encrypted inputs" and row["next_due"] == 123
+        assert store.db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+    finally:
+        store.close()

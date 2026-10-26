@@ -2,6 +2,8 @@
 
 import json
 import time
+import ssl
+import re
 from pathlib import PurePosixPath
 from urllib.parse import urlsplit
 
@@ -22,12 +24,14 @@ def profile(value):
     try:
         url = urlsplit(value["url"])
         assert url.scheme == "https" and url.hostname and not url.username and not url.password
+        assert url.port is None or 1 <= url.port <= 65535
         assert not url.query and not url.fragment and url.path in ("", "/")
-        assert len(value["token"]) >= 32
+        assert isinstance(value["token"], str) and len(value["token"]) >= 32
         assert len(value["channel"]) == 32 and all(c in "0123456789abcdef" for c in value["channel"])
         if value.get("ca"):
             plain_path(value["ca"]).read_bytes()
-        return {k: value[k] for k in ("url", "channel", "token", "ca") if k in value}
+        ssl.create_default_context(cafile=value.get("ca"), cadata=value.get("ca_pem"))
+        return {k: value[k] for k in ("url", "channel", "token", "ca", "ca_pem") if k in value}
     except Exception as exc:
         raise DispatcherError("REMOTE_CONFIG") from exc
 
@@ -77,15 +81,22 @@ class Registry:
         peer = validate_peer(registration["peer"])
         if (
             registration["os"] != "linux"
+            or type(registration["protocol"]) is not int
             or registration["protocol"] != 1
             or not isinstance(registration["name"], str)
             or not 1 <= len(registration["name"]) <= 80
             or not registration["name"].isprintable()
             or any(c in registration["name"] for c in "<>&")
+            or not re.fullmatch(r"[A-Za-z0-9_.-]{1,40}", str(registration["version"]))
         ):
             raise DispatcherError("REMOTE_CONFIG")
         relay = profile(relay)
         with self.store.transaction():
+            if (
+                self.db.execute("SELECT count(*) FROM remote_agents WHERE state!='REVOKED'").fetchone()[0]
+                >= 32
+            ):
+                raise DispatcherError("REMOTE_LIMIT")
             previous = self.db.execute("SELECT peer FROM remote_agents WHERE id=?", (peer["id"],)).fetchone()
             if previous:
                 raise DispatcherError("REMOTE_IDENTITY")  # Never silently replace pins/credentials.
@@ -114,8 +125,8 @@ class Registry:
     def revoke(self, agent_id):
         with self.store.transaction():
             self.db.execute(
-                "UPDATE remote_agents SET state='REVOKED',last_seen=0,last_error='REMOTE_REVOKED' WHERE id=?",
-                (agent_id,),
+                "UPDATE remote_agents SET state='REVOKED',revoked_at=?,last_error='REMOTE_REVOKED' WHERE id=?",
+                (time.time(), agent_id),
             )
             for execution in self.db.execute(
                 "SELECT e.*,rr.state remote_state FROM executions e JOIN remote_runs rr ON rr.run_id=e.run_id WHERE rr.agent_id=? AND e.status IN ('LEASED','RUNNING')",

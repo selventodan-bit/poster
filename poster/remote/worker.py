@@ -9,6 +9,7 @@ import threading
 import time
 
 from poster.dispatcher.worker import Controls, execute
+from .protocol import LEASE
 
 
 class LeaseControls(Controls):
@@ -24,7 +25,7 @@ class LeaseControls(Controls):
                     line, pending = pending.split(b"\n", 1)
                     if line.startswith(b"LEASE "):
                         expiry = float(line[6:])
-                        if expiry <= time.time() + 9:
+                        if expiry <= time.time() + LEASE + 3:
                             self.expires = max(self.expires, expiry)
                     elif line in {b"CANCEL_REQUESTED", b"TIMEOUT"}:
                         self.request(line.decode())
