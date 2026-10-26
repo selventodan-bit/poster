@@ -26,7 +26,12 @@ class Schedules:
             raise DispatcherError("SCHEDULE_MISSING")
         return dict(row)
 
-    def create(self, item, spec, cipher, names, *, timeout=300, now=None):
+    def create(self, item, spec, cipher, names, *, timeout=300, now=None, agent_id=None, remote_outputs=()):
+        from poster.remote.registry import output_names, validate_target
+
+        if agent_id:
+            validate_target(self.store, agent_id)
+        remote_outputs = output_names(remote_outputs)
         spec = parse_spec(spec)
         if type(timeout) not in (int, float) or not 1 <= timeout <= 86400:
             raise DispatcherError("PARAMETERS_INVALID")
@@ -52,14 +57,38 @@ class Schedules:
                     now,
                 ),
             )
+            self.db.execute(
+                "UPDATE schedules SET agent_id=?,remote_outputs=? WHERE id=?",
+                (agent_id, json.dumps(remote_outputs), schedule_id),
+            )
         return schedule_id
 
     def change(
-        self, schedule_id, *, spec=None, enabled=None, delete=False, resume=False, replacement=None, now=None
+        self,
+        schedule_id,
+        *,
+        spec=None,
+        enabled=None,
+        delete=False,
+        resume=False,
+        replacement=None,
+        now=None,
+        target=None,
     ):
         with self.store.transaction():
             row = self.get(schedule_id)
             now = time.time() if now is None else now
+            if target is not None:
+                from poster.remote.registry import validate_target, output_names
+
+                agent_id = target.get("agent_id")
+                if agent_id:
+                    validate_target(self.store, agent_id)
+                outputs = output_names(target.get("remote_outputs", []))
+                self.db.execute(
+                    "UPDATE schedules SET agent_id=?,remote_outputs=? WHERE id=?",
+                    (agent_id, json.dumps(outputs), schedule_id),
+                )
             if spec is not None:
                 parsed = parse_spec(spec)
                 self.db.execute(
@@ -114,7 +143,7 @@ class Schedules:
         rows = [
             self.public(dict(r))
             for r in self.db.execute(
-                "SELECT id,project_id,version,name,spec,timeout,enabled,deleted,paused_code,next_due,created,updated FROM schedules WHERE "
+                "SELECT id,project_id,version,name,spec,timeout,enabled,deleted,paused_code,next_due,created,updated,agent_id,remote_outputs FROM schedules WHERE "
                 + where
                 + " ORDER BY "
                 + order
@@ -142,6 +171,7 @@ class Schedules:
             }
             for row in rows:
                 row["spec"] = json.loads(row["spec"])
+                row["outputs"] = json.loads(row.pop("remote_outputs"))
                 row.update(stats.get(row["id"], {}))
                 row.update(latest.get(row["id"], {}))
                 row["status"] = row["paused_code"] or ("ENABLED" if row["enabled"] else "DISABLED")
@@ -236,6 +266,8 @@ class Scheduler:
                             json.loads(row["input_names"]),
                             key="schedule:" + identity,
                             timeout=row["timeout"],
+                            agent_id=row["agent_id"],
+                            remote_outputs=json.loads(row["remote_outputs"]),
                         )
                         self.db.execute(
                             "INSERT OR IGNORE INTO schedule_events VALUES(?,?,?,?,?,'ENQUEUED',?,?)",

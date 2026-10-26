@@ -6,13 +6,47 @@ import json
 import os
 from pathlib import Path
 import threading
+import time
 
 from poster.dispatcher.worker import Controls, execute
 
 
+class LeaseControls(Controls):
+    def __init__(self, pending, expires):
+        super().__init__(pending)
+        self.expires = expires
+
+    def read(self):
+        pending = self.pending
+        try:
+            while True:
+                while b"\n" in pending:
+                    line, pending = pending.split(b"\n", 1)
+                    if line.startswith(b"LEASE "):
+                        expiry = float(line[6:])
+                        if expiry <= time.time() + 9:
+                            self.expires = max(self.expires, expiry)
+                    elif line in {b"CANCEL_REQUESTED", b"TIMEOUT"}:
+                        self.request(line.decode())
+                chunk = os.read(0, 4096)
+                if not chunk or len(pending) > 4096:
+                    self.request("DISPATCHER_LOST")
+                    return
+                pending += chunk
+        except Exception:
+            self.request("DISPATCHER_LOST")
+
+    def lease_watchdog(self):
+        while not self.finished.wait(0.05):
+            if time.time() >= self.expires:
+                self.request("DISPATCHER_LOST")
+                return
+
+
 class ExecutionAdapter:
-    def __init__(self, root, packet):
+    def __init__(self, root, packet, controls):
         self.root = root
+        self.controls = controls
         self.job = packet["job"]
         from .protocol import un64
 
@@ -27,7 +61,7 @@ class ExecutionAdapter:
         return self.current
 
     def start(self, *_):
-        return True  # Controller durably marked RUNNING BEFORE releasing the key.
+        return not self.controls.reason and time.time() < self.controls.expires
 
     def progress(self, run_id, *, confirmed=None, effects=False):
         self.current["effects_possible"] |= int(effects)
@@ -63,18 +97,21 @@ def main():
     if b"\n" not in raw:
         return 2
     first, pending = raw.split(b"\n", 1)
-    controls = Controls(pending)
+    controls = None
     try:
         value = json.loads(first)
         os.environ["POSTER_SESSION_KEY"] = value["key"]
-        adapter = ExecutionAdapter(args.root, value)
+        controls = LeaseControls(pending, value["lease"])
+        adapter = ExecutionAdapter(args.root, value, controls)
+        threading.Thread(target=controls.lease_watchdog, daemon=True).start()
         threading.Thread(target=controls.read, daemon=True).start()
         threading.Thread(target=controls.watchdog, daemon=True).start()
         return asyncio.run(execute(adapter, value["execution"], value["execution"]["owner"], controls))
     except Exception:
         return 2
     finally:
-        controls.finished.set()
+        if controls:
+            controls.finished.set()
 
 
 if __name__ == "__main__":

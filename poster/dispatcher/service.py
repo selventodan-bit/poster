@@ -65,10 +65,14 @@ def enqueue_snapshot(
     profile_id=None,
     project_key=None,
     profile_key_file=None,
+    agent_id=None,
+    remote_outputs=(),
 ):
     """Admit the inspected immutable version, never recapture a moving source."""
     if key is not None and (previous := store.find_key(key)):
         return previous
+    if agent_id and profile_id:
+        raise DispatcherError("REMOTE_CONFIG")
     cipher, names = prepare_snapshot(
         store,
         project_id,
@@ -80,7 +84,17 @@ def enqueue_snapshot(
         project_key=project_key,
         profile_key_file=profile_key_file,
     )
-    return store.enqueue(project_id, version, plain_path(source), cipher, names, key=key, timeout=timeout)
+    return store.enqueue(
+        project_id,
+        version,
+        plain_path(source),
+        cipher,
+        names,
+        key=key,
+        timeout=timeout,
+        agent_id=agent_id,
+        remote_outputs=remote_outputs,
+    )
 
 
 def prepare_snapshot(
@@ -172,6 +186,17 @@ class Dispatcher:
 
     def recover(self):
         for execution in self.store.active():
+            remote = self.store.is_remote(execution["run_id"])
+            if remote:
+                if remote["state"] == "OFFERED":
+                    self.store.recover_unstarted(execution["run_id"])
+                else:
+                    self.store.complete(execution["run_id"], Status.UNKNOWN, code="DISPATCHER_LOST")
+                self.store.db.execute(
+                    "DELETE FROM remote_outbox WHERE id IN (?,?)",
+                    (execution["run_id"] + ":offer", execution["run_id"] + ":grant"),
+                )
+                continue  # A Linux PID must NEVER be signalled on the Windows Controller.
             if self.store.recover_unstarted(execution["run_id"]):
                 continue
             if execution["pid"]:
@@ -252,6 +277,16 @@ class Dispatcher:
                     if self.on_started:
                         self.on_started()
                     while True:
+                        if (
+                            not hasattr(self, "remote_controller")
+                            and self.store.db.execute(
+                                "SELECT 1 FROM remote_agents WHERE state!='PENDING' LIMIT 1"
+                            ).fetchone()
+                        ):
+                            from poster.remote.controller import Controller
+
+                            self.remote_controller = Controller(self.store.path)
+                            self.remote_controller.start()
                         self.tick()
                         stopping = self.stop_requested or self.store.stopping()
                         if not stopping:
@@ -270,6 +305,8 @@ class Dispatcher:
                                 )
                                 if not execution:
                                     break
+                                if self.store.is_remote(execution["run_id"]):
+                                    continue  # Same claim/limits, handled by outbound transport only.
                                 try:
                                     worker = WorkerProcess(self.store, execution)
                                     self.workers[execution["run_id"]] = worker
@@ -285,8 +322,10 @@ class Dispatcher:
                                         else Status.FAILED,
                                         code="PROCESS_CONTROL_FAILED",
                                     )
-                        if not self.workers and (
-                            stopping or once and not self.store.counts().get("PENDING", 0)
+                        if (
+                            not self.workers
+                            and not self.store.active()
+                            and (stopping or once and not self.store.counts().get("PENDING", 0))
                         ):
                             break
                         time.sleep(self.poll)
@@ -301,6 +340,8 @@ class Dispatcher:
                         worker.close(force=True)
                         self.harvest(run_id, worker)
                         del self.workers[run_id]
+                    if hasattr(self, "remote_controller"):
+                        self.remote_controller.close()
                     self.store.end_service(self.owner)
         except Timeout as exc:
             raise DispatcherError("DISPATCHER_BUSY") from exc

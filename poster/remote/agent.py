@@ -21,7 +21,7 @@ from poster.dispatcher.processes import terminate_tree, reap_detached
 from poster.dispatcher.security import private_dir, plain_path, safe_json
 from poster.maker.storage import atomic
 from .journal import Journal
-from .protocol import Identity, validate_peer, unpack, pack, raw_json, b64, un64, LEASE
+from .protocol import Identity, validate_peer, unpack, pack, raw_json, b64, un64, LEASE, MAX_MESSAGE
 from .registry import read_json, output_names
 from .relay import Client
 
@@ -41,6 +41,7 @@ class Agent:
         self.workers = {}
         self.events = queue.SimpleQueue()
         self.last_pulse = 0
+        self.permitted = set()
         self.done = False
         self.acks = []
         self.error = ""
@@ -71,10 +72,18 @@ class Agent:
             self.last_pulse = max(self.last_pulse, packet["issued"])
             if value.get("revoked"):
                 self.journal.db.execute("INSERT OR REPLACE INTO meta VALUES('revoked','1')")
-            permitted = set(value["runs"])
+            permitted = self.permitted = set(value["runs"])
             for key, worker in self.workers.items():
                 if key not in permitted:
                     self.cancel(worker, "DISPATCHER_LOST")
+                elif worker["reason"] is None:
+                    try:
+                        worker["process"].stdin.write(
+                            ("LEASE " + str(packet["issued"] + LEASE) + "\n").encode()
+                        )
+                        worker["process"].stdin.flush()
+                    except OSError:
+                        pass
         elif kind == "offer":
             if self.journal.db.execute("SELECT 1 FROM meta WHERE id='revoked'").fetchone():
                 return
@@ -103,7 +112,7 @@ class Agent:
                 and row["state"] == "ACCEPTED"
                 and not self.journal.db.execute("SELECT 1 FROM meta WHERE id='revoked'").fetchone()
             ):
-                if time.time() - self.last_pulse >= LEASE:
+                if time.time() - self.last_pulse >= LEASE or run_id not in self.permitted:
                     return
                 offer = self.journal.decode(row["data"])
                 if value["deadline"] <= time.time():
@@ -129,6 +138,7 @@ class Agent:
                 with self.journal.transaction():
                     self.journal.drop(run_id + ":report")
                     self.journal.db.execute("UPDATE runs SET data=NULL WHERE id=?", (run_id,))
+                self.journal.put(run_id + ":received", dict(kind="received", run_id=run_id))
                 shutil.rmtree(self.root / "runs" / run_id, ignore_errors=True)
         else:
             raise DispatcherError("REMOTE_PROTOCOL")
@@ -174,7 +184,10 @@ class Agent:
             key=grant["key"],
         )
         self.workers[run_id] = worker
-        process.stdin.write(raw_json(dict(key=grant["key"], job=job, execution=execution)) + b"\n")
+        process.stdin.write(
+            raw_json(dict(key=grant["key"], job=job, execution=execution, lease=self.last_pulse + LEASE))
+            + b"\n"
+        )
         process.stdin.flush()
 
         def read():
@@ -303,13 +316,22 @@ class Agent:
                             for key, w in self.workers.items()
                         ],
                     )
-                    messages = [
-                        pack(self.identity, self.peer, heartbeat),
-                        *[pack(self.identity, self.peer, m) for m in self.journal.messages()],
-                    ]
+                    messages = []
+                    size = 0
+                    bodies = [heartbeat, *self.journal.messages()]
+                    for body in bodies:
+                        packet = pack(self.identity, self.peer, body)
+                        length = len(raw_json(packet))
+                        if size + length > MAX_MESSAGE:
+                            break
+                        messages.append(packet)
+                        size += length
                     try:
                         packets = self.client.exchange(messages, self.acks)
                         self.acks = []
+                        for body in bodies[: len(messages)]:
+                            if body.get("kind") == "received":
+                                self.journal.drop(body["run_id"] + ":received")
                         for packet in packets:
                             try:
                                 self.handle(packet)

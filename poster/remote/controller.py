@@ -18,12 +18,14 @@ from .relay import Client
 
 
 class Controller:
-    def __init__(self, path):
+    def __init__(self, path, agent_id=None):
         self.path = path
+        self.agent_id = agent_id
         self.done = threading.Event()
         self.thread = None
         self.clients = {}
         self.last_error = ""
+        self.steps = {}
 
     def start(self):
         self.thread = threading.Thread(target=self.run, name="poster-remote", daemon=True)
@@ -52,6 +54,12 @@ class Controller:
         if sum(map(len, files.values())) > 10_000_000:
             raise DispatcherError("REMOTE_LIMIT")
         payload = unseal(job["inputs_cipher"])
+        from poster.auth import session_key
+
+        master = session_key()
+        if master in raw_json(payload) or any(master in raw for raw in files.values()):
+            raise DispatcherError("REMOTE_CONFIG")
+        self.steps[job["version"]] = {n["id"] for n in json.loads(files[manifest["main"]])["nodes"]}
         if payload.get("profile"):
             raise DispatcherError("REMOTE_CONFIG")
         key = Fernet.generate_key()
@@ -82,7 +90,10 @@ class Controller:
             return
         kind = value.get("kind")
         run_id = value.get("run_id")
-        if agent["state"] != "TRUSTED":
+        if (
+            self.store.db.execute("SELECT state FROM remote_agents WHERE id=?", (agent["id"],)).fetchone()[0]
+            != "TRUSTED"
+        ):
             return
         if kind == "heartbeat":
             if (
@@ -115,6 +126,13 @@ class Controller:
                                 (packet["issued"] + LEASE, entry["run_id"]),
                             )
                             self.drop(entry["run_id"] + ":grant")
+                            confirmed = entry.get("confirmed")
+                            job = self.store.payload(execution["job_id"], private=False)
+                            if confirmed in self.steps.get(job["version"], set()):
+                                self.store.db.execute(
+                                    "UPDATE executions SET last_confirmed_step=? WHERE run_id=?",
+                                    (confirmed, entry["run_id"]),
+                                )
         else:
             row = self.store.is_remote(run_id)
             if row is None or row["agent_id"] != agent["id"]:
@@ -162,6 +180,18 @@ class Controller:
                             self.import_report(row, execution, job, value)
                         except Exception:
                             self.store.complete(run_id, Status.UNKNOWN, code="REPORT_INVALID")
+                if kind == "report" and execution["status"] in {"UNKNOWN", "REVIEW_REQUIRED"}:
+                    root = private_dir(self.store.root / "runs" / run_id)
+                    # Preserve late authenticated evidence privately; never clear UNKNOWN.
+                    atomic(
+                        root / "late-result.enc",
+                        seal(
+                            {
+                                "message": value,
+                                "key": unseal(row["key_cipher"]) if row["key_cipher"] else None,
+                            }
+                        ),
+                    )
                 with self.store.transaction():
                     for suffix in [":offer", ":grant", ":cancel"]:
                         self.drop(run_id + suffix)
@@ -169,6 +199,12 @@ class Controller:
                         "UPDATE remote_runs SET state='DONE',key_cipher=NULL WHERE run_id=?", (run_id,)
                     )
                     self.put(run_id + ":receipt", agent["id"], dict(kind="receipt", run_id=run_id))
+            elif kind == "accepted" and execution["status"] not in ACTIVE:
+                self.put(
+                    run_id + ":cancel",
+                    agent["id"],
+                    dict(kind="cancel", run_id=run_id, reason="DISPATCHER_LOST"),
+                )
             elif kind == "received":
                 self.drop(run_id + ":receipt")
             elif kind != "accepted":
@@ -196,6 +232,9 @@ class Controller:
             or result["gui_imports_forbidden"] is not True
         ):
             raise DispatcherError("REPORT_INVALID")
+        confirmed = result.get("last_confirmed_step")
+        if confirmed in self.steps.get(job["version"], set()):
+            self.store.progress(row["run_id"], confirmed=confirmed)
         root = private_dir(self.store.root / "runs" / row["run_id"])
         work = private_dir(root / "work")
         allowed = output_names(json.loads(job["remote_outputs"]))
@@ -301,71 +340,97 @@ class Controller:
         )
 
     def run(self):
+        if self.agent_id is not None:
+            return self.run_channel()
+        children = {}
         try:
             with FileLock(str(self.path) + ".remote.lock", timeout=0):
-                self.store = Store(self.path)
-                self.identity = Registry(self.store).identity()
+                store = Store(self.path)
                 try:
                     while not self.done.is_set():
-                        agents = self.store.db.execute(
-                            "SELECT * FROM remote_agents WHERE state!='PENDING' ORDER BY id"
-                        ).fetchall()
-                        for agent in agents:
-                            self.maintain(agent)
-                            peer = json.loads(agent["peer"])
-                            runs = [
-                                r[0]
-                                for r in self.store.db.execute(
-                                    "SELECT rr.run_id FROM remote_runs rr JOIN executions e ON e.run_id=rr.run_id WHERE rr.agent_id=? AND e.status='RUNNING'",
-                                    (agent["id"],),
-                                )
-                            ]
-                            bodies = [dict(kind="pulse", runs=runs, revoked=agent["state"] == "REVOKED")]
-                            bodies += [
-                                unseal(r[0])
-                                for r in self.store.db.execute(
-                                    "SELECT body FROM remote_outbox WHERE agent_id=? ORDER BY rowid LIMIT 6",
-                                    (agent["id"],),
-                                )
-                            ]
-                            outgoing = []
-                            size = 0
-                            for body in bodies:
-                                packet = pack(self.identity, peer, body)
-                                length = len(raw_json(packet))
-                                if size + length > MAX_MESSAGE:
-                                    break
-                                outgoing.append(packet)
-                                size += length
-                            client = self.clients.get(agent["id"])
-                            if client is None:
-                                client = self.clients[agent["id"]] = Client(
-                                    unseal(agent["relay_cipher"]), "controller"
-                                )
-                            try:
-                                packets = client.exchange(outgoing)
-                                acknowledgements = []
-                                for packet in packets:
-                                    try:
-                                        self.handle(agent, packet)
-                                    except Exception:
-                                        self.store.db.execute(
-                                            "UPDATE remote_agents SET last_error='REMOTE_PROTOCOL' WHERE id=?",
-                                            (agent["id"],),
-                                        )
-                                    acknowledgements.append(packet["id"])
-                                if acknowledgements:
-                                    client.exchange(acknowledgements=acknowledgements)
-                            except DispatcherError:
-                                self.store.db.execute(
-                                    "UPDATE remote_agents SET last_error='REMOTE_TRANSPORT' WHERE id=?",
-                                    (agent["id"],),
-                                )
-                        self.store.db.execute("DELETE FROM remote_seen WHERE expires<?", (time.time() - 3,))
+                        ids = [
+                            r[0]
+                            for r in store.db.execute("SELECT id FROM remote_agents WHERE state!='PENDING'")
+                        ]
+                        for agent_id in ids:
+                            if agent_id not in children:
+                                child = children[agent_id] = Controller(self.path, agent_id)
+                                child.start()
                         self.done.wait(0.25)
                 finally:
-                    for client in self.clients.values():
-                        client.close()
-                    self.store.close()
+                    for child in children.values():
+                        child.done.set()
+                    for child in children.values():
+                        child.close()
+                    store.close()
+        except Exception:
+            self.last_error = "REMOTE_TRANSPORT"
+
+    def run_channel(self):
+        try:
+            self.store = Store(self.path)
+            self.identity = Registry(self.store).identity()
+            try:
+                while not self.done.is_set():
+                    agents = self.store.db.execute(
+                        "SELECT * FROM remote_agents WHERE id=?", (self.agent_id,)
+                    ).fetchall()
+                    for agent in agents:
+                        self.maintain(agent)
+                        peer = json.loads(agent["peer"])
+                        runs = [
+                            r[0]
+                            for r in self.store.db.execute(
+                                "SELECT rr.run_id FROM remote_runs rr JOIN executions e ON e.run_id=rr.run_id WHERE rr.agent_id=? AND e.status='RUNNING'",
+                                (agent["id"],),
+                            )
+                        ]
+                        bodies = [dict(kind="pulse", runs=runs, revoked=agent["state"] == "REVOKED")]
+                        bodies += [
+                            unseal(r[0])
+                            for r in self.store.db.execute(
+                                "SELECT body FROM remote_outbox WHERE agent_id=? ORDER BY rowid LIMIT 6",
+                                (agent["id"],),
+                            )
+                        ]
+                        outgoing = []
+                        size = 0
+                        for body in bodies:
+                            packet = pack(self.identity, peer, body)
+                            length = len(raw_json(packet))
+                            if size + length > MAX_MESSAGE:
+                                break
+                            outgoing.append(packet)
+                            size += length
+                        client = self.clients.get(agent["id"])
+                        if client is None:
+                            client = self.clients[agent["id"]] = Client(
+                                unseal(agent["relay_cipher"]), "controller"
+                            )
+                        try:
+                            packets = client.exchange(outgoing)
+                            acknowledgements = []
+                            for packet in packets:
+                                try:
+                                    self.handle(agent, packet)
+                                except Exception:
+                                    self.store.db.execute(
+                                        "UPDATE remote_agents SET last_error='REMOTE_PROTOCOL' WHERE id=?",
+                                        (agent["id"],),
+                                    )
+                                acknowledgements.append(packet["id"])
+                            if acknowledgements:
+                                client.exchange(acknowledgements=acknowledgements)
+                        except DispatcherError:
+                            self.store.db.execute(
+                                "UPDATE remote_agents SET last_error='REMOTE_TRANSPORT' WHERE id=?",
+                                (agent["id"],),
+                            )
+                    self.store.db.execute("DELETE FROM remote_seen WHERE expires<?", (time.time() - 3,))
+                    self.done.wait(0.25)
+            finally:
+                for client in self.clients.values():
+                    client.close()
+                self.store.close()
         except Exception:
             self.last_error = "REMOTE_TRANSPORT"

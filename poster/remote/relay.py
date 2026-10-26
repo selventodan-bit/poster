@@ -42,17 +42,25 @@ class Client:
             )
             if len(body) > MAX_HTTP:
                 raise ValueError()
-            response = self.http.post(
+            with self.http.stream(
+                "POST",
                 self.config["url"].rstrip("/") + "/v1/exchange",
                 content=body,
                 headers={
                     "Authorization": "Bearer " + self.config["token"],
                     "Content-Type": "application/json",
                 },
-            )
-            if response.status_code != 200 or len(response.content) > MAX_HTTP:
-                raise ValueError()
-            value = response.json()
+            ) as response:
+                if response.status_code != 200:
+                    raise ValueError()
+                chunks = []
+                size = 0
+                for chunk in response.iter_bytes():
+                    size += len(chunk)
+                    if size > MAX_HTTP:
+                        raise ValueError()
+                    chunks.append(chunk)
+                value = json.loads(b"".join(chunks))
             if (
                 value["protocol"] != 1
                 or not isinstance(value["messages"], list)

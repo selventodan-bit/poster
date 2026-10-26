@@ -36,6 +36,8 @@ def output_names(values):
     if not isinstance(values, (list, tuple)) or len(values) > 32:
         raise DispatcherError("REMOTE_LIMIT")
     for name in values:
+        if not isinstance(name, str):
+            raise DispatcherError("PATH_FORBIDDEN")
         path = PurePosixPath(name)
         if (
             not isinstance(name, str)
@@ -78,6 +80,8 @@ class Registry:
             or registration["protocol"] != 1
             or not isinstance(registration["name"], str)
             or not 1 <= len(registration["name"]) <= 80
+            or not registration["name"].isprintable()
+            or any(c in registration["name"] for c in "<>&")
         ):
             raise DispatcherError("REMOTE_CONFIG")
         relay = profile(relay)
@@ -113,6 +117,20 @@ class Registry:
                 "UPDATE remote_agents SET state='REVOKED',last_seen=0,last_error='REMOTE_REVOKED' WHERE id=?",
                 (agent_id,),
             )
+            for execution in self.db.execute(
+                "SELECT e.*,rr.state remote_state FROM executions e JOIN remote_runs rr ON rr.run_id=e.run_id WHERE rr.agent_id=? AND e.status IN ('LEASED','RUNNING')",
+                (agent_id,),
+            ).fetchall():
+                status = "UNKNOWN" if execution["remote_state"] == "GRANTED" else "FAILED"
+                self.db.execute(
+                    "UPDATE executions SET status=?,code='REMOTE_REVOKED',finished=? WHERE run_id=?",
+                    (status, time.time(), execution["run_id"]),
+                )
+                self.db.execute(
+                    "UPDATE jobs SET status=?,updated=? WHERE id=?",
+                    (status, time.time(), execution["job_id"]),
+                )
+                self.store.event(execution["job_id"], status, "REMOTE_REVOKED")
         return True
 
     def rows(self):

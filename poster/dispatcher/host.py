@@ -30,6 +30,7 @@ from .schedule_time import preview
 from .security import seal, unseal
 from .store import Store
 from .workspace import queue_key, workspace_path
+from poster.remote.registry import Registry
 
 MAX_MESSAGE = 2_000_000
 
@@ -250,6 +251,7 @@ class Host:
             next_due="sn.next_due",
             last_confirmed_step="e.last_confirmed_step",
             schedule_id="se.schedule_id",
+            agent_id="j.agent_id",
         )
         self.store.db.create_function(
             "poster_project_name",
@@ -274,7 +276,7 @@ class Host:
         total = self.store.db.execute("SELECT count(*) FROM jobs j" + where, args).fetchone()[0]
         rows = self.store.db.execute(
             "SELECT j.id,j.project_id,j.version,j.status,j.attempt,j.created,j.updated,j.timeout,"
-            "e.pid,e.code,e.last_confirmed_step,e.report,e.report_sha256,e.started,se.due,se.schedule_id,sn.next_due,"
+            "e.pid,e.code,e.last_confirmed_step,e.report,e.report_sha256,e.started,se.due,se.schedule_id,sn.next_due,j.agent_id,"
             "round(coalesce(e.finished,?)-e.started,2) duration FROM jobs j "
             "LEFT JOIN executions e ON e.job_id=j.id AND e.attempt=j.attempt "
             "LEFT JOIN schedule_events se ON se.job_id=j.id "
@@ -328,6 +330,23 @@ class Host:
 
     def dispatch(self, value):
         op = value.pop("op")
+        if op.startswith("remote_"):
+            from poster.remote.registry import read_json
+
+            registry = Registry(self.store)
+            if op == "remote_identity":
+                return registry.export_identity(value["path"])
+            if op == "remote_register":
+                return registry.register(read_json(value["registration"]), read_json(value["relay_profile"]))
+            if op == "remote_agents":
+                return registry.rows()
+            if op == "remote_approve":
+                result = registry.approve(value["id"])
+                self.start()
+                return result
+            if op == "remote_revoke":
+                return registry.revoke(value["id"])
+            raise DispatcherError("PARAMETERS_INVALID")
         if op in {"autostart_status", "autostart_set"}:
             from .autostart import configure
 
@@ -358,11 +377,13 @@ class Host:
                     cipher,
                     names,
                     timeout=options.get("timeout", self.settings["timeout"]),
+                    agent_id=value.get("agent_id"),
+                    remote_outputs=value.get("remote_outputs", []),
                 )
                 self.start()  # Saving a real schedule starts the singleton queue service.
                 return result
             if op == "schedule_change":
-                if set(value) - {"id", "spec", "enabled", "delete", "resume"}:
+                if set(value) - {"id", "spec", "enabled", "delete", "resume", "target"}:
                     raise DispatcherError("PARAMETERS_INVALID")
                 return schedules.change(value.pop("id"), **value)
             if op == "schedule_version":
@@ -405,6 +426,7 @@ class Host:
                 "projects": self.projects(),
                 "jobs": self.jobs(**value),
                 "schedules": Schedules(self.store).rows(**schedule_query),
+                "agents": Registry(self.store).rows(),
             }
         if op == "add":
             return self.catalog.inspect(**value)
@@ -438,6 +460,8 @@ class Host:
                             profile_id=item.get("profile_id"),
                             profile_key_file=item.get("profile_key_file"),
                             key=value["request_id"] + ":" + item["id"],
+                            agent_id=item.get("agent_id"),
+                            remote_outputs=item.get("remote_outputs", []),
                         )
                     )
                 except Exception as exc:
