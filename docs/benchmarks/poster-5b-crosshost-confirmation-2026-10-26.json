@@ -1,0 +1,503 @@
+{
+  "format": "poster.crosshost.record.v1",
+  "source": "Complete public JSON annotations of an actual repeated Windows/Linux run",
+  "run_url": "https://github.com/selventodan-bit/poster/actions/runs/40375923286",
+  "artifact": {
+    "id": 12675515453,
+    "url": "https://github.com/selventodan-bit/poster/actions/runs/40375923286/artifacts/12675515453",
+    "sha256": "c7cc8dbdc8610577684150b95234448e44c6939d838257e196466adc288a1447"
+  },
+  "canonical_report_sha256": "fc4d37a2a47a58afc8edac27f16fea1eddc5dc1e3d3a407d008e43b5f225f6c6",
+  "report": {
+    "format": "poster.crosshost.v1",
+    "status": "PASSED",
+    "full_cross_host_acceptance": true,
+    "scenarios": {
+      "frozen_windows_processes": "PASSED",
+      "linux_processes": "PASSED",
+      "tls_hostname_certificate_auth": "PASSED",
+      "pairing_fingerprints_approval": "PASSED",
+      "signed_heartbeat": "PASSED",
+      "exact_maker_snapshot": "PASSED",
+      "typed_and_protected_inputs": "PASSED",
+      "linux_graphrunner_output": "PASSED",
+      "windows_history": "PASSED",
+      "two_parallel_executions": "PASSED",
+      "global_and_project_limits": "PASSED",
+      "cancellation": "PASSED",
+      "browser_timeout_cleanup": "PASSED",
+      "agent_disconnect_reconnect": "PASSED",
+      "post_partition_unknown_no_resend": "PASSED",
+      "secret_and_queue_key_boundary": "PASSED",
+      "no_orphan_browsers": "PASSED",
+      "revoke_without_fallback": "PASSED"
+    },
+    "commit": "f411f806d5d0fa498b556bd4e4d2c6a955bcd992",
+    "windows_frozen": true,
+    "linux_non_root": true,
+    "separate_hosts": true,
+    "real_tcp_tls": true,
+    "proof": {
+      "windows": {
+        "os": "Windows",
+        "release": "2022Server",
+        "version": "10.0.20348",
+        "processes": [
+          {
+            "pid": 4744,
+            "birth": 1793038716.5913377,
+            "executable": "PosterService.exe"
+          },
+          {
+            "pid": 6628,
+            "birth": 1793038717.2091167,
+            "executable": "PosterDispatcher.exe"
+          }
+        ]
+      },
+      "production_commit": "f411f806d5d0fa498b556bd4e4d2c6a955bcd992",
+      "launchers": {
+        "maker": {
+          "file": "Poster.exe",
+          "sha256": "0eab54100ad2e1ecb9851abeef49110c903571a992537172e352b35e12c54afc"
+        },
+        "service": {
+          "file": "PosterService.exe",
+          "sha256": "9e8db3f510eb3ca0f630c52a2dc940764fe1266337080877eb12fb0f330b32ac"
+        },
+        "worker": {
+          "file": "PosterWorker.exe",
+          "sha256": "efc14fd6bd6d6e66802cc0925937699a0cbb311405bf44c07466d08add5c994a"
+        },
+        "gui": {
+          "file": "PosterDispatcher.exe",
+          "sha256": "3b89c6fb4b6a9ac1e8f1ed9d21d697dbf80122cded2a1c3fde87c6c33fca72cf"
+        }
+      },
+      "linux": {
+        "os": {
+          "system": "Linux",
+          "kernel": "6.18.54.1-microsoft-standard-WSL2",
+          "arch": "x86_64",
+          "distribution": "Ubuntu 24.04.5 LTS",
+          "boot_id": "7d7d2a6b-d9c1-4cfd-bcfc-9b1796bb07a5",
+          "python": "3.12.3"
+        },
+        "packages": {
+          "poster-http": "0.2.0",
+          "httpx": "0.28.1",
+          "cryptography": "50.0.2",
+          "psutil": "7.2.2",
+          "playwright": "1.64.0",
+          "pydantic": "2.14.1",
+          "PyYAML": "6.0.3",
+          "filelock": "3.32.7"
+        },
+        "uid": 1000,
+        "program_commit": "f411f806d5d0fa498b556bd4e4d2c6a955bcd992",
+        "helper_sha256": "dcfff82b5c1327cd0fa59bb1a7c270742d0e9732e78f1b6dcc7850b58a3ad583",
+        "roles": {
+          "agent": {
+            "birth": 1793038720.62,
+            "pid": 7811,
+            "alive": true
+          },
+          "relay": {
+            "birth": 1793038716.42,
+            "pid": 7731,
+            "alive": true
+          },
+          "fixture": {
+            "birth": 1793038716.42,
+            "pid": 7732,
+            "alive": true
+          }
+        }
+      },
+      "parallel": {
+        "active": [
+          {
+            "id": "56c840dd93574c578b303067fac071cc",
+            "pid": 8225,
+            "birth": null,
+            "status": "RUNNING"
+          },
+          {
+            "id": "1c8b4a73ba214807b26964136212fd15",
+            "pid": 7955,
+            "birth": null,
+            "status": "RUNNING"
+          }
+        ],
+        "observed_linux": {
+          "observed": 2,
+          "alive": [
+            {
+              "pid": 7955,
+              "birth": 1793038723.08,
+              "name": "python"
+            },
+            {
+              "pid": 8225,
+              "birth": 1793038726.85,
+              "name": "python"
+            }
+          ]
+        },
+        "same_project_pending": true,
+        "global_limit_pending": true
+      },
+      "jobs": [
+        {
+          "id": "1c8b4a73ba214807b26964136212fd15",
+          "status": "SUCCEEDED",
+          "attempt": 1
+        },
+        {
+          "id": "95b2c76c00874df6932e500d7af7bdcb",
+          "status": "SUCCEEDED",
+          "attempt": 1
+        },
+        {
+          "id": "56c840dd93574c578b303067fac071cc",
+          "status": "SUCCEEDED",
+          "attempt": 1
+        },
+        {
+          "id": "96b96abe860a40da9da4598e03b161bc",
+          "status": "SUCCEEDED",
+          "attempt": 1
+        },
+        {
+          "id": "c6926bbcfe3948dba489a8dafa4ce70a",
+          "status": "CANCELLED",
+          "attempt": 1
+        },
+        {
+          "id": "55a94e596244432198edebc0df36c2eb",
+          "status": "UNKNOWN",
+          "attempt": 1
+        },
+        {
+          "id": "397059705b7a4b0aadffaaa54304e1ab",
+          "status": "UNKNOWN",
+          "attempt": 1
+        }
+      ],
+      "sqlite_history": [
+        {
+          "run_id": "0dc9172cc1fa4f20935cbc9ebf055459",
+          "job_id": "1c8b4a73ba214807b26964136212fd15",
+          "attempt": 1,
+          "status": "SUCCEEDED",
+          "pid": 7955,
+          "birth": 1793038723.08,
+          "leased": 1793038721.7820811,
+          "started": 1793038722.7067323,
+          "finished": 1793038729.6909897,
+          "code": "",
+          "effects_possible": 1
+        },
+        {
+          "run_id": "b07eda7f3c394ca38560c1d13ba00d27",
+          "job_id": "56c840dd93574c578b303067fac071cc",
+          "attempt": 1,
+          "status": "SUCCEEDED",
+          "pid": 8225,
+          "birth": 1793038726.85,
+          "leased": 1793038725.7715082,
+          "started": 1793038726.6241014,
+          "finished": 1793038730.310924,
+          "code": "",
+          "effects_possible": 1
+        },
+        {
+          "run_id": "d7b1894d8ca34bdfbcf1b3bc5eb8fb9f",
+          "job_id": "95b2c76c00874df6932e500d7af7bdcb",
+          "attempt": 1,
+          "status": "SUCCEEDED",
+          "pid": 8437,
+          "birth": 1793038730.92,
+          "leased": 1793038729.7199855,
+          "started": 1793038730.6537294,
+          "finished": 1793038731.9100106,
+          "code": "",
+          "effects_possible": 1
+        },
+        {
+          "run_id": "41be28f046b44091b9d31d4a85cb6a5f",
+          "job_id": "96b96abe860a40da9da4598e03b161bc",
+          "attempt": 1,
+          "status": "SUCCEEDED",
+          "pid": 8455,
+          "birth": 1793038731.55,
+          "leased": 1793038730.3154514,
+          "started": 1793038731.2793307,
+          "finished": 1793038732.2320838,
+          "code": "",
+          "effects_possible": 1
+        },
+        {
+          "run_id": "47cc0b72ca2d4a2d94b71c7f41015972",
+          "job_id": "c6926bbcfe3948dba489a8dafa4ce70a",
+          "attempt": 1,
+          "status": "CANCELLED",
+          "pid": 8498,
+          "birth": 1793038733.51,
+          "leased": 1793038732.3493764,
+          "started": 1793038733.1811616,
+          "finished": 1793038734.4518483,
+          "code": "CANCEL_REQUESTED",
+          "effects_possible": 1
+        },
+        {
+          "run_id": "d52cb79bb79f4627a30d1100cefd8d39",
+          "job_id": "55a94e596244432198edebc0df36c2eb",
+          "attempt": 1,
+          "status": "UNKNOWN",
+          "pid": 8609,
+          "birth": 1793038735.74,
+          "leased": 1793038734.6686883,
+          "started": 1793038735.3732421,
+          "finished": 1793038744.1275594,
+          "code": "TIMEOUT",
+          "effects_possible": 1
+        },
+        {
+          "run_id": "b20e01c7758442df8ee6c2e04b6827e2",
+          "job_id": "397059705b7a4b0aadffaaa54304e1ab",
+          "attempt": 1,
+          "status": "UNKNOWN",
+          "pid": 9327,
+          "birth": 1793038748.61,
+          "leased": 1793038747.627875,
+          "started": 1793038748.3764992,
+          "finished": 1793038779.7887352,
+          "code": "DISPATCHER_LOST",
+          "effects_possible": 1
+        }
+      ],
+      "fixture": [
+        {
+          "label": "first",
+          "sha256": "dbfc7a0e0fd39d4524bda53c365c1e0fdd435d9e4ad77ddd7756f0e8eda62728",
+          "types": {
+            "n": "int",
+            "nested": "list",
+            "ok": "bool",
+            "token": "str"
+          }
+        },
+        {
+          "label": "second",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "types": {}
+        },
+        {
+          "label": "first",
+          "sha256": "dbfc7a0e0fd39d4524bda53c365c1e0fdd435d9e4ad77ddd7756f0e8eda62728",
+          "types": {
+            "n": "int",
+            "nested": "list",
+            "ok": "bool",
+            "token": "str"
+          }
+        },
+        {
+          "label": "lost",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "types": {}
+        }
+      ],
+      "snapshot": {
+        "version": "78ea37c0fa3ec749c5c3d168b681c094be1625e76146940052088d2ef6c6e9a7",
+        "sha256": "f1292bdbcf99e591927c1aa68e96f47cf400a72b60ac724929dd0693ecd66107",
+        "original_bytes_equal": true,
+        "run_id": "0dc9172cc1fa4f20935cbc9ebf055459"
+      },
+      "returned_files": [
+        {
+          "name": "out.txt",
+          "sha256": "56a6f93cfc941d4975cb4e5c8bfd399c13dd8088836221061fdc187aee489282",
+          "bytes": 17
+        },
+        {
+          "name": "third.txt",
+          "sha256": "b1e99324505bd32da0e1f85dcf5e19a09db0481e8a15f62c41eb320304a8e927",
+          "bytes": 5
+        }
+      ],
+      "tls": {
+        "url": "https://poster-linux.test:18443",
+        "verified": true,
+        "rejected": [
+          "bad_credential",
+          "untrusted_CA",
+          "wrong_hostname"
+        ]
+      },
+      "browser": {
+        "observed": [
+          {
+            "pid": 8673,
+            "birth": 1793038736.53,
+            "name": "chrome"
+          },
+          {
+            "pid": 8684,
+            "birth": 1793038736.61,
+            "name": "chrome"
+          },
+          {
+            "pid": 8685,
+            "birth": 1793038736.62,
+            "name": "chrome"
+          },
+          {
+            "pid": 8742,
+            "birth": 1793038736.87,
+            "name": "chrome"
+          },
+          {
+            "pid": 8766,
+            "birth": 1793038736.91,
+            "name": "chrome"
+          },
+          {
+            "pid": 8740,
+            "birth": 1793038736.86,
+            "name": "chrome"
+          },
+          {
+            "pid": 8679,
+            "birth": 1793038736.6,
+            "name": "chrome_crashpad_handler"
+          },
+          {
+            "pid": 8681,
+            "birth": 1793038736.6,
+            "name": "chrome_crashpad_handler"
+          }
+        ],
+        "alive_after_timeout": []
+      },
+      "reconnect": {
+        "identity_preserved": true,
+        "roles": {
+          "agent": {
+            "birth": 1793038746.13,
+            "pid": 9150,
+            "alive": true
+          },
+          "relay": {
+            "birth": 1793038716.42,
+            "pid": 7731,
+            "alive": true
+          },
+          "fixture": {
+            "birth": 1793038716.42,
+            "pid": 7732,
+            "alive": true
+          }
+        }
+      },
+      "partition": {
+        "job_id": "397059705b7a4b0aadffaaa54304e1ab",
+        "status": "UNKNOWN",
+        "post_count": 1,
+        "history_count": 1
+      },
+      "secret_boundary": {
+        "queue_key_transferred": false,
+        "linux_files_checked": 8,
+        "plaintext_canary_absent": true
+      },
+      "revoke": {
+        "error": "REMOTE_REVOKED",
+        "admitted_jobs": 0,
+        "queue_count_unchanged": true
+      }
+    }
+  },
+  "provenance": {
+    "status": "PASSED",
+    "full_cross_host_acceptance": true,
+    "topology": "Windows hosted runner + separate WSL2 Linux VM (private TCP)",
+    "production_commit": "f411f806d5d0fa498b556bd4e4d2c6a955bcd992",
+    "harness_commit": "9aa505d3b75ca5ceefc4ffcb1a85678b2bfdf028",
+    "artifacts": {
+      "windows": {
+        "file": "poster-maker-windows.zip",
+        "sha256": "4fabdfd5581133624cdb26e70ae6aeaa9563311bc1754dc825a7736b1af02e54",
+        "bytes": 306590780
+      },
+      "linux": {
+        "file": "poster-linux.tar.gz",
+        "sha256": "bcafbd27f20d8f7f8ddb32222b68efada9870d9c2a67e92c4fe473055859e731",
+        "bytes": 59830734
+      }
+    },
+    "linux_manifest": {
+      "commit": "f411f806d5d0fa498b556bd4e4d2c6a955bcd992",
+      "files_verified": 36,
+      "wheelhouse_python": "3.12",
+      "wheelhouse_platform": "Linux/x86_64"
+    },
+    "infrastructure": {
+      "status": "WSL2_READY",
+      "full_cross_host_acceptance": false,
+      "topology": "Windows hosted runner + separate WSL2 Linux VM",
+      "windows": {
+        "os": "Windows",
+        "release": "2022Server",
+        "version": "10.0.20348",
+        "pid": 8184
+      },
+      "linux": {
+        "os": "Linux",
+        "kernel": "6.18.54.1-microsoft-standard-WSL2",
+        "arch": "x86_64",
+        "pid": 278,
+        "boot_id": "7d7d2a6b-d9c1-4cfd-bcfc-9b1796bb07a5",
+        "mount_types": [
+          "9p",
+          "binfmt_misc",
+          "cgroup2",
+          "configfs",
+          "debugfs",
+          "devpts",
+          "devtmpfs",
+          "ext4",
+          "fusectl",
+          "hugetlbfs",
+          "mqueue",
+          "overlay",
+          "proc",
+          "rootfs",
+          "sysfs",
+          "tmpfs",
+          "tracefs"
+        ],
+        "windows_mountpoints": [],
+        "windows_drives_mounted": false,
+        "interop_enabled": false
+      }
+    },
+    "ssh": {
+      "hostname": "poster-linux.test",
+      "port": 22,
+      "host_key_sha256": "SHA256:/6urIDzJuAdqfeYl7f49wkp+Y23u/AXYCXHGxhhmA7M",
+      "strict_host_key_checking": true,
+      "uid": 1000,
+      "windows_drive_sharing": false,
+      "interop": false
+    },
+    "scenario_counts": {
+      "PASSED": 18,
+      "FAILED": 0,
+      "NOT_EXECUTED": 0
+    },
+    "acceptance_phase": null,
+    "failure_line": null
+  }
+}

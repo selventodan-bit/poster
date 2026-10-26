@@ -12,6 +12,18 @@ https://github.com/selventodan-bit/poster/actions/runs/40374290381
 Закреплённая запись результата:
 [`poster-5b-crosshost-2026-10-26.json`](benchmarks/poster-5b-crosshost-2026-10-26.json).
 
+Повторный реальный прогон также прошёл **18/18 PASSED**:
+https://github.com/selventodan-bit/poster/actions/runs/40375923286
+([safe artifact](https://github.com/selventodan-bit/poster/actions/runs/40375923286/artifacts/12675515453)).
+**Полная постоянная запись** с HTTP fixture, SQLite rows, PID/birth, браузерной
+очисткой и отсутствием повторного POST:
+[`poster-5b-crosshost-confirmation-2026-10-26.json`](benchmarks/poster-5b-crosshost-confirmation-2026-10-26.json).
+Она восстановлена из полных JSON-аннотаций настоящего прогона, без дописывания
+результатов или приватных данных; digest `canonical_report_sha256` относится к
+JSON с sort_keys=True и separators=(',',':'), а не к bytes форматированного файла.
+Первый полный CI исправленного harness:
+https://github.com/selventodan-bit/poster/actions/runs/40374290408 — SUCCESS.
+
 Фактические ОС: Windows Server 2022 (10.0.20348) и Ubuntu 24.04.5 LTS x86_64,
 отдельное настоящее ядро `6.18.54.1-microsoft-standard-WSL2`, Python 3.12.3,
 Agent UID 1000. Native Service/GUI PID 980/1432; Linux Agent/Relay PID 7807/7727;
