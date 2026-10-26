@@ -162,13 +162,36 @@ def check(executable, output):
             win32clipboard.CloseClipboard()
         keyboard.send_keys("^v", pause=0.05)
 
-    def click(name):
-        state = wait(
-            lambda s: name in s.get("widgets", {}) and s["widgets"][name]["enabled"], "control " + name
-        )
+    def stable_point(predicate, point_for, label):
+        # Qt can publish an observer before a deferred LayoutRequest settles.
+        # As in the Scheduler harness, require two distinct observer frames at
+        # the same point, then use real OS input. The observer is read-only.
         window.set_focus()
-        p = state["widgets"][name]
-        mouse.click(coords=(p["x"], p["y"]))
+        previous, generation, count = None, None, 0
+
+        def ready(state):
+            nonlocal previous, generation, count
+            if not predicate(state) or state.get("busy"):
+                previous, count = None, 0
+                return False
+            point = point_for(state)
+            identity = (state["pid"], point["x"], point["y"])
+            current = observer.stat().st_mtime_ns
+            if current != generation:
+                count = count + 1 if identity == previous else 1
+                previous, generation = identity, current
+            return count >= 2
+
+        state = wait(ready, label)
+        return point_for(state)
+
+    def click(name):
+        point = stable_point(
+            lambda state: state.get("widgets", {}).get(name, {}).get("enabled"),
+            lambda state: state["widgets"][name],
+            "control " + name,
+        )
+        mouse.click(coords=(point["x"], point["y"]))
 
     def fill(name, value):
         click(name)
@@ -179,10 +202,14 @@ def check(executable, output):
         return wait(lambda s: s.get("connected") and not s.get("busy"), "GUI idle")
 
     def tab(index):
-        state = idle()
-        p = next(p for p in state["tabs"] if p["index"] == index)
-        mouse.click(coords=(p["x"], p["y"]))
-        time.sleep(0.15)
+        point = stable_point(
+            lambda state: state.get("connected"),
+            lambda state: next(p for p in state["tabs"] if p["index"] == index),
+            "stable tab coordinates " + str(index),
+        )
+        mouse.click(coords=(point["x"], point["y"]))
+        table = {0: "projects_table", 1: "jobs_table", 2: "schedules_table", 3: "remote_agents_table"}[index]
+        wait(lambda state: table in state.get("widgets", {}), "tab visible " + str(index))
 
     def native_file(title, path):
         dialog = Desktop(backend="win32").window(title=title)
@@ -749,6 +776,9 @@ def check(executable, output):
                     "type": safe_error,
                     "state_error": snapshot().get("error"),
                     "action": snapshot().get("action"),
+                    "visible_tables": [
+                        name for name in snapshot().get("widgets", {}) if name.endswith("_table")
+                    ],
                     "connected": snapshot().get("connected"),
                     "service": snapshot().get("service"),
                     "job_states": [r["status"] for r in all_jobs().values()],
