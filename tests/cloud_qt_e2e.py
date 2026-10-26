@@ -37,6 +37,22 @@ def wait(app, predicate, timeout=25):
         if predicate():
             return
         QTest.qWait(10)
+    import traceback
+
+    states = [
+        {
+            "window": w.objectName(),
+            "busy": getattr(w, "busy", None),
+            "code": getattr(w, "last_error", None),
+            "visible": w.isVisible(),
+        }
+        for w in app.topLevelWidgets()
+        if w.objectName() in {"poster_cloud_projects", "maker_window"}
+    ]
+    print(
+        "::error title=Cloud Qt diagnostic::"
+        + json.dumps({"frames": [f.lineno for f in traceback.extract_stack()[-3:]], "states": states})
+    )
     raise AssertionError("Qt cloud UI deadline")
 
 

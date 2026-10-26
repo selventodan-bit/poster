@@ -485,8 +485,6 @@ class Host:
                 for item in value["ids"]
             ]
         if op == "validate_batch":
-            from .service import prepare_snapshot
-
             for spec in value["items"]:
                 item = self.catalog.items[spec["id"]]
                 prepare_snapshot(
