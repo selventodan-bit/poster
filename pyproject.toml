@@ -25,7 +25,20 @@ dependencies = [
 recorder = ["playwright>=1.48,<2"]
 maker = ["playwright>=1.48,<2", "PySide6==6.12.0"]
 dev = ["pytest>=8,<10", "pytest-asyncio>=0.24,<2", "ruff>=0.8"]
-notebook = ["nbclient>=0.10,<1", "nbformat>=5.10,<6", "ipykernel>=6.29,<8"]
+notebook = [
+    "nbclient>=0.10,<1",
+    "nbformat>=5.10,<6",
+    "ipykernel>=6.29,<8",
+    "ipywidgets>=8.1,<9",
+    "marimo>=0.20,<1",
+    "fsspec>=2026.1,<2027",
+    "google-api-python-client>=2.190,<3",
+    "google-auth-httplib2>=0.3,<1",
+    "google-auth-oauthlib>=1.2,<2",
+    "pydata-google-auth>=1.9,<2",
+    "setuptools>=75",
+    "setuptools-scm>=8,<10",
+]
 
 [project.scripts]
 poster = "poster.cli:main"

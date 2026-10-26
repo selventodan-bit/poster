@@ -1,14 +1,82 @@
 name: crosshost-acceptance
 on:
   push:
-    branches: [codex/poster-5b-crosshost-acceptance]
+    branches: [codex/poster-5b-crosshost-acceptance, codex/poster-5c-drive-cloud-multiworker]
   workflow_dispatch:
 permissions:
   contents: read
   actions: read
 jobs:
+  current-windows:
+    if: github.ref_name == 'codex/poster-5c-drive-cloud-multiworker'
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install ".[maker]" -c requirements-recorder.txt -r requirements-windows-build.txt
+      - run: python scripts/build_windows_app.py --embedded --output release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: crosshost-current-windows
+          path: release/
+          if-no-files-found: error
+  current-linux:
+    if: github.ref_name == 'codex/poster-5c-drive-cloud-multiworker'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.12'
+      - run: uv sync --frozen --extra dev --extra recorder
+      - run: uv run --no-sync python scripts/build_remote_release.py --output release/linux --wheelhouse
+      - uses: actions/upload-artifact@v4
+        with:
+          name: crosshost-current-linux
+          path: release/linux/
+          if-no-files-found: error
+  frozen-drive-notebook:
+    needs: [current-windows]
+    if: github.ref_name == 'codex/poster-5c-drive-cloud-multiworker'
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: crosshost-current-windows
+          path: release/
+      - run: python -m pip install --require-hashes -r requirements-cloud-runtime.txt
+      - run: python -m pip install . --no-deps
+      - run: python -m pip install pywinauto==0.6.9 Pillow==11.3.0
+      - name: Verify archive and extract new portable Full package
+        shell: pwsh
+        run: |
+          $expected = (Get-Content release/poster-maker-windows.sha256).Split(' ')[0]
+          if ((Get-FileHash release/poster-maker-windows.zip -Algorithm SHA256).Hash.ToLower() -ne $expected) { throw 'New Full checksum mismatch' }
+          Expand-Archive release/poster-maker-windows.zip '.poster/Full Stage 5C Ж'
+      - name: Real frozen Maker to HTTP Drive fixture to Jupyter to frozen Dispatcher
+        run: python scripts/cloud/check_frozen.py
+        env:
+          POSTER_CLOUD_FROZEN_BUNDLE: .poster/Full Stage 5C Ж
+          PYTHONUTF8: '1'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stage5c-frozen-safe-evidence
+          path: .poster/cloud-frozen-public/
+          include-hidden-files: true
+          if-no-files-found: error
   windows-linux:
-    if: github.event.repository.private == false
+    needs: [current-windows, current-linux]
+    if: always() && github.event.repository.private == false && (github.ref_name != 'codex/poster-5c-drive-cloud-multiworker' || (needs.current-windows.result == 'success' && needs.current-linux.result == 'success'))
     runs-on: windows-2022
     timeout-minutes: 45
     steps:
@@ -17,6 +85,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Download accepted frozen Windows package, never rebuild it
+        if: github.ref_name != 'codex/poster-5c-drive-cloud-multiworker'
         uses: actions/download-artifact@v4
         with:
           name: poster-maker-windows
@@ -24,11 +93,24 @@ jobs:
           github-token: ${{ github.token }}
           path: .poster/original-windows
       - name: Download accepted Linux wheelhouse of the same production SHA
+        if: github.ref_name != 'codex/poster-5c-drive-cloud-multiworker'
         uses: actions/download-artifact@v4
         with:
           name: poster-linux
           run-id: '40355084531'
           github-token: ${{ github.token }}
+          path: .poster/original-linux
+      - name: Download newly built Windows package from THIS exact workflow run
+        if: github.ref_name == 'codex/poster-5c-drive-cloud-multiworker'
+        uses: actions/download-artifact@v4
+        with:
+          name: crosshost-current-windows
+          path: .poster/original-windows
+      - name: Download newly built Linux wheelhouse from THIS exact workflow run
+        if: github.ref_name == 'codex/poster-5c-drive-cloud-multiworker'
+        uses: actions/download-artifact@v4
+        with:
+          name: crosshost-current-linux
           path: .poster/original-linux
       - name: Install only the external acceptance driver
         run: python -m pip install ".[recorder]" -c requirements-recorder.txt pywinauto==0.6.9 Pillow==11.3.0
@@ -51,6 +133,7 @@ jobs:
         run: python scripts/crosshost/run_hosted.py
         env:
           PYTHONUTF8: '1'
+          POSTER_CROSSHOST_CURRENT: ${{ github.ref_name == 'codex/poster-5c-drive-cloud-multiworker' && '1' || '0' }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:

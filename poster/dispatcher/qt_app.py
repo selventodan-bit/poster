@@ -1093,7 +1093,7 @@ class DispatcherWindow(QMainWindow):
     def open_cloud(self):
         from poster.cloud.qt_panel import CloudDialog
 
-        self.cloud_dialog = CloudDialog(self, opened=self.cloud_project_imported)
+        self.cloud_dialog = CloudDialog(self, opened=self.cloud_project_imported, dispatcher_root=self.root)
         self.cloud_dialog.show()
 
     def cloud_project_imported(self, value):

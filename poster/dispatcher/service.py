@@ -78,6 +78,17 @@ def enqueue_snapshot(
         return previous
     if agent_id and profile_id:
         raise DispatcherError("REMOTE_PROFILE")
+    if agent_id:
+        # Old 5B workers lack resource staging and session SecretRef bindings.
+        # Refuse BEFORE admission, rather than discovering this after a POST.
+        from poster.remote.registry import validate_target
+
+        manifest, files = Snapshots(store.root).read(version)
+        graph = Graph.model_validate_json(files[manifest["main"]])
+        validate_target(store, agent_id)
+        agent = store.db.execute("SELECT version FROM remote_agents WHERE id=?", (agent_id,)).fetchone()
+        if (secret_refs or graph.metadata.get("poster.resources")) and agent["version"] != "5C.1":
+            raise DispatcherError("REMOTE_VERSION")
     cipher, names = prepare_snapshot(
         store,
         project_id,

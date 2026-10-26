@@ -5,6 +5,22 @@ on:
 permissions:
   contents: read
 jobs:
+  notebook-runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --frozen --extra dev --extra recorder --extra notebook
+      - name: Real notebook kernels, original subprocesses, encrypted results and safe replay refusal
+        run: uv run --no-sync python -m pytest -q tests/test_cloud_runtime.py tests/cloud_notebook_runtimes.py --junitxml=.poster/cloud-notebook.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cloud-notebook-runtime
+          path: .poster/cloud-notebook.xml
+          include-hidden-files: true
+          if-no-files-found: error
   provider-documentation:
     runs-on: ubuntu-24.04
     timeout-minutes: 10

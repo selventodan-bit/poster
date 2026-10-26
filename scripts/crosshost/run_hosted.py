@@ -102,6 +102,7 @@ def wsl(args, **kwargs):
 
 
 def main():
+    global COMMIT, WINDOWS_SHA, LINUX_SHA, INSTALL
     if os.name != "nt" or os.environ.get("GITHUB_ACTIONS") != "true":
         raise RuntimeError("REQUIRES_STANDARD_HOSTED_WINDOWS")
     from cryptography.hazmat.primitives import serialization
@@ -109,6 +110,20 @@ def main():
     from poster.dispatcher.security import private_dir, safe_json, restrict
 
     root = Path(__file__).resolve().parents[2]
+    if os.environ.get("POSTER_CROSSHOST_CURRENT") == "1":
+        import re
+
+        commit = execute(["git", "rev-parse", "HEAD"]).decode().strip()
+        if not re.fullmatch("[a-f0-9]{40}", commit) or commit != os.environ.get("GITHUB_SHA"):
+            raise RuntimeError("CURRENT_COMMIT_MISMATCH")
+        checksums = []
+        for role, filename in [("windows", "poster-maker-windows.sha256"), ("linux", "poster-linux.sha256")]:
+            expected = (root / ".poster" / ("original-" + role) / filename).read_text().split()[0]
+            if not re.fullmatch("[a-f0-9]{64}", expected):
+                raise RuntimeError("CURRENT_CHECKSUM_INVALID")
+            checksums.append(expected)
+        INSTALL = INSTALL.replace(COMMIT, commit).replace(LINUX_SHA, checksums[1])
+        COMMIT, WINDOWS_SHA, LINUX_SHA = commit, *checksums
     public = root / ".poster/crosshost-public"
     public.mkdir(parents=True, exist_ok=True)
     private = private_dir(root / ".poster/crosshost-private")

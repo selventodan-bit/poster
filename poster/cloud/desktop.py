@@ -230,6 +230,36 @@ class DesktopCloud:
         root = await library.root()
         return {**status, "drive": "AVAILABLE", "root_configured": bool(root)}
 
+    async def sync_results(self, dispatcher_root, project_id=None):
+        from .admission import claims
+        from .results import DesktopArchive
+
+        library = await self._library()
+        archive = DesktopArchive(dispatcher_root)
+        imported, pending, rejected = [], 0, 0
+        projects = [
+            p
+            async for p in library.projects()
+            if p["status"] == "READY" and (project_id is None or p["project_id"] == project_id)
+        ]
+        for project in projects:
+            descriptor = await library.descriptor(await library.find(project["project_id"]))
+            history, _ = await claims(library, descriptor)
+            for claim in history:
+                for index, plan in enumerate(claim["runs"]):
+                    if await library.files.info(plan[2]) is None:
+                        pending += 1
+                        continue
+                    try:
+                        imported.append(
+                            await archive.import_result(library, claim, index, recipient(self.store))
+                        )
+                    except CloudError:
+                        rejected += 1
+        return dict(
+            imported=imported, pending=pending, rejected=rejected, mode="DETACHED", history=archive.rows()
+        )
+
     async def close(self):
         if self.client:
             await self.client.aclose()

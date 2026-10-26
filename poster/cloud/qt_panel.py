@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 import threading
 
-from PySide6.QtCore import QObject, QUrl, Qt, Signal
+from PySide6.QtCore import QObject, QUrl, Qt, Signal, QTimer
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -86,6 +86,7 @@ class CloudDialog(QDialog):
         published=None,
         service=None,
         auto_publish=False,
+        dispatcher_root=None,
     ):
         super().__init__(parent)
         self.setObjectName("poster_cloud_projects")
@@ -97,6 +98,7 @@ class CloudDialog(QDialog):
         self.bridge.completed.connect(self.completed)
         self.source = Path(source) if source else None
         self.auto_publish = auto_publish
+        self.dispatcher_root = dispatcher_root
         self.preferred_project = None
         self.opened, self.published = opened, published
         self.pending = {}
@@ -140,6 +142,11 @@ class CloudDialog(QDialog):
         self.button(files, "cloud_folder", "Открыть папку проекта", self.folder)
         self.button(files, "cloud_versions", "История версий", self.selected)
         layout.addLayout(files)
+        if dispatcher_root is not None:
+            row = QHBoxLayout()
+            self.button(row, "cloud_results", "Импортировать автономные результаты", self.sync_results)
+            self.button(row, "cloud_notebook", "Подготовить и открыть notebook…", self.export_notebook)
+            layout.addLayout(row)
         if self.source:
             layout.addWidget(QLabel("Файлы данных этого проекта (добавляются только выбранные файлы):"))
             self.resources = QListWidget()
@@ -168,6 +175,14 @@ class CloudDialog(QDialog):
         self.button(close, "cloud_close", "Закрыть", self.accept)
         layout.addLayout(close)
         self.run("status", self.service.status(), self.account_status)
+        if self.service.fixture:
+            import os
+
+            self.test_observer = os.environ.get("POSTER_CLOUD_TEST_OBSERVER")
+            if self.test_observer:
+                self.observer_timer = QTimer(self)
+                self.observer_timer.timeout.connect(self.observe_fixture)
+                self.observer_timer.start(100)
 
     def button(self, layout, name, title, callback):
         button = QPushButton(title)
@@ -315,6 +330,78 @@ class CloudDialog(QDialog):
         self.run(
             "open", self.service.open(row["project_id"], self.version.currentData()), self.opened_project
         )
+
+    def sync_results(self):
+        row = self.current()
+        self.run(
+            "results",
+            self.service.sync_results(self.dispatcher_root, row["project_id"] if row else None),
+            self.results_synced,
+        )
+
+    def results_synced(self, value):
+        self.status.setText(
+            f"Автономных результатов: {len(value['imported'])}; ожидаются: {value['pending']}; отклонены: {value['rejected']}."
+        )
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Автономные результаты — DETACHED")
+        dialog.resize(900, 400)
+        layout = QVBoxLayout(dialog)
+        table = QTableWidget(len(value["history"]), 6)
+        table.setHorizontalHeaderLabels(["Запуск", "Версия", "Статус", "ОС / PID", "Файлы", "Режим"])
+        for i, row in enumerate(value["history"]):
+            for j, text in enumerate(
+                [
+                    row["run_id"],
+                    row["project_version"][:12],
+                    row["status"],
+                    str(row["evidence"].get("os")) + " / " + str(row["evidence"].get("pid")),
+                    ", ".join(row["outputs"]),
+                    row["mode"],
+                ]
+            ):
+                table.setItem(i, j, QTableWidgetItem(text))
+        table.cellDoubleClicked.connect(
+            lambda i, j: QDesktopServices.openUrl(QUrl.fromLocalFile(value["history"][i]["directory"]))
+        )
+        layout.addWidget(
+            QLabel(
+                "Двойное нажатие открывает возвращённые файлы. Управляемые задания и их UNKNOWN не изменяются."
+            )
+        )
+        layout.addWidget(table)
+        close = QPushButton("Закрыть")
+        close.clicked.connect(dialog.accept)
+        layout.addWidget(close)
+        dialog.exec()
+
+    def observe_fixture(self):
+        # Enabled ONLY by validated loopback fixture mode; never serialize
+        # tokens, inputs, widget text, graph parameters or account information.
+        from poster.dispatcher.security import safe_json
+
+        points = {}
+        for name, button in self.buttons.items():
+            pos = button.mapToGlobal(button.rect().center())
+            points[name] = [pos.x(), pos.y()]
+        safe_json(
+            Path(self.test_observer),
+            dict(
+                busy=self.busy,
+                code=self.last_error,
+                positions=points,
+                projects=[{k: r.get(k) for k in ("project_id", "version", "status")} for r in self.rows],
+                version=self.version.currentData(),
+                visible=self.isVisible(),
+            ),
+        )
+
+    def export_notebook(self):
+        from .export_dialog import NotebookExportDialog
+
+        row = self.current()
+        if row and self.version.currentData():
+            NotebookExportDialog(self, row["project_id"], self.version.currentData()).exec()
 
     def opened_project(self, value):
         self.status.setText("Проект загружен и проверен.")

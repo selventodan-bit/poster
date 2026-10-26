@@ -195,7 +195,16 @@ class PortableBundle:
                 raise CloudError("PRIVATE_RESOURCE")
             graph.secret_file = graph.secret_sha256 = None
             graph.metadata = {}
+            exports = graph.extensions.get("outputs")
             graph.extensions = {}
+            if exports is not None:
+                from poster.maker.variables import NAME
+
+                if not isinstance(exports, list) or not all(
+                    isinstance(n, str) and NAME.fullmatch(n) for n in exports
+                ):
+                    raise CloudError("INTEGRITY")
+                graph.extensions["outputs"] = exports
             for node in graph.nodes:
                 node.extensions = {}
                 for key in ("path", "file", "filename", "directory"):

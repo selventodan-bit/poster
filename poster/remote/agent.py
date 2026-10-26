@@ -317,7 +317,7 @@ class Agent:
                     heartbeat = dict(
                         kind="heartbeat",
                         os="linux",
-                        version="5B.1",
+                        version=__import__("poster.remote", fromlist=["VERSION"]).VERSION,
                         protocol=1,
                         capabilities=capabilities(self.root),
                         runs=[
@@ -380,7 +380,7 @@ class Agent:
                                 dict(
                                     kind="heartbeat",
                                     os="linux",
-                                    version="5B.1",
+                                    version=__import__("poster.remote", fromlist=["VERSION"]).VERSION,
                                     protocol=1,
                                     capabilities=capabilities(self.root, phase="STOPPED"),
                                     runs=[],

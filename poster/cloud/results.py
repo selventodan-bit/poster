@@ -87,12 +87,39 @@ class ResultArchive:
         self.store = store
 
     def rows(self):
-        return [
-            dict(row)
-            for row in self.store.db.execute(
-                "SELECT mode,issuer,run_id,project_id,project_version,status,imported FROM cloud_results ORDER BY imported DESC LIMIT 1000"
+        values = []
+        for row in self.store.db.execute("SELECT * FROM cloud_results ORDER BY imported DESC LIMIT 1000"):
+            value = dict(row)
+            safe = unseal(value.pop("manifest_cipher"))
+            value.update(
+                directory=safe["directory"],
+                evidence=safe["manifest"]["evidence"],
+                outputs=list(safe["manifest"]["outputs"]),
             )
-        ]
+            values.append(value)
+        return values
+
+    def find(self, issuer, run_id):
+        row = self.store.db.execute(
+            "SELECT manifest_cipher FROM cloud_results WHERE mode='DETACHED' AND issuer=? AND run_id=?",
+            (issuer, run_id),
+        ).fetchone()
+        return unseal(row[0]) if row else None
+
+    def save(self, value, safe):
+        self.store.db.execute(
+            "INSERT INTO cloud_results VALUES(?,?,?,?,?,?,?,?)",
+            (
+                "DETACHED",
+                value["issuer"],
+                value["run_id"],
+                value["project_id"],
+                value["project_version"],
+                value["status"],
+                time.time(),
+                seal(safe),
+            ),
+        )
 
     async def import_result(self, library, claim, index, recipient):
         run_id, _, manifest_id = claim["runs"][index]
@@ -114,12 +141,9 @@ class ResultArchive:
             raise CloudError("RESULT_UNTRUSTED")
         # Public signature is bound to the pre-execution claim, not an arbitrary
         # key supplied by a result file. IDs separate modes and independent runs.
-        old = self.store.db.execute(
-            "SELECT manifest_cipher FROM cloud_results WHERE mode=? AND issuer=? AND run_id=?",
-            ("DETACHED", value["issuer"], run_id),
-        ).fetchone()
+        old = self.find(value["issuer"], run_id)
         if old:
-            if unseal(old[0])["manifest"] != signed:
+            if old["manifest"] != signed:
                 raise CloudError("RESULT_UNTRUSTED")
             return dict(run_id=run_id, status=value["status"], already_imported=True)
         if len(value["outputs"]) > 128:
@@ -143,17 +167,29 @@ class ResultArchive:
             private_dir(target.parent)
             atomic(target, raw)
         safe = dict(manifest=signed, directory=str(root))
-        self.store.db.execute(
-            "INSERT INTO cloud_results VALUES(?,?,?,?,?,?,?,?)",
-            (
-                "DETACHED",
-                value["issuer"],
-                run_id,
-                bundle.project_id,
-                bundle.version,
-                value["status"],
-                time.time(),
-                seal(safe),
-            ),
-        )
+        self.save(value, safe)
         return dict(run_id=run_id, status=value["status"], directory=str(root), outputs=list(decoded))
+
+
+class DesktopArchive(ResultArchive):
+    """Qt bridge uses authenticated native IPC; SQLite stays on the Host thread."""
+
+    def __init__(self, root):
+        from types import SimpleNamespace
+
+        self.store = SimpleNamespace(root=Path(root))
+
+    def find(self, issuer, run_id):
+        from poster.dispatcher.host import request
+
+        return request(self.store.root, "cloud_result_find", issuer=issuer, run_id=run_id)
+
+    def save(self, value, safe):
+        from poster.dispatcher.host import request
+
+        request(self.store.root, "cloud_result_save", value=value, safe=safe)
+
+    def rows(self):
+        from poster.dispatcher.host import request
+
+        return request(self.store.root, "cloud_results")

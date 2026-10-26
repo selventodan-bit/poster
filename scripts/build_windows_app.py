@@ -80,8 +80,13 @@ def package(bundle, output, commit, *, embedded=False):
     (bundle / "BUILD_INFO.json").write_text(json.dumps(info, indent=2), encoding="utf-8")
     shutil.copyfile(ROOT / "WINDOWS_README.txt", bundle / "WINDOWS_README.txt")
     (bundle / "docs").mkdir(exist_ok=True)
-    for doc in ("POSTER_STAGE5A_REMOTE_LINUX_WORKER.md", "POSTER_STAGE5B_REMOTE_DEPLOYMENT.md"):
+    for doc in (
+        "POSTER_STAGE5A_REMOTE_LINUX_WORKER.md",
+        "POSTER_STAGE5B_REMOTE_DEPLOYMENT.md",
+        "POSTER_STAGE5C_DRIVE_CLOUD_MULTIWORKER.md",
+    ):
         shutil.copyfile(ROOT / "docs" / doc, bundle / "docs" / doc)
+    shutil.copytree(ROOT / "notebooks", bundle / "notebooks", dirs_exist_ok=True)
     licenses(bundle, embedded)
     name = "poster-maker-windows" if embedded else "poster-windows"
     target = output / (name + ".zip")

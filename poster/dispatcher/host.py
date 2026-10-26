@@ -330,6 +330,33 @@ class Host:
 
     def dispatch(self, value):
         op = value.pop("op")
+        if op.startswith("cloud_result"):
+            from poster.cloud.results import ResultArchive, TERMINAL
+            from poster.cloud.format import identifier, version_id
+
+            archive = ResultArchive(self.store)
+            if op == "cloud_results":
+                return archive.rows()
+            if op == "cloud_result_find":
+                return archive.find(identifier(value["issuer"]), identifier(value["run_id"]))
+            if op == "cloud_result_save":
+                result, safe = value["value"], value["safe"]
+                if (
+                    result.get("mode") != "DETACHED"
+                    or safe.get("manifest") != result
+                    or result.get("status") not in TERMINAL
+                ):
+                    raise DispatcherError("PARAMETERS_INVALID")
+                for name in ("issuer", "run_id", "project_id"):
+                    identifier(result[name])
+                version_id(result["project_version"])
+                old = archive.find(result["issuer"], result["run_id"])
+                if old is None:
+                    archive.save(result, safe)
+                elif old != safe:
+                    raise DispatcherError("REPORT_INVALID")
+                return True
+            raise DispatcherError("PARAMETERS_INVALID")
         if op.startswith("remote_"):
             from poster.remote.registry import read_json
 

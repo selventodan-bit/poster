@@ -36,7 +36,10 @@ def wait(app, predicate, timeout=25):
         app.processEvents()
         if predicate():
             return
-        QTest.qWait(10)
+        # On Windows a tight QTest.qWait loop can retain the GIL and starve
+        # Python's Drive/cleanup threads. Production QApplication.exec releases
+        # it; explicitly yield here while continuing real Qt event delivery.
+        time.sleep(0.01)
     import traceback
 
     states = [
