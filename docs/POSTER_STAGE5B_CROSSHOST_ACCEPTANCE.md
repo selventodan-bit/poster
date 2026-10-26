@@ -51,8 +51,12 @@ automount Windows-дисков и interop. Отдельная capability-про�
 ещё не означает прохождения E2E. Kernel-wide WSLInterop также явно выключается
 bootstrap root до создания обычного пользователя; он не может включить его обратно.
 
-Для повторения в Actions выберите workflow **crosshost-acceptance → Run workflow →
-codex/poster-5b-crosshost-acceptance**. Все входы закреплены в коде; вводить
+Для повторения в Actions откройте успешный run **crosshost-acceptance** по ссылке
+выше и выберите **Re-run all jobs**. Новый push в
+`codex/poster-5b-crosshost-acceptance` также запускает workflow автоматически.
+`workflow_dispatch` для файла, отсутствующего в default branch, может быть
+недоступен; переносить workflow в main для приёмки не требуется.
+Все входы закреплены в коде; вводить
 пользовательские secrets, настраивать личный ПК или покупать VM не требуется.
 Job отказывается запускаться для private repository. Он устанавливает Ubuntu,
 OpenSSH и browser OS libraries администратором гостя, после чего runtime выполняет
@@ -200,6 +204,9 @@ SHA256 архивов выше сверены с аннотациями прин
    ```bash
    sudo apt-get update
    sudo apt-get install openssh-server python3.12-venv ca-certificates
+   # Только для новой выделенной тестовой учётной записи:
+   sudo adduser --disabled-password --gecos '' postercheck
+   sudo install -d -m 700 -o postercheck -g postercheck /home/postercheck/.ssh
    sudo systemctl enable --now ssh
    sudo ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256
    ```
