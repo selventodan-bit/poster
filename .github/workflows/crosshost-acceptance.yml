@@ -1,0 +1,42 @@
+name: crosshost-acceptance
+on:
+  push:
+    branches: [codex/poster-5b-crosshost-acceptance]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  infrastructure:
+    if: github.event.repository.private == false
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install a real WSL2 Ubuntu VM without cache or additional paid resources
+        uses: Vampire/setup-wsl@4c48163d9f981914dd8caa0fc335fe19cca5bff4 # v7.2.0
+        with:
+          distribution: Ubuntu-24.04
+          wsl-version: '2'
+          use-cache: 'false'
+          update: 'false'
+          wsl-conf: |
+            [boot]
+            systemd=true
+            [automount]
+            enabled=false
+            [interop]
+            enabled=false
+            appendWindowsPath=false
+      - name: Require an actual Linux kernel and isolated guest filesystem
+        run: python scripts/crosshost/probe_wsl2.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: crosshost-infrastructure-capability
+          path: .poster/crosshost-infrastructure/probe.json
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7
