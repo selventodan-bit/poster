@@ -9,7 +9,7 @@ import uuid
 from cryptography.fernet import Fernet
 
 from ..auth import session_key
-from ..maker.model import Graph, secret_refs
+from ..maker.model import Graph, secret_refs, graph_secret_refs
 from ..maker.storage import atomic
 from ..maker.variables import has_reference
 from .models import DispatcherError
@@ -47,7 +47,7 @@ class Catalog:
         project_id, version = snapshots.create(source)
         manifest, files = snapshots.read(version)
         graph = Graph.model_validate_json(files[manifest["main"]])
-        tokens = []
+        tokens, missing_refs = [], set()
         pending, visited = [manifest["main"]], set()
         while pending:
             name = pending.pop()
@@ -57,11 +57,14 @@ class Catalog:
                 raise DispatcherError("PROJECT_INVALID")
             visited.add(name)
             dependency = Graph.model_validate_json(files[name])
+            known = set()
             if dependency.secret_file:
                 sidecar = posixpath.join(posixpath.dirname(name), dependency.secret_file)
+                known.update(json.loads(files[sidecar])["tokens"])
                 tokens.extend(
                     base64.b64decode(v, validate=True) for v in json.loads(files[sidecar])["tokens"].values()
                 )
+            missing_refs.update(graph_secret_refs(dependency) - known)
             for node in dependency.nodes:
                 if node.type == "Project.Run":
                     value = node.params.get("path", "child.postergraph.json")
@@ -114,6 +117,7 @@ class Catalog:
             "version": version,
             "source": str(source),
             "inputs": inputs,
+            "secret_refs": sorted(missing_refs),
             "nodes": len(graph.nodes),
             "browser": any(
                 n.type.startswith("Browser.")

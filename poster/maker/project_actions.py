@@ -5,7 +5,7 @@ from typing import Any
 from pydantic import Field
 from .actions import Action
 from .action_fields import properties
-from .model import DataModel, GraphError, secret_refs
+from .model import DataModel, GraphError, secret_refs, graph_secret_refs
 from .resources import FileSandbox
 from .storage import load_graph
 from .variables import NAME
@@ -33,6 +33,11 @@ async def run_project(ctx, p):
     if child_path in ctx.ancestry:
         raise GraphError("PROJECT_RECURSION")
     graph, vault = load_graph(child_path)
+    # Explicit per-session bindings also resolve protected values in reachable
+    # child graphs. Keep the original child runner and its isolated variables.
+    for ref in graph_secret_refs(graph):
+        if ref not in vault.tokens and ref in ctx.vault.tokens:
+            vault.put_value(ctx.vault.get(ref), ref)
     if any(
         n.type.startswith("Browser.") or n.type == "Logic.If" and n.params.get("condition") != "equals"
         for n in graph.nodes

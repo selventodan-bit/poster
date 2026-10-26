@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import posixpath
 import shutil
 import uuid
 
@@ -26,6 +27,31 @@ def digest(raw):
 
 def canonical(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+
+
+def reachable_graphs(manifest, files):
+    """Metadata traversal of the original Project.Run dependency contract."""
+    from ..maker.model import Graph
+
+    pending, seen = [manifest["main"]], set()
+    while pending:
+        name = pending.pop()
+        if name in seen:
+            continue
+        if name not in files:
+            raise DispatcherError("SNAPSHOT_INVALID")
+        graph = Graph.model_validate_json(files[name])
+        seen.add(name)
+        yield name, graph
+        for node in graph.nodes:
+            if node.type == "Project.Run":
+                value = node.params.get("path", "child.postergraph.json")
+                if has_reference(value):
+                    pending.extend(n for n in files if n.endswith(".postergraph.json"))
+                elif isinstance(value, str):
+                    pending.append(
+                        posixpath.normpath(posixpath.join(posixpath.dirname(name), value.replace("\\", "/")))
+                    )
 
 
 class Snapshots:

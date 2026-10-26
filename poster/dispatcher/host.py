@@ -484,33 +484,69 @@ class Host:
                 )
                 for item in value["ids"]
             ]
+        if op == "validate_batch":
+            from .service import prepare_snapshot
+
+            for spec in value["items"]:
+                item = self.catalog.items[spec["id"]]
+                prepare_snapshot(
+                    self.store,
+                    item["project_id"],
+                    item["version"],
+                    inputs=spec.get("inputs"),
+                    secrets=spec.get("secrets"),
+                    secret_refs=spec.get("secret_refs"),
+                    project_key=item["project_key"],
+                )
+                if not 1 <= spec.get("timeout", 300) <= 86400:
+                    raise DispatcherError("PARAMETERS_INVALID")
+            return True
         if op == "enqueue_batch":
             if not 1 <= len(value["items"]) <= 100:
                 raise DispatcherError("PARAMETERS_INVALID")
+            counts = [item.get("count", 1) for item in value["items"]]
+            limits = [item.get("max_concurrent", 32) for item in value["items"]]
+            if (
+                any(type(c) is not int or not 1 <= c <= 1000 for c in counts)
+                or sum(counts) > 1000
+                or any(type(n) is not int or not 1 <= n <= 32 for n in limits)
+            ):
+                raise DispatcherError("PARAMETERS_INVALID")
+            self.store.reserve_admission(value["request_id"], {"items": value["items"]})
             jobs, errors = [], []
-            for item in value["items"]:
-                try:
-                    jobs.append(
-                        self.catalog.enqueue(
-                            item["id"],
-                            timeout=item.get("timeout", self.settings["timeout"]),
-                            inputs=item.get("inputs"),
-                            secrets=item.get("secrets"),
-                            profile_root=item.get("profile_root"),
-                            profile_id=item.get("profile_id"),
-                            profile_key_file=item.get("profile_key_file"),
-                            key=value["request_id"] + ":" + item["id"],
-                            agent_id=item.get("agent_id"),
-                            remote_outputs=item.get("remote_outputs", []),
+            ids = [item["id"] for item in value["items"]]
+            for index, item in enumerate(value["items"]):
+                group = value["request_id"] + ":" + str(index)
+                for instance in range(counts[index]):
+                    key = value["request_id"] + ":" + item["id"]
+                    if counts[index] > 1 or ids.count(item["id"]) > 1:
+                        key += ":" + str(index) + ":" + str(instance)
+                    try:
+                        jobs.append(
+                            self.catalog.enqueue(
+                                item["id"],
+                                timeout=item.get("timeout", self.settings["timeout"]),
+                                inputs=item.get("inputs"),
+                                secrets=item.get("secrets"),
+                                secret_refs=item.get("secret_refs"),
+                                profile_root=item.get("profile_root"),
+                                profile_id=item.get("profile_id"),
+                                profile_key_file=item.get("profile_key_file"),
+                                key=key,
+                                agent_id=item.get("agent_id"),
+                                remote_outputs=item.get("remote_outputs", []),
+                                batch_id=group if counts[index] > 1 or "max_concurrent" in item else None,
+                                batch_limit=limits[index],
+                            )
                         )
-                    )
-                except Exception as exc:
-                    errors.append(
-                        {
-                            "id": item["id"],
-                            "code": exc.code if isinstance(exc, DispatcherError) else "INPUT_INVALID",
-                        }
-                    )
+                    except Exception as exc:
+                        errors.append(
+                            {
+                                "id": item["id"],
+                                "instance": instance,
+                                "code": exc.code if isinstance(exc, DispatcherError) else "INPUT_INVALID",
+                            }
+                        )
             return {"jobs": jobs, "errors": errors}
         if op == "jobs":
             return self.jobs(**value)

@@ -307,3 +307,55 @@ raise SystemExit(main())
         if process.poll() is None:
             process.kill()
             process.wait(5)
+
+
+def test_five_real_copies_are_idempotent_and_keep_contexts_separate(host, tmp_path):
+    root, _ = host
+    with controlled_server() as (server, base):
+        item = register(
+            root,
+            tmp_path / "copies.postergraph.json",
+            [
+                ("HTTP.Post", {"url": base + "/hold/0"}),
+                ("Files.WriteText", {"path": "same.txt", "text": "five"}),
+            ],
+        )
+        request(root, "settings", max_workers=5, max_per_project=5, timeout=30)
+        items = [{"id": item["id"], "count": 5, "max_concurrent": 5}]
+        batch = request(root, "enqueue_batch", items=items, request_id="five-stable")
+        assert not batch["errors"] and len(set(batch["jobs"])) == 5
+        assert request(root, "enqueue_batch", items=items, request_id="five-stable") == batch
+        with pytest.raises(DispatcherError):
+            request(root, "enqueue_batch", items=[dict(items[0], count=6)], request_id="five-stable")
+        request(root, "start")
+        wait(lambda: len(server.calls) == 5)
+        histories = [request(root, "show", id=j)["history"][0] for j in batch["jobs"]]
+        assert len({h["pid"] for h in histories}) == 5
+        assert all(psutil.pid_exists(h["pid"]) for h in histories)
+        server.gates["0"].set()
+        wait(lambda: all(request(root, "show", id=j)["status"] == "SUCCEEDED" for j in batch["jobs"]))
+        paths = [Path(request(root, "show", id=j)["workdir"]) for j in batch["jobs"]]
+        assert len(set(paths)) == 5
+        assert all((p / "same.txt").read_text() == "five" for p in paths)
+        assert len(server.calls) == 5
+
+
+def test_batch_parallel_limit_preserves_queue_limit(host, tmp_path):
+    root, _ = host
+    with controlled_server() as (server, base):
+        item = register(
+            root, tmp_path / "limited.postergraph.json", [("HTTP.Get", {"url": base + "/hold/0"})]
+        )
+        request(root, "settings", max_workers=5, max_per_project=5, timeout=30)
+        batch = request(
+            root,
+            "enqueue_batch",
+            items=[{"id": item["id"], "count": 3, "max_concurrent": 1}],
+            request_id="bounded",
+        )
+        request(root, "start")
+        wait(lambda: len(server.calls) == 1)
+        assert [request(root, "show", id=j)["status"] for j in batch["jobs"]].count("PENDING") == 2
+        server.gates["0"].set()
+        wait(lambda: all(request(root, "show", id=j)["status"] == "SUCCEEDED" for j in batch["jobs"]))
+        assert len(server.calls) == 3

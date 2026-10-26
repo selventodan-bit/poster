@@ -129,6 +129,8 @@ async def execute(store, execution, owner, controls):
 
             stage_resources(graph, files, workdir)
         envelope = unseal(job["inputs_cipher"])
+        for ref, value in envelope.get("secret_refs", {}).items():
+            vault.put_value(value, ref)
         if envelope.get("project_key"):
             from ..auth import _legacy_keys
 

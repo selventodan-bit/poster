@@ -14,7 +14,16 @@ from .models import ACTIVE, MESSAGES, TERMINAL, TRANSITIONS, DispatcherError, St
 from .security import plain_path, private_dir, restrict
 
 APPLICATION_ID = 0x50445350
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
+
+MIGRATION_6 = """
+ALTER TABLE jobs ADD COLUMN batch_id TEXT;
+ALTER TABLE jobs ADD COLUMN batch_limit INTEGER NOT NULL DEFAULT 32 CHECK(batch_limit BETWEEN 1 AND 32);
+CREATE INDEX jobs_batch_status ON jobs(batch_id,status);
+CREATE TABLE admission_requests(id TEXT PRIMARY KEY,payload_cipher BLOB NOT NULL,created REAL NOT NULL);
+CREATE TABLE cloud_sources(project_id TEXT NOT NULL,snapshot_version TEXT NOT NULL,metadata_cipher BLOB NOT NULL,PRIMARY KEY(project_id,snapshot_version));
+CREATE TABLE cloud_results(mode TEXT NOT NULL,issuer TEXT NOT NULL,run_id TEXT NOT NULL,project_id TEXT NOT NULL,project_version TEXT NOT NULL,status TEXT NOT NULL,imported REAL NOT NULL,manifest_cipher BLOB NOT NULL,PRIMARY KEY(mode,issuer,run_id));
+"""
 
 MIGRATION_3 = """
 ALTER TABLE jobs ADD COLUMN agent_id TEXT;
@@ -110,7 +119,7 @@ class Store:
         tables = {r[0] for r in self.db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         app = self.db.execute("PRAGMA application_id").fetchone()[0]
         version = self.db.execute("PRAGMA user_version").fetchone()[0]
-        if (tables and (app != APPLICATION_ID or version not in (1, 2, 3, 4, SCHEMA_VERSION))) or (
+        if (tables and (app != APPLICATION_ID or version not in (1, 2, 3, 4, 5, SCHEMA_VERSION))) or (
             not tables and (app or version)
         ):
             raise DispatcherError("STORE_INVALID")
@@ -160,6 +169,11 @@ class Store:
                 self.db.execute(
                     "CREATE TABLE remote_pairings(id TEXT PRIMARY KEY,expires REAL NOT NULL,controller TEXT NOT NULL,profile_cipher BLOB NOT NULL,consumed TEXT)"
                 )
+                self.db.execute("PRAGMA user_version=5")
+            if self.db.execute("PRAGMA user_version").fetchone()[0] == 5:
+                for statement in MIGRATION_6.split(";"):
+                    if statement.strip():
+                        self.db.execute(statement)
                 self.db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
         for suffix in ("", "-wal", "-shm"):
             item = Path(str(self.path) + suffix)
@@ -196,6 +210,28 @@ class Store:
         row = self.db.execute("SELECT id FROM jobs WHERE dedup_hash=?", (dedup_hash(key),)).fetchone()
         return row[0] if row else None
 
+    def reserve_admission(self, request_id, payload):
+        """Persist an encrypted intent before per-item admission; safe after a crash."""
+        from .security import seal, unseal
+        from .snapshots import canonical
+
+        if not isinstance(request_id, str) or not 1 <= len(request_id) <= 200:
+            raise DispatcherError("PARAMETERS_INVALID")
+        raw = canonical(payload)
+        if len(raw) > 1_000_000:
+            raise DispatcherError("INPUT_INVALID")
+        with self.transaction():
+            previous = self.db.execute(
+                "SELECT payload_cipher FROM admission_requests WHERE id=?", (request_id,)
+            ).fetchone()
+            if previous:
+                if canonical(unseal(previous[0])) != raw:
+                    raise DispatcherError("PARAMETERS_INVALID")
+            else:
+                self.db.execute(
+                    "INSERT INTO admission_requests VALUES(?,?,?)", (request_id, seal(payload), time.time())
+                )
+
     def enqueue(
         self,
         project_id,
@@ -208,6 +244,8 @@ class Store:
         timeout=300,
         agent_id=None,
         remote_outputs=(),
+        batch_id=None,
+        batch_limit=32,
     ):
         with self.transaction():
             return self._enqueue(
@@ -220,6 +258,8 @@ class Store:
                 timeout=timeout,
                 agent_id=agent_id,
                 remote_outputs=remote_outputs,
+                batch_id=batch_id,
+                batch_limit=batch_limit,
             )
 
     def _enqueue(
@@ -234,9 +274,17 @@ class Store:
         timeout=300,
         agent_id=None,
         remote_outputs=(),
+        batch_id=None,
+        batch_limit=32,
     ):
         """Caller owns BEGIN IMMEDIATE, including any schedule event and cursor update."""
         if not 0.05 <= timeout <= 86400:
+            raise DispatcherError("PARAMETERS_INVALID")
+        if (
+            type(batch_limit) is not int
+            or not 1 <= batch_limit <= 32
+            or (batch_id is not None and (not isinstance(batch_id, str) or len(batch_id) > 300))
+        ):
             raise DispatcherError("PARAMETERS_INVALID")
         if agent_id:
             from poster.remote.registry import validate_target, output_names
@@ -253,7 +301,7 @@ class Store:
             "INSERT OR IGNORE INTO projects VALUES(?,?,?,?)", (project_id, version, str(source), now)
         )
         self.db.execute(
-            "INSERT INTO jobs(id,project_id,version,inputs_cipher,input_names,dedup_hash,status,timeout,created,updated) VALUES(?,?,?,?,?,?,'PENDING',?,?,?)",
+            "INSERT INTO jobs(id,project_id,version,inputs_cipher,input_names,dedup_hash,status,timeout,created,updated,batch_id,batch_limit) VALUES(?,?,?,?,?,?,'PENDING',?,?,?,?,?)",
             (
                 job_id,
                 project_id,
@@ -264,6 +312,8 @@ class Store:
                 timeout,
                 now,
                 now,
+                batch_id,
+                batch_limit,
             ),
         )
         self.db.execute(
@@ -336,7 +386,7 @@ class Store:
             row = self.db.execute(
                 "SELECT * FROM jobs j WHERE status='PENDING' AND (agent_id IS NULL OR EXISTS(SELECT 1 FROM remote_agents a WHERE a.id=j.agent_id AND a.state='TRUSTED' AND coalesce(json_extract(a.capabilities,'$.phase'),'RUNNING')='RUNNING' AND a.last_seen>"
                 + str(time.time() - LEASE)
-                + ")) AND NOT (EXISTS(SELECT 1 FROM schedule_events se WHERE se.job_id=j.id) AND EXISTS(SELECT 1 FROM jobs u LEFT JOIN schedule_reviews r ON r.job_id=u.id WHERE u.project_id=j.project_id AND u.status IN ('UNKNOWN','REVIEW_REQUIRED') AND r.job_id IS NULL)) AND (SELECT count(*) FROM jobs a WHERE a.project_id=j.project_id AND a.status IN ('LEASED','RUNNING'))<? ORDER BY created LIMIT 1",
+                + ")) AND NOT (EXISTS(SELECT 1 FROM schedule_events se WHERE se.job_id=j.id) AND EXISTS(SELECT 1 FROM jobs u LEFT JOIN schedule_reviews r ON r.job_id=u.id WHERE u.project_id=j.project_id AND u.status IN ('UNKNOWN','REVIEW_REQUIRED') AND r.job_id IS NULL)) AND (SELECT count(*) FROM jobs a WHERE a.project_id=j.project_id AND a.status IN ('LEASED','RUNNING'))<? AND (j.batch_id IS NULL OR (SELECT count(*) FROM jobs b WHERE b.batch_id=j.batch_id AND b.status IN ('LEASED','RUNNING'))<j.batch_limit) ORDER BY created LIMIT 1",
                 (max_per_project,),
             ).fetchone()
             if row is None:

@@ -7,13 +7,13 @@ import uuid
 
 from filelock import FileLock, Timeout
 
-from ..maker.model import Graph, secret_refs
+from ..maker.model import Graph, secret_refs as secret_references, graph_secret_refs
 from ..maker.variables import Variables
 from ..maker.storage import Vault
 from .models import ACTIVE, DispatcherError, Status
 from .processes import WorkerProcess, terminate_tree, reap_detached
 from .security import key_setup, plain_path, seal
-from .snapshots import Snapshots, digest
+from .snapshots import Snapshots, digest, reachable_graphs
 
 
 def enqueue(
@@ -22,6 +22,7 @@ def enqueue(
     *,
     inputs=None,
     secrets=None,
+    secret_refs=None,
     key=None,
     timeout=300,
     profile_root=None,
@@ -42,6 +43,7 @@ def enqueue(
         source,
         inputs=inputs,
         secrets=secrets,
+        secret_refs=secret_refs,
         key=key,
         timeout=timeout,
         profile_root=profile_root,
@@ -59,6 +61,7 @@ def enqueue_snapshot(
     *,
     inputs=None,
     secrets=None,
+    secret_refs=None,
     key=None,
     timeout=300,
     profile_root=None,
@@ -67,6 +70,8 @@ def enqueue_snapshot(
     profile_key_file=None,
     agent_id=None,
     remote_outputs=(),
+    batch_id=None,
+    batch_limit=32,
 ):
     """Admit the inspected immutable version, never recapture a moving source."""
     if key is not None and (previous := store.find_key(key)):
@@ -79,6 +84,7 @@ def enqueue_snapshot(
         version,
         inputs=inputs,
         secrets=secrets,
+        secret_refs=secret_refs,
         profile_root=profile_root,
         profile_id=profile_id,
         project_key=project_key,
@@ -94,6 +100,8 @@ def enqueue_snapshot(
         timeout=timeout,
         agent_id=agent_id,
         remote_outputs=remote_outputs,
+        batch_id=batch_id,
+        batch_limit=batch_limit,
     )
 
 
@@ -104,6 +112,7 @@ def prepare_snapshot(
     *,
     inputs=None,
     secrets=None,
+    secret_refs=None,
     profile_root=None,
     profile_id=None,
     project_key=None,
@@ -115,16 +124,26 @@ def prepare_snapshot(
     if manifest["project_id"] != project_id:
         raise DispatcherError("SNAPSHOT_INVALID")
     graph = Graph.model_validate_json(files[manifest["main"]])
-    inputs, secrets = inputs or {}, secrets or {}
+    inputs, secrets, secret_refs = inputs or {}, secrets or {}, secret_refs or {}
     if set(inputs) & set(secrets):
         raise DispatcherError("INPUT_INVALID")
     try:
-        if len(json.dumps([inputs, secrets], allow_nan=False).encode()) > 1_000_000:
+        if len(json.dumps([inputs, secrets, secret_refs], allow_nan=False).encode()) > 1_000_000:
             raise ValueError()
         vault = Vault()
+        required, available = set(), set()
+        for name, dependency in reachable_graphs(manifest, files):
+            required.update(graph_secret_refs(dependency))
+            if dependency.secret_file:
+                sidecar = str(Path(name).parent / dependency.secret_file).replace("\\", "/")
+                available.update(json.loads(files[sidecar])["tokens"])
+        if not set(secret_refs) <= required or not required <= available | set(secret_refs):
+            raise ValueError()
+        for ref, value in secret_refs.items():
+            vault.put_value(value, ref)
         validated = dict(inputs)
         for name, value in inputs.items():
-            if name in graph.variables and graph.variables[name].secret and not secret_refs(value):
+            if name in graph.variables and graph.variables[name].secret and not secret_references(value):
                 raise ValueError()
         for name, value in secrets.items():
             validated[name] = vault.put_value(value)
@@ -132,6 +151,8 @@ def prepare_snapshot(
     except Exception as exc:
         raise DispatcherError("INPUT_INVALID") from exc
     envelope = {"inputs": inputs, "secrets": secrets}
+    if secret_refs:
+        envelope["secret_refs"] = secret_refs
     if project_key:
         from cryptography.fernet import Fernet
 

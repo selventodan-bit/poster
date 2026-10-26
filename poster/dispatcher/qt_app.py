@@ -232,6 +232,23 @@ class InputsDialog(QDialog):
             line.addWidget(kind)
             form.addRow(definition["name"] + (" *" if definition["required"] else ""), row)
             self.fields.append((definition, enabled, edit, kind, boolean))
+        self.references = {}
+        for ref in item.get("secret_refs", []):
+            edit = QLineEdit()
+            edit.setObjectName("secret_ref_" + ref)
+            edit.setEchoMode(QLineEdit.EchoMode.Password)
+            form.addRow("Защищённое значение " + ref, edit)
+            self.references[ref] = edit
+        self.copies, self.parallel = QSpinBox(), QSpinBox()
+        self.copies.setObjectName("job_copies")
+        self.parallel.setObjectName("job_parallel")
+        self.copies.setRange(1, 1000)
+        self.parallel.setRange(1, 32)
+        self.copies.setValue(1)
+        self.parallel.setValue(1)
+        if target is None:
+            form.addRow("Всего запусков", self.copies)
+            form.addRow("Одновременно, не выше лимитов очереди", self.parallel)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setWidget(content)
@@ -253,6 +270,7 @@ class InputsDialog(QDialog):
     def validate(self):
         try:
             self.values()
+            self.reference_values()
             self.remote_target.values()
         except DispatcherError as exc:
             self.error.setText(MESSAGES[exc.code])
@@ -287,6 +305,11 @@ class InputsDialog(QDialog):
             elif definition["required"] and not definition.get("has_default"):
                 raise ValueError()
         return inputs, secrets
+
+    def reference_values(self):
+        if any(not edit.text() for edit in self.references.values()):
+            raise ValueError()
+        return {ref: edit.text() for ref, edit in self.references.items()}
 
 
 class DispatcherWindow(QMainWindow):
@@ -1105,6 +1128,9 @@ class DispatcherWindow(QMainWindow):
                     **dialog.remote_target.values(),
                     "inputs": inputs,
                     "secrets": secrets,
+                    "secret_refs": dialog.reference_values(),
+                    "count": dialog.copies.value(),
+                    "max_concurrent": dialog.parallel.value(),
                     "timeout": dialog.timeout.value(),
                     "profile_root": str(Path(dialog.profile_path.text()).parent)
                     if dialog.profile_path.text()
