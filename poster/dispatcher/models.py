@@ -26,6 +26,7 @@ TRANSITIONS = {
 }
 
 MESSAGES = {
+    "REMOTE_CHANNEL": "Канал relay уже привязан к Agent. Оператор должен выдать отдельный канал и новые credentials.",
     "REMOTE_TLS": "TLS-сертификат или hostname relay не прошёл проверку. Проверьте DNS, срок и доверенный CA.",
     "REMOTE_NETWORK": "Relay недоступен: проверьте DNS, HTTPS-порт и сеть.",
     "REMOTE_AUTH": "Relay отказал в авторизации. Проверьте приватный профиль нужной роли и канала.",

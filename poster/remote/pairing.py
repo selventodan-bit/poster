@@ -102,6 +102,10 @@ def finish_offer(store, registration_file, expected_agent):
             store.db.execute("UPDATE remote_pairings SET consumed=? WHERE id=?", (result, row["id"]))
             return result
     except Exception as exc:
-        if isinstance(exc, DispatcherError) and exc.code == "REMOTE_FINGERPRINT":
+        if isinstance(exc, DispatcherError) and exc.code in {
+            "REMOTE_FINGERPRINT",
+            "REMOTE_CHANNEL",
+            "REMOTE_LIMIT",
+        }:
             raise
         raise DispatcherError("REMOTE_PAIRING") from exc

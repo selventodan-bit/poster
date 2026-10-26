@@ -713,18 +713,18 @@ jobs:
           python-version: '3.12'
       - run: uv sync --frozen --extra dev --extra recorder
       - name: Build hash-pinned offline headless release from the exact clean SHA
-        run: uv run --no-sync python scripts/build_remote_release.py --output release-linux --wheelhouse
+        run: uv run --no-sync python scripts/build_remote_release.py --output release/linux --wheelhouse
       - name: Build actual earlier 5B version for the upgrade test
-        run: uv run --no-sync python scripts/build_remote_release.py --output release-linux-previous --revision ca4a0e8a1876ba4b4ec81f2834bc9816e6b5e5a2 --wheelhouse
+        run: uv run --no-sync python scripts/build_remote_release.py --output release/linux-previous --revision ca4a0e8a1876ba4b4ec81f2834bc9816e6b5e5a2 --wheelhouse
       - uses: actions/upload-artifact@v4
         with:
           name: poster-linux
-          path: release-linux/
+          path: release/linux/
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
           name: poster-linux-previous-upgrade-fixture
-          path: release-linux-previous/
+          path: release/linux-previous/
           if-no-files-found: error
 
   remote-linux-deployment:
@@ -732,8 +732,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
-      POSTER_LINUX_RELEASE: release-linux/poster-linux.tar.gz
-      POSTER_PREVIOUS_LINUX_RELEASE: release-linux-previous/poster-linux.tar.gz
+      POSTER_LINUX_RELEASE: release/linux/poster-linux.tar.gz
+      POSTER_PREVIOUS_LINUX_RELEASE: release/linux-previous/poster-linux.tar.gz
       POSTER_PREVIOUS_COMMIT: ca4a0e8a1876ba4b4ec81f2834bc9816e6b5e5a2
       POSTER_TEST_SYSTEMD: '1'
     steps:
@@ -746,13 +746,13 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: poster-linux
-          path: release-linux
+          path: release/linux
       - uses: actions/download-artifact@v4
         with:
           name: poster-linux-previous-upgrade-fixture
-          path: release-linux-previous
+          path: release/linux-previous
       - name: Actual non-root systemd Agent and Relay offline install graph stop restart update and remove
-        run: uv run --no-sync python -m pytest -q -s tests/remote_deployment_e2e.py --junitxml=.poster/remote-deployment.xml
+        run: uv run --no-sync python -m pytest -q -s tests/remote_deployment_e2e.py tests/remote_crosshost_peer.py --junitxml=.poster/remote-deployment.xml
       - if: always()
         run: uv run --no-sync python scripts/summarize_pytest.py .poster/remote-deployment.xml .poster/remote-deployment-tests.json --label 'Installed Linux systemd services'
       - uses: actions/upload-artifact@v4
@@ -762,5 +762,25 @@ jobs:
           path: |
             .poster/remote-deployment-tests.json
             .poster/remote-deployment-report.json
+          include-hidden-files: true
+          if-no-files-found: error
+
+  remote-crosshost-harness:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Package repeatable trusted-infrastructure harness with an honest outstanding criterion
+        run: python scripts/check_remote_crosshost.py --not-executed --output .poster/remote-crosshost
+      - uses: actions/upload-artifact@v4
+        with:
+          name: remote-crosshost-NOT_EXECUTED
+          path: |
+            .poster/remote-crosshost/report.json
+            scripts/check_remote_crosshost.py
+            scripts/crosshost/linux_peer.py
           include-hidden-files: true
           if-no-files-found: error

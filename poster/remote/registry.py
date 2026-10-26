@@ -108,6 +108,17 @@ class Registry:
                 >= 32
             ):
                 raise DispatcherError("REMOTE_LIMIT")
+            # One opaque mailbox role belongs to one pinned Agent, including revoked pins.
+            # Reusing a channel could let a second Agent drain the first Agent's envelopes.
+            destination = urlsplit(relay["url"])
+            for row in self.db.execute("SELECT relay_cipher FROM remote_agents"):
+                other = unseal(row[0])
+                origin = urlsplit(other["url"])
+                if other["channel"] == relay["channel"] and (origin.hostname, origin.port or 443) == (
+                    destination.hostname,
+                    destination.port or 443,
+                ):
+                    raise DispatcherError("REMOTE_CHANNEL")
             previous = self.db.execute("SELECT peer FROM remote_agents WHERE id=?", (peer["id"],)).fetchone()
             if previous:
                 raise DispatcherError("REMOTE_IDENTITY")  # Never silently replace pins/credentials.

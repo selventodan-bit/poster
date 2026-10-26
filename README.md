@@ -1,4 +1,6 @@
-# Poster 3.0 — ProjectMaker + Dispatcher, этап 5A
+# Poster 3.0 — ProjectMaker + Dispatcher, этап 5B
+
+**Remote deployment 5B:** [установка Agent/Relay, мастер подключения, диагностика и статус Windows/Linux проверки](docs/POSTER_STAGE5B_REMOTE_DEPLOYMENT.md).
 
 **Remote Linux Agent 5A:** [TLS relay, подключение доверенного Agent, секреты и recovery](docs/POSTER_STAGE5A_REMOTE_LINUX_WORKER.md).
 

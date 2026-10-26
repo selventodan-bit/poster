@@ -150,3 +150,35 @@ def test_real_tls_diagnostics_classify_without_exposing_credentials(pairing, fai
         assert config["token"] not in str(error.value)
     finally:
         client.close()
+
+
+def test_real_relay_rejects_incompatible_protocol_after_authentication(pairing):
+    p = pairing
+    config = read_json(p["relay"] / "controller-relay.json")
+    client = Client(config, "controller")
+    try:
+        value = client.http.post(
+            config["url"] + "/v1/probe",
+            json=dict(protocol=2, channel=config["channel"], role="controller"),
+            headers={"Authorization": "Bearer " + config["token"]},
+        )
+        assert value.status_code == 426 and value.json()["code"] == "REMOTE_VERSION"
+    finally:
+        client.close()
+
+
+def test_second_agent_cannot_reuse_mailbox_channel_even_after_revocation(pairing):
+    p = pairing
+    first = agent_pair(p["root"], "First", p["offer"], p["info"]["controller"])
+    finish_offer(p["store"], p["root"] / "registration.json", first)
+    registry = Registry(p["store"])
+    registration = read_json(p["root"] / "registration.json")
+    registration["peer"] = Identity().public()
+    relay = read_json(p["relay"] / "controller-relay.json")
+    for revoke in (False, True):
+        if revoke:
+            registry.revoke(first)
+        with pytest.raises(DispatcherError) as error:
+            registry.register(registration, relay)
+        assert error.value.code == "REMOTE_CHANNEL"
+    assert len(registry.rows()) == 1

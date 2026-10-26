@@ -237,7 +237,9 @@ async def execute(store, execution, owner, controls):
     finally:
         if runner:
             try:
-                await asyncio.wait_for(runner.close(), 3)
+                # Chromium/Playwright shutdown on a loaded Windows host can exceed 3s.
+                # Cancellation and lost-lease process watchdogs keep their existing bounds.
+                await asyncio.wait_for(runner.close(), 10)
             except BaseException as exc:
                 state, code = Status.UNKNOWN, "PROCESS_CONTROL_FAILED"
                 cleanup_failure = {"phase": "runner_close", "type": type(exc).__name__}

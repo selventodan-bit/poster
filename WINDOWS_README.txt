@@ -1,4 +1,4 @@
-Poster 3.0 — ProjectMaker + Dispatcher, этап 5A (Windows 10/11 x64)
+Poster 3.0 — ProjectMaker + Dispatcher, этап 5B (Windows 10/11 x64)
 
 DISPATCHER (Full): двойной щелчок PosterDispatcher.exe или кнопка Dispatcher в Maker.
 Добавить проект… → выбрать сохранённый .postergraph.json → В очередь → заполнить
@@ -8,7 +8,13 @@ DISPATCHER (Full): двойной щелчок PosterDispatcher.exe или кн�
 (дождаться активных) либо Завершить службу. Следующий запуск окна подключается к службе.
 UNKNOWN / Нужна ручная проверка не повторяются автоматически: проверьте внешний сайт.
 
-УДАЛЁННЫЕ WORKERS (5A, Full): в отдельной вкладке экспортируйте публичную
+УДАЛЁННЫЕ WORKERS (5B, Full): «Подключить Linux Agent пошагово…» проверяет TLS,
+экспортирует приватный offer на 15 минут, сверяет Agent fingerprint перед импортом
+и отдельно запрашивает доверие. ONLINE требует подписанного heartbeat; тестовый
+граф возвращает файл и SHA256. Установка Linux/systemd, ошибки и пределы:
+docs/POSTER_STAGE5B_REMOTE_DEPLOYMENT.md. Windows/Linux cross-host пока NOT_EXECUTED.
+
+Прежний ручной workflow 5A: в отдельной вкладке экспортируйте публичную
 идентичность Controller, загрузите registration.json Linux Agent и приватный
 controller-relay.json, сравните полный ID и явно подтвердите доверие. Agent и
 Controller подключаются исходящим HTTPS к отдельно развёрнутому TLS relay.

@@ -67,7 +67,11 @@ class Client:
                     raise DispatcherError("REMOTE_AUTH")
                 if response.status_code != 200:
                     raise DispatcherError(
-                        "REMOTE_LIMIT" if response.status_code == 429 else "REMOTE_PROTOCOL"
+                        "REMOTE_LIMIT"
+                        if response.status_code == 429
+                        else "REMOTE_VERSION"
+                        if response.status_code == 426
+                        else "REMOTE_PROTOCOL"
                     )
                 chunks = []
                 size = 0
@@ -132,11 +136,7 @@ def server(configuration, database, cert, key, *, host="127.0.0.1", port=0):
                     raise ValueError()
                 value = json.loads(self.rfile.read(length))
                 channel, role = value["channel"], value["role"]
-                if (
-                    type(value["protocol"]) is not int
-                    or value["protocol"] != 1
-                    or role not in {"agent", "controller"}
-                ):
+                if role not in {"agent", "controller"}:
                     raise ValueError()
                 expected = credentials.get(channel, {}).get(role, "")
                 token = self.headers.get("Authorization", "")
@@ -144,6 +144,9 @@ def server(configuration, database, cert, key, *, host="127.0.0.1", port=0):
                     hashlib.sha256(token.removeprefix("Bearer ").encode()).hexdigest(), expected
                 ):
                     status = 403
+                    raise ValueError()
+                if type(value["protocol"]) is not int or value["protocol"] != 1:
+                    status, answer = 426, {"code": "REMOTE_VERSION"}
                     raise ValueError()
                 if self.path == "/v1/probe":
                     raw = raw_json({"protocol": 1, "ready": True})
