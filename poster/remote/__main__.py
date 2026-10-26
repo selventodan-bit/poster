@@ -32,6 +32,17 @@ def main():
     init.add_argument("--relay-profile", type=Path, required=True)
     agent = sub.add_parser("agent")
     agent.add_argument("--root", type=Path, required=True)
+    pair = sub.add_parser("pair")
+    pair.add_argument("--root", type=Path, required=True)
+    pair.add_argument("--name", required=True)
+    pair.add_argument("--offer", type=Path, required=True)
+    pair.add_argument("--expect-controller", required=True)
+    for name in ("doctor", "status", "serve"):
+        command = sub.add_parser(name)
+        command.add_argument("--root", type=Path, required=True)
+        command.add_argument("--role", choices=("agent", "relay"), required=True)
+        if name == "doctor":
+            command.add_argument("--network", action="store_true")
     args = parser.parse_args()
     try:
         if args.command == "tls-init":
@@ -61,10 +72,33 @@ def main():
             from .setup import agent_init
 
             agent_init(args.root, args.name, args.controller, args.relay_profile)
+        elif args.command == "pair":
+            from .pairing import agent_pair
+
+            agent_pair(args.root, args.name, args.offer, args.expect_controller)
+        elif args.command in {"doctor", "status"}:
+            import json
+            from .diagnostics import doctor
+            from .service import status
+
+            value = (
+                status(args.root, args.role)
+                if args.command == "status"
+                else doctor(args.root, args.role, network=args.network)
+            )
+            print(json.dumps(value))
+            return 0 if value["ready"] else 2
+        elif args.command == "serve":
+            from .service import serve
+
+            serve(args.root, args.role)
         elif args.command == "agent":
             from .agent import Agent
+            import signal
 
-            Agent(args.root).run()
+            agent = Agent(args.root)
+            signal.signal(signal.SIGTERM, lambda *_: setattr(agent, "done", True))
+            agent.run()
         return 0
     except KeyboardInterrupt:
         return 0

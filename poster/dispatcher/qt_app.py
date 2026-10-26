@@ -463,6 +463,7 @@ class DispatcherWindow(QMainWindow):
         layout.addWidget(note)
 
     def build_remote_agents(self):
+        self.pairing_dialog = None
         panel = QWidget()
         layout = QVBoxLayout(panel)
         self.remote_agents_model = TableModel(
@@ -483,6 +484,11 @@ class DispatcherWindow(QMainWindow):
         )
         self.remote_agents = self.table("remote_agents_table", self.remote_agents_model)
         layout.addWidget(self.remote_agents)
+        guided = QHBoxLayout()
+        self.button("remote_pairing", "Подключить Linux Agent пошагово…", self.remote_pairing, guided)
+        self.button("remote_diagnose", "Проверить соединение", self.remote_diagnose, guided)
+        self.button("remote_check", "Безопасное тестовое задание", self.remote_check, guided)
+        layout.addLayout(guided)
         actions = QHBoxLayout()
         self.button("remote_export", "Ключ Controller…", self.remote_export, actions)
         self.button("remote_register", "Загрузить заявку…", self.remote_register, actions)
@@ -495,6 +501,22 @@ class DispatcherWindow(QMainWindow):
         note.setWordWrap(True)
         layout.addWidget(note)
         self.tabs.addTab(panel, "Удалённые Workers")
+
+    def remote_pairing(self):
+        from .pairing_dialog import PairingDialog
+
+        self.pairing_dialog = PairingDialog(self)
+        self.pairing_dialog.show()
+
+    def remote_diagnose(self):
+        rows = self.selected(self.remote_agents)
+        if rows:
+            self.call("remote_diagnose", id=rows[0]["id"])
+
+    def remote_check(self):
+        rows = self.selected(self.remote_agents)
+        if rows:
+            self.call("remote_test", id=rows[0]["id"])
 
     def remote_export(self):
         path, _ = QFileDialog.getSaveFileName(
@@ -801,6 +823,8 @@ class DispatcherWindow(QMainWindow):
     def completed(self, label, reply, context):
         self.busy = False
         value, error = reply
+        if label == "remote_wizard" and context:
+            context.consume(value, error)
         if error:
             self.last_error = error
             self.banner.setText(MESSAGES[error])
@@ -898,6 +922,26 @@ class DispatcherWindow(QMainWindow):
                 self.details.setPlainText(
                     f"Добавлено заданий: {len(value['jobs'])}. "
                     + " ".join(MESSAGES[e["code"]] for e in value["errors"])
+                )
+            elif label == "remote_diagnose":
+                self.details.setPlainText(
+                    "Relay: "
+                    + str(value["relay"])
+                    + " · TLS: "
+                    + str(value["tls_verified"])
+                    + " · Agent online: "
+                    + str(value["online"])
+                    + " · свободно слотов: "
+                    + str(value["free_slots"])
+                    + "\n"
+                    + "\n".join(value["messages"])
+                )
+            elif label == "remote_test":
+                self.tabs.setCurrentIndex(1)
+                self.details.setPlainText(
+                    "Безопасный тест в общей очереди: "
+                    + value["job"]
+                    + "\nПосле SUCCEEDED выберите задание и откройте рабочую папку."
                 )
             elif label == "shutdown":
                 self.connected = False

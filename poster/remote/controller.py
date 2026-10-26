@@ -97,6 +97,9 @@ class Controller:
         ):
             return
         if kind == "heartbeat":
+            from .diagnostics import validate_capabilities
+
+            capabilities = validate_capabilities(value["capabilities"]) if "capabilities" in value else {}
             if (
                 not re.fullmatch(r"[A-Za-z0-9_.-]{1,40}", str(value.get("version", "")))
                 or value.get("os") != "linux"
@@ -109,6 +112,10 @@ class Controller:
                 self.store.db.execute(
                     "UPDATE remote_agents SET last_seen=max(last_seen,?),last_error='',os='linux',version=?,protocol=1 WHERE id=? AND state='TRUSTED'",
                     (min(time.time(), packet["issued"]), str(value["version"])[:40], agent["id"]),
+                )
+                self.store.db.execute(
+                    "UPDATE remote_agents SET capabilities=? WHERE id=?",
+                    (json.dumps(capabilities), agent["id"]),
                 )
                 for entry in value["runs"]:
                     rr = self.store.is_remote(entry["run_id"])
@@ -464,10 +471,10 @@ class Controller:
                                 acknowledgements.append(packet["id"])
                             if acknowledgements:
                                 client.exchange(acknowledgements=acknowledgements)
-                        except DispatcherError:
+                        except DispatcherError as exc:
                             self.store.db.execute(
-                                "UPDATE remote_agents SET last_error='REMOTE_TRANSPORT' WHERE id=?",
-                                (agent["id"],),
+                                "UPDATE remote_agents SET last_error=? WHERE id=?",
+                                (exc.code, agent["id"]),
                             )
                     self.store.db.execute("DELETE FROM remote_seen WHERE expires<?", (time.time() - 3,))
                     self.done.wait(0.25)

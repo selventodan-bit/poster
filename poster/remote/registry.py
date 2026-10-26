@@ -125,7 +125,9 @@ class Registry:
             )
         return peer["id"]
 
-    def approve(self, agent_id):
+    def approve(self, agent_id, fingerprint=None):
+        if fingerprint is not None and fingerprint != agent_id:
+            raise DispatcherError("REMOTE_FINGERPRINT")
         with self.store.transaction():
             if not self.db.execute(
                 "UPDATE remote_agents SET state='TRUSTED' WHERE id=? AND state='PENDING'", (agent_id,)
@@ -171,12 +173,16 @@ class Registry:
         return [
             {
                 **dict(r),
-                "online": running and r["state"] == "TRUSTED" and time.time() - r["last_seen"] < LEASE,
+                "capabilities": json.loads(r["capabilities"]),
+                "online": running
+                and r["state"] == "TRUSTED"
+                and time.time() - r["last_seen"] < LEASE
+                and json.loads(r["capabilities"]).get("phase", "RUNNING") == "RUNNING",
                 "active": active.get(r["id"], 0),
                 "projects": sorted(projects.get(r["id"], set())),
             }
             for r in self.db.execute(
-                "SELECT id,name,state,last_seen,os,version,protocol,last_error FROM remote_agents ORDER BY name LIMIT 1000"
+                "SELECT id,name,state,last_seen,os,version,protocol,last_error,capabilities FROM remote_agents ORDER BY name LIMIT 1000"
             )
         ]
 

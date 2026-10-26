@@ -307,6 +307,8 @@ class Agent:
                     del self.workers[run_id]
 
     def run(self):
+        from .diagnostics import capabilities
+
         with FileLock(str(self.root / "agent.lock"), timeout=0):
             self.recover()
             try:
@@ -317,6 +319,7 @@ class Agent:
                         os="linux",
                         version="5A.1",
                         protocol=1,
+                        capabilities=capabilities(self.root),
                         runs=[
                             dict(
                                 run_id=key,
@@ -350,8 +353,8 @@ class Agent:
                                 self.error = "REMOTE_PROTOCOL"
                             self.acks.append(packet["id"])
                         self.error = ""
-                    except DispatcherError:
-                        self.error = "REMOTE_TRANSPORT"
+                    except DispatcherError as exc:
+                        self.error = exc.code
                     safe_json(
                         self.root / "status.json",
                         dict(
@@ -360,10 +363,32 @@ class Agent:
                             active=len(self.workers),
                             error=self.error,
                             pid=os.getpid(),
+                            birth=psutil.Process().create_time(),
+                            at=time.time(),
+                            phase="RUNNING",
                         ),
                     )
                     time.sleep(0.25)
             finally:
+                try:
+                    self.client.exchange(
+                        [
+                            pack(
+                                self.identity,
+                                self.peer,
+                                dict(
+                                    kind="heartbeat",
+                                    os="linux",
+                                    version="5A.1",
+                                    protocol=1,
+                                    capabilities=capabilities(self.root, phase="STOPPED"),
+                                    runs=[],
+                                ),
+                            )
+                        ]
+                    )
+                except DispatcherError:
+                    pass
                 for worker in self.workers.values():
                     self.cancel(worker, "DISPATCHER_LOST")
                 for run_id, worker in self.workers.items():
@@ -371,3 +396,15 @@ class Agent:
                     reap_detached(run_id, worker["birth"])
                 self.client.close()
                 self.journal.close()
+                safe_json(
+                    self.root / "status.json",
+                    dict(
+                        id=self.identity.public()["id"],
+                        pid=os.getpid(),
+                        birth=psutil.Process().create_time(),
+                        at=time.time(),
+                        phase="STOPPED",
+                        active=0,
+                        error=self.error,
+                    ),
+                )

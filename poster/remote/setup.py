@@ -73,6 +73,9 @@ def relay_profiles(root, url, ca=None):
             }
         ),
     )
+    safe_json(
+        root / "pairing-relay.json", {role: read_json(root / (role + "-relay.json")) for role in values}
+    )
     return channel
 
 
@@ -84,7 +87,7 @@ def agent_init(root, name, controller_file, relay_file):
         return _agent_init(root, name, controller_file, relay_file)
 
 
-def _agent_init(root, name, controller_file, relay_file):
+def _agent_init(root, name, controller_file, relay_file, *, controller=None, relay=None):
     from cryptography.fernet import Fernet
 
     root = private_dir(root)
@@ -95,8 +98,8 @@ def _agent_init(root, name, controller_file, relay_file):
     from .journal import Journal
     from .protocol import validate_peer
 
-    controller = validate_peer(read_json(controller_file))
-    relay = profile(read_json(relay_file))
+    controller = validate_peer(controller if controller is not None else read_json(controller_file))
+    relay = profile(relay if relay is not None else read_json(relay_file))
     identity = Identity()
     storage_key = Fernet.generate_key()
     Journal(root, storage_key, create=True).close()

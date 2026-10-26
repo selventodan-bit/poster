@@ -336,12 +336,36 @@ class Host:
             registry = Registry(self.store)
             if op == "remote_identity":
                 return registry.export_identity(value["path"])
+            if op == "remote_public":
+                return registry.identity().public()
+            if op == "remote_pairing_export":
+                from poster.remote.pairing import export_offer
+
+                return export_offer(
+                    self.store, value["operator_file"], value["url"], Path(value["destination"])
+                )
+            if op == "remote_pairing_finish":
+                from poster.remote.pairing import finish_offer
+
+                return finish_offer(self.store, value["registration"], value["fingerprint"])
+            if op == "remote_diagnose":
+                from poster.remote.diagnostics import connection
+
+                return connection(self.store, value["id"], self.settings)
+            if op == "remote_test":
+                from .remote_check import enqueue_check
+
+                return enqueue_check(self, value["id"])
+            if op == "remote_test_status":
+                from .remote_check import check_status
+
+                return check_status(self, value["job"])
             if op == "remote_register":
                 return registry.register(read_json(value["registration"]), read_json(value["relay_profile"]))
             if op == "remote_agents":
                 return registry.rows()
             if op == "remote_approve":
-                result = registry.approve(value["id"])
+                result = registry.approve(value["id"], value.get("fingerprint"))
                 self.start()
                 return result
             if op == "remote_revoke":

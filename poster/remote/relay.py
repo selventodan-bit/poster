@@ -7,6 +7,7 @@ import json
 import sqlite3
 import socket
 import ssl
+import sys
 import threading
 import time
 
@@ -31,6 +32,16 @@ class Client:
         self.http.close()
 
     def exchange(self, messages=(), acknowledgements=()):
+        return self._request("/v1/exchange", messages, acknowledgements)["messages"]
+
+    def probe(self):
+        """Authenticated non-destructive TLS check; never consumes peer messages."""
+        value = self._request("/v1/probe")
+        if value.get("ready") is not True:
+            raise DispatcherError("REMOTE_PROTOCOL")
+        return {"relay": True, "tls_verified": True, "protocol": 1}
+
+    def _request(self, path, messages=(), acknowledgements=()):
         try:
             body = raw_json(
                 dict(
@@ -45,15 +56,19 @@ class Client:
                 raise ValueError()
             with self.http.stream(
                 "POST",
-                self.config["url"].rstrip("/") + "/v1/exchange",
+                self.config["url"].rstrip("/") + path,
                 content=body,
                 headers={
                     "Authorization": "Bearer " + self.config["token"],
                     "Content-Type": "application/json",
                 },
             ) as response:
+                if response.status_code in (401, 403):
+                    raise DispatcherError("REMOTE_AUTH")
                 if response.status_code != 200:
-                    raise ValueError()
+                    raise DispatcherError(
+                        "REMOTE_LIMIT" if response.status_code == 429 else "REMOTE_PROTOCOL"
+                    )
                 chunks = []
                 size = 0
                 for chunk in response.iter_bytes():
@@ -62,13 +77,22 @@ class Client:
                         raise ValueError()
                     chunks.append(chunk)
                 value = json.loads(b"".join(chunks))
-            if (
-                value["protocol"] != 1
-                or not isinstance(value["messages"], list)
-                or len(value["messages"]) > 16
-            ):
+            if type(value.get("protocol")) is not int or value["protocol"] != 1:
+                raise DispatcherError("REMOTE_VERSION")
+            if path == "/v1/probe":
+                return value
+            if not isinstance(value["messages"], list) or len(value["messages"]) > 16:
                 raise ValueError()
-            return value["messages"]
+            return value
+        except DispatcherError:
+            raise
+        except httpx.TransportError as exc:
+            current = exc
+            tls = False
+            while current:
+                tls |= isinstance(current, ssl.SSLCertVerificationError)
+                current = current.__cause__ or current.__context__
+            raise DispatcherError("REMOTE_TLS" if tls else "REMOTE_NETWORK") from None
         except Exception as exc:
             raise DispatcherError("REMOTE_TRANSPORT") from exc
 
@@ -101,14 +125,18 @@ def server(configuration, database, cert, key, *, host="127.0.0.1", port=0):
             try:
                 length = int(self.headers.get("Content-Length", "0"))
                 if (
-                    self.path != "/v1/exchange"
+                    self.path not in {"/v1/exchange", "/v1/probe"}
                     or self.headers.get("Transfer-Encoding")
                     or not 0 < length <= MAX_HTTP
                 ):
                     raise ValueError()
                 value = json.loads(self.rfile.read(length))
                 channel, role = value["channel"], value["role"]
-                if value["protocol"] != 1 or role not in {"agent", "controller"}:
+                if (
+                    type(value["protocol"]) is not int
+                    or value["protocol"] != 1
+                    or role not in {"agent", "controller"}
+                ):
                     raise ValueError()
                 expected = credentials.get(channel, {}).get(role, "")
                 token = self.headers.get("Authorization", "")
@@ -117,6 +145,14 @@ def server(configuration, database, cert, key, *, host="127.0.0.1", port=0):
                 ):
                     status = 403
                     raise ValueError()
+                if self.path == "/v1/probe":
+                    raw = raw_json({"protocol": 1, "ready": True})
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(raw)))
+                    self.end_headers()
+                    self.wfile.write(raw)
+                    return
                 if len(value["messages"]) > 8 or len(value["acks"]) > 32:
                     raise ValueError()
                 recipient = "controller" if role == "agent" else "agent"
@@ -172,6 +208,11 @@ def server(configuration, database, cert, key, *, host="127.0.0.1", port=0):
     class Server(ThreadingHTTPServer):
         daemon_threads = True
         slots = threading.BoundedSemaphore(64)
+
+        def handle_error(self, request, address):
+            if isinstance(sys.exception(), (ssl.SSLError, ConnectionError, TimeoutError)):
+                return  # Expected untrusted/closed TLS clients; never dump headers or exception data.
+            super().handle_error(request, address)
 
         def process_request(self, request, address):
             if not self.slots.acquire(blocking=False):
