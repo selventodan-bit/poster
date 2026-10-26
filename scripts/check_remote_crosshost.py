@@ -108,6 +108,7 @@ def export_history(source, output):
 class Peer:
     def __init__(self, config):
         self.config = config
+        self.last_failure = None
         self.session = uuid.uuid4().hex
         if not re.fullmatch(r"[a-z_][a-z0-9_-]*@[a-zA-Z0-9.-]+", config["ssh_destination"]):
             raise ValueError("Invalid SSH destination")
@@ -151,6 +152,15 @@ class Peer:
             timeout=120,
         )
         if value.returncode or len(value.stdout) > 60_000_000:
+            self.last_failure = dict(action=action, returncode=value.returncode)
+            try:
+                detail = json.loads(value.stderr)
+                if re.fullmatch("[A-Za-z]{1,80}", detail.get("error_type", "")) and all(
+                    re.fullmatch("[A-Za-z_]+\.py:[0-9]+", f) for f in detail.get("frames", [])
+                ):
+                    self.last_failure.update(detail)
+            except (ValueError, TypeError):
+                pass
             raise RuntimeError("Trusted SSH helper failed")  # Never print private stdout/stderr.
         return json.loads(value.stdout)
 
@@ -533,6 +543,8 @@ def check(config, output):
             proof=proof,
         )
     except Exception as exc:
+        if peer.last_failure:
+            proof["peer_failure"] = peer.last_failure
         if (root / "dispatcher.sqlite").exists() and not (output / "windows-history-safe.sqlite").exists():
             try:
                 proof.update(export_history(root / "dispatcher.sqlite", output))

@@ -118,6 +118,7 @@ class Catalog:
             "source": str(source),
             "inputs": inputs,
             "secret_refs": sorted(missing_refs),
+            "outputs": graph.metadata.get("poster.outputs", []),
             "nodes": len(graph.nodes),
             "browser": any(
                 n.type.startswith("Browser.")
@@ -154,5 +155,6 @@ class Catalog:
             item["version"],
             Path(item["source"]),
             project_key=item["project_key"],
+            cloud_origin=item.get("cloud"),
             **options,
         )

@@ -70,4 +70,5 @@ def install(commit, source_sha256, requirements_sha256, *, molab=False):
                 stdout=subprocess.DEVNULL,
                 env=env,
             )
+    os.environ["POSTER_CLOUD_SOURCE_COMMIT"] = commit
     return commit

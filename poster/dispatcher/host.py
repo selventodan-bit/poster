@@ -420,6 +420,7 @@ class Host:
                     item["project_id"],
                     item["version"],
                     project_key=item["project_key"],
+                    cloud_origin=item.get("cloud"),
                     **{k: v for k, v in options.items() if k != "timeout"},
                 )
                 result = schedules.create(
@@ -448,6 +449,8 @@ class Host:
                     project_key=item["project_key"],
                     inputs=payload.get("inputs"),
                     secrets=payload.get("secrets"),
+                    secret_refs=payload.get("secret_refs"),
+                    cloud_origin=item.get("cloud"),
                 )
                 if payload.get("profile"):
                     # Preserve the explicitly selected encrypted profile snapshot and its lock.
@@ -494,9 +497,25 @@ class Host:
                 version_id(cloud["version"])
                 identifier(cloud["folder_id"])
                 self.catalog.items[item["id"]]["cloud"] = cloud
+                self.store.db.execute(
+                    "INSERT OR REPLACE INTO cloud_sources VALUES(?,?,?)",
+                    (item["project_id"], item["version"], seal(cloud)),
+                )
                 self.catalog.save()
                 item["cloud"] = cloud
             return item
+        if op == "cloud_exports":
+            rows = self.store.db.execute(
+                "SELECT id,inputs_cipher FROM jobs WHERE status IN ('SUCCEEDED','FAILED','CANCELLED','TIMED_OUT','UNKNOWN','REVIEW_REQUIRED') ORDER BY created LIMIT 1000"
+            ).fetchall()
+            results = []
+            for row in rows:
+                origin = unseal(row["inputs_cipher"]).get("cloud_origin")
+                if origin:
+                    execution = self.dispatch({"op": "show", "id": row["id"]})
+                    execution["commit"] = build_info()["commit"]
+                    results.append(dict(origin=origin, execution=execution))
+            return results
         if op == "remove":
             self.catalog.remove(value["ids"])
             return True

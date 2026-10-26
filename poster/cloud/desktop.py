@@ -79,6 +79,9 @@ class DesktopCloud:
             db.execute(
                 "CREATE TABLE IF NOT EXISTS bindings(source TEXT PRIMARY KEY,project_id TEXT,version TEXT,folder_id TEXT)"
             )
+            db.execute(
+                "CREATE TABLE IF NOT EXISTS resource_aliases(source TEXT,original TEXT,logical TEXT,PRIMARY KEY(source,original))"
+            )
 
     async def status(self):
         if self.fixture:
@@ -174,12 +177,24 @@ class DesktopCloud:
 
                     atomic(target, raw)
             selected.append(name)
+            with sqlite3.connect(self.cache) as db:
+                db.execute(
+                    "INSERT OR REPLACE INTO resource_aliases VALUES(?,?,?)", (str(source), str(path), name)
+                )
         return selected
 
     async def publish(self, source, *, resources=None, outputs=(), resolve_conflict=False):
         library = await self._library()
         peer = recipient(self.store).public()
-        bundle = PortableBundle.capture(source, resources=resources, outputs=outputs, recipient=peer)
+        with sqlite3.connect(self.cache) as db:
+            aliases = dict(
+                db.execute(
+                    "SELECT original,logical FROM resource_aliases WHERE source=?", (str(plain_path(source)),)
+                )
+            )
+        bundle = PortableBundle.capture(
+            source, resources=resources, outputs=outputs, recipient=peer, resource_aliases=aliases
+        )
         previous = self._binding(source)
         expected = previous["version"] if previous and previous["project_id"] == bundle.project_id else None
         if resolve_conflict:
@@ -232,10 +247,17 @@ class DesktopCloud:
 
     async def sync_results(self, dispatcher_root, project_id=None):
         from .admission import claims
-        from .results import DesktopArchive
+        from .results import DesktopArchive, export_managed
+        from poster.dispatcher.host import request
 
         library = await self._library()
         archive = DesktopArchive(dispatcher_root)
+        entries = await asyncio.to_thread(request, Path(dispatcher_root), "cloud_exports")
+        exported = await export_managed(
+            library,
+            recipient(self.store),
+            [e for e in entries if project_id is None or e["origin"]["project_id"] == project_id],
+        )
         imported, pending, rejected = [], 0, 0
         projects = [
             p
@@ -257,7 +279,12 @@ class DesktopCloud:
                     except CloudError:
                         rejected += 1
         return dict(
-            imported=imported, pending=pending, rejected=rejected, mode="DETACHED", history=archive.rows()
+            imported=imported,
+            pending=pending,
+            rejected=rejected,
+            mode="DETACHED",
+            history=archive.rows(),
+            exported=exported,
         )
 
     async def close(self):

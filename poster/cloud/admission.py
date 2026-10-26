@@ -63,7 +63,9 @@ async def completed(library, claim):
     return value
 
 
-async def acquire(library, descriptor, bundle, intent, identity, count, parallel):
+async def acquire(
+    library, descriptor, bundle, intent, identity, count, parallel, *, code_commit="UNAVAILABLE"
+):
     history, slot = await claims(library, descriptor)
     if any(item["intent"] == intent for item in history):
         raise CloudError("RUN_ALREADY_CLAIMED")
@@ -99,6 +101,7 @@ async def acquire(library, descriptor, bundle, intent, identity, count, parallel
         resolution_id=next(values),
         parallel=parallel,
         created=time.time(),
+        code_commit=code_commit,
         runs=[[uuid.uuid4().hex, next(values), next(values)] for _ in range(count)],
     )
     if len(canonical(claim)) > 200000:

@@ -137,6 +137,10 @@ class PortableBundle:
                 n: m["files"][n] for n in self.files if n not in graphs
             }:
                 raise ValueError()
+            if len(m["outputs"]) > MAX_FILES or len({n.casefold() for n in m["outputs"]}) != len(
+                m["outputs"]
+            ):
+                raise CloudError("PACKAGE_LIMIT")
             for name in m["outputs"]:
                 public_resource(name)
             return self
@@ -146,7 +150,7 @@ class PortableBundle:
             raise CloudError("INTEGRITY") from exc
 
     @classmethod
-    def capture(cls, source, *, resources=None, outputs=(), recipient=None):
+    def capture(cls, source, *, resources=None, outputs=(), recipient=None, resource_aliases=None):
         source = plain_path(source)
         from poster.maker.http_actions import protect_graph
 
@@ -206,10 +210,20 @@ class PortableBundle:
                     raise CloudError("INTEGRITY")
                 graph.extensions["outputs"] = exports
             for node in graph.nodes:
+                tab = node.extensions.get("browser_tab")
                 node.extensions = {}
+                if tab:
+                    if not isinstance(tab, str) or len(tab) > 200:
+                        raise CloudError("INTEGRITY")
+                    node.extensions["browser_tab"] = tab
                 for key in ("path", "file", "filename", "directory"):
                     value = node.params.get(key)
                     if isinstance(value, str) and value and "{{" not in value:
+                        if value in (resource_aliases or {}):
+                            target = resource_aliases[value]
+                            if target not in resources:
+                                raise CloudError("PATH_FORBIDDEN")
+                            node.params[key] = value = relative(target)
                         relative(value)
             graph_names.append(relative(name))
             refs.update(graph_secret_refs(graph))
@@ -231,6 +245,7 @@ class PortableBundle:
             selected[name] = path.read_bytes()
         main = Graph.model_validate_json(files[source.name])
         main.metadata["poster.resources"] = {n: digest(raw) for n, raw in sorted(selected.items())}
+        main.metadata["poster.outputs"] = sorted(set(outputs))
         files[source.name] = main.model_dump_json(indent=2).encode()
         files.update(selected)
         manifest = dict(

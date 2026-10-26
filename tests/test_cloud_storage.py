@@ -223,3 +223,30 @@ async def test_empty_resource_and_republish_refresh_declared_resource_bytes(libr
     assert second.files["empty.csv"] == b"new data"
     await lib.publish(second, name=graph.name, expected_version=first.version)
     assert (await lib.fetch(first.project_id)).version == second.version
+
+
+async def test_explicit_external_resource_selection_rewrites_only_matching_paths(library, tmp_path):
+    from poster.cloud.desktop import DesktopCloud
+    from poster.cloud.format import digest
+    from poster.maker.model import Graph
+
+    lib, _ = library
+    source, graph = project(tmp_path, text="aliases")
+    resource = tmp_path / "selected.csv"
+    resource.write_text("n\n17\n")
+    node = next(n for n in graph.nodes if n.type == "Files.WriteText")
+    node.type = "CSV.Read"
+    node.params = {"path": str(resource)}
+    save_graph(source, graph, Vault())
+    facade = DesktopCloud(tmp_path / "desktop-cloud", files=lib.files)
+    selected = await facade.include_resources(source, [str(resource)])
+    assert selected == ["resources/selected.csv"]
+    result = await facade.publish(source, resources=selected)
+    bundle = await lib.fetch(graph.id, result["version"])
+    published = Graph.model_validate_json(bundle.files[bundle.manifest["main"]])
+    assert next(n for n in published.nodes if n.type == "CSV.Read").params["path"] == "resources/selected.csv"
+    assert bundle.manifest["files"]["resources/selected.csv"] == digest(resource.read_bytes())
+    assert str(resource).encode() not in b"".join(bundle.files.values())
+    assert next(
+        n for n in Graph.model_validate_json(source.read_bytes()).nodes if n.type == "CSV.Read"
+    ).params["path"] == str(resource)

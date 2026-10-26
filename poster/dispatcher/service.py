@@ -72,6 +72,7 @@ def enqueue_snapshot(
     remote_outputs=(),
     batch_id=None,
     batch_limit=32,
+    cloud_origin=None,
 ):
     """Admit the inspected immutable version, never recapture a moving source."""
     if key is not None and (previous := store.find_key(key)):
@@ -100,6 +101,7 @@ def enqueue_snapshot(
         profile_id=profile_id,
         project_key=project_key,
         profile_key_file=profile_key_file,
+        cloud_origin=cloud_origin,
     )
     return store.enqueue(
         project_id,
@@ -128,6 +130,7 @@ def prepare_snapshot(
     profile_id=None,
     project_key=None,
     profile_key_file=None,
+    cloud_origin=None,
 ):
     """Validate once and retain encrypted inputs for manual or scheduled admission."""
     snapshots = Snapshots(store.root)
@@ -162,6 +165,17 @@ def prepare_snapshot(
     except Exception as exc:
         raise DispatcherError("INPUT_INVALID") from exc
     envelope = {"inputs": inputs, "secrets": secrets}
+    if cloud_origin:
+        from poster.cloud.format import identifier, version_id
+
+        if (
+            set(cloud_origin) != {"project_id", "version", "folder_id"}
+            or cloud_origin["project_id"] != project_id
+        ):
+            raise DispatcherError("PARAMETERS_INVALID")
+        identifier(cloud_origin["folder_id"])
+        version_id(cloud_origin["version"])
+        envelope["cloud_origin"] = cloud_origin
     if secret_refs:
         envelope["secret_refs"] = secret_refs
     if project_key:

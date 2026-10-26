@@ -67,7 +67,7 @@ def decrypt_output(identity, value, context):
 
 
 def sign_result(identity, body):
-    if body.get("mode") != "DETACHED":
+    if body.get("mode") not in {"DETACHED", "MANAGED_EXPORT"}:
         raise CloudError("RESULT_UNTRUSTED")
     return dict(**body, signature=b64(identity.sign.sign(canonical(body))))
 
@@ -75,7 +75,7 @@ def sign_result(identity, body):
 def verify_result(peer, value):
     try:
         validate_peer(peer)
-        if value.get("mode") != "DETACHED" or value.get("issuer") != peer["id"]:
+        if value.get("mode") not in {"DETACHED", "MANAGED_EXPORT"} or value.get("issuer") != peer["id"]:
             raise ValueError()
         body = {k: v for k, v in value.items() if k != "signature"}
         ed25519.Ed25519PublicKey.from_public_bytes(un64(peer["sign"])).verify(

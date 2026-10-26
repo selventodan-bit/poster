@@ -30,6 +30,7 @@ class Ticket:
     descriptor: dict
     bundle: object
     jobs: list[str]
+    arguments: dict = field(default_factory=dict, repr=False)
     results: dict = field(default_factory=dict)
     finished: bool = False
 
@@ -41,6 +42,10 @@ class NotebookSession:
         self.provider = provider
         self.capacity = capacity or probe(provider, root=self.root)
         self.identity = Identity()
+        import re
+
+        candidate = os.environ.get("POSTER_CLOUD_SOURCE_COMMIT", os.environ.get("GITHUB_SHA", ""))
+        self.code_commit = candidate if re.fullmatch("[a-f0-9]{40}", candidate) else "UNAVAILABLE"
         self.process = None
         self.lifecycle = Lifecycle.READY
         self.intents, self.blocked = {}, set()
@@ -76,6 +81,7 @@ class NotebookSession:
                 "SSL_CERT_FILE",
                 "SSL_CERT_DIR",
                 "POSTER_BROWSER_EXECUTABLE",
+                "POSTER_CHROMIUM",
             }
         }
         env["PYTHONUTF8"] = "1"
@@ -132,7 +138,19 @@ class NotebookSession:
         if intent is None:
             raise CloudError("INPUT_INVALID")  # UI explicitly prepares a new intent.
         async with self.gate:
+            arguments = dict(
+                project_id=project_id,
+                version=version,
+                count=count,
+                parallel=parallel,
+                inputs=inputs or {},
+                secrets=secrets or {},
+                secret_refs=secret_refs or {},
+                timeout=timeout,
+            )
             if intent in self.intents:
+                if self.intents[intent].arguments != arguments:
+                    raise CloudError("INPUT_INVALID")
                 return self.intents[intent]
             if intent in self.blocked:
                 raise CloudError("RUN_UNCERTAIN")
@@ -158,13 +176,22 @@ class NotebookSession:
             descriptor = await self.library.descriptor(await self.library.find(project_id))
             self.blocked.add(intent)
             claim = await admission.acquire(
-                self.library, descriptor, bundle, intent, self.identity, count, parallel
+                self.library,
+                descriptor,
+                bundle,
+                intent,
+                self.identity,
+                count,
+                parallel,
+                code_commit=self.code_commit,
             )
             reply = await self._rpc("enqueue_batch", items=[spec], request_id=intent)
             if reply["errors"] or len(reply["jobs"]) != count:
                 self.lifecycle = Lifecycle.UNKNOWN
                 raise CloudError("RUN_UNCERTAIN")
-            ticket = Ticket(intent, claim, descriptor, bundle, reply["jobs"])
+            from copy import deepcopy
+
+            ticket = Ticket(intent, claim, descriptor, bundle, reply["jobs"], arguments=deepcopy(arguments))
             self.intents[intent] = ticket
             await self._rpc("start")
             self.lifecycle = Lifecycle.EXECUTING

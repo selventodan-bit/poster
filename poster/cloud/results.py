@@ -11,11 +11,12 @@ from .errors import CloudError
 from .format import MAX_BYTES, canonical, digest, identifier, relative
 
 TERMINAL = {"SUCCEEDED", "FAILED", "CANCELLED", "TIMED_OUT", "UNKNOWN", "REVIEW_REQUIRED"}
+MAX_OUTPUT_BYTES = 14_000_000  # AES-GCM JSON/base64 must fit the bounded Drive blob.
 
 
 def context(claim, run_id, name):
     return dict(
-        mode="DETACHED",
+        mode=claim.get("mode", "DETACHED"),
         project_id=claim["project_id"],
         project_version=claim["version"],
         run_id=run_id,
@@ -30,7 +31,15 @@ async def publish_result(library, descriptor, claim, index, identity, execution,
     if identity.public() != claim["issuer"] or execution["status"] not in TERMINAL:
         raise CloudError("RESULT_UNTRUSTED")
     files = library.files
-    await files.folder(run_id, descriptor["folders"]["results"], file_id=folder_id)
+    await files.folder(
+        run_id,
+        descriptor["folders"]["results"],
+        file_id=folder_id,
+        properties={
+            "poster_result_mode": claim.get("mode", "DETACHED"),
+            "poster_result_manifest": manifest_id,
+        },
+    )
     peer = bundle.manifest.get("result_recipient")
     outputs, total = {}, 0
     if peer is None:
@@ -40,11 +49,11 @@ async def publish_result(library, descriptor, claim, index, identity, execution,
         path = plain_path(Path(execution["workdir"]) / name) if execution.get("workdir") else None
         if path is None or not path.exists():
             continue
-        if not path.is_file() or path.stat().st_size > MAX_BYTES:
+        if not path.is_file() or path.stat().st_size > MAX_OUTPUT_BYTES:
             raise CloudError("PACKAGE_LIMIT")
         raw = path.read_bytes()
         total += len(raw)
-        if total > MAX_BYTES:
+        if total > MAX_OUTPUT_BYTES:
             raise CloudError("PACKAGE_LIMIT")
         box = encrypt_output(peer, raw, context(claim, run_id, name))
         file_id = (await files.ids())[0]
@@ -54,7 +63,7 @@ async def publish_result(library, descriptor, claim, index, identity, execution,
     current = history[0] if history else {}
     body = dict(
         format="poster.cloud.result.v1",
-        mode="DETACHED",
+        mode=claim.get("mode", "DETACHED"),
         issuer=identity.public()["id"],
         project_id=claim["project_id"],
         project_version=claim["version"],
@@ -70,6 +79,7 @@ async def publish_result(library, descriptor, claim, index, identity, execution,
             native_run_id=current.get("run_id"),
             effects_possible=bool(current.get("effects_possible")),
             report_sha256=current.get("report_sha256"),
+            commit=claim.get("code_commit", "UNAVAILABLE"),
         ),
         outputs=outputs,
     )
@@ -129,6 +139,7 @@ class ResultArchive:
         if any(
             (
                 value.get("format") != "poster.cloud.result.v1",
+                value.get("mode") != "DETACHED" or claim.get("mode") != "DETACHED",
                 value.get("claim_id") != claim["id"],
                 value.get("run_id") != run_id,
                 value.get("project_id") != bundle.project_id,
@@ -167,7 +178,7 @@ class ResultArchive:
             private_dir(target.parent)
             atomic(target, raw)
         safe = dict(manifest=signed, directory=str(root))
-        self.save(value, safe)
+        self.save(signed, safe)
         return dict(run_id=run_id, status=value["status"], directory=str(root), outputs=list(decoded))
 
 
@@ -193,3 +204,48 @@ class DesktopArchive(ResultArchive):
         from poster.dispatcher.host import request
 
         return request(self.store.root, "cloud_results")
+
+
+async def export_managed(library, identity, entries):
+    """Storage-only export of confirmed native history; never changes that history."""
+    exported = []
+    for entry in entries:
+        origin, execution = entry["origin"], entry["execution"]
+        folder = await library.find(origin["project_id"])
+        if folder is None or folder["id"] != origin["folder_id"]:
+            raise CloudError("INTEGRITY")
+        descriptor = await library.descriptor(folder)
+        bundle = await library.fetch(origin["project_id"], origin["version"])
+        history = execution["history"]
+        run_id = history[0]["run_id"] if history else "cancelled-" + execution["id"]
+        key = "managed-export:" + bundle.version + ":" + run_id
+        state = library.files.journal.get(key)
+        if state and state.get("done"):
+            raw = await library.files.read(state["claim"]["runs"][0][2])
+            if digest(raw) != state["done"]["sha256"]:
+                raise CloudError("RESULT_UNTRUSTED")
+            exported.append(state["done"])
+            continue
+        if state is None:
+            claim_id, folder_id, manifest_id = await library.files.ids(3)
+            claim = dict(
+                format="poster.cloud.managed-export.v1",
+                mode="MANAGED_EXPORT",
+                id=claim_id,
+                issuer=identity.public(),
+                project_id=bundle.project_id,
+                version=bundle.version,
+                native_snapshot=execution["version"],
+                code_commit=execution.get("commit", "UNAVAILABLE"),
+                runs=[[run_id, folder_id, manifest_id]],
+            )
+            state = dict(claim=claim)
+            library.files.journal.set(key, state)
+        claim = state["claim"]
+        await library.files.create_json(
+            claim["id"], "managed-origin.json", descriptor["folders"]["results"], claim
+        )
+        result = await publish_result(library, descriptor, claim, 0, identity, execution, bundle)
+        library.files.journal.set(key, dict(claim=claim, done=result))
+        exported.append(result)
+    return exported

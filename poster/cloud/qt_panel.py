@@ -144,7 +144,7 @@ class CloudDialog(QDialog):
         layout.addLayout(files)
         if dispatcher_root is not None:
             row = QHBoxLayout()
-            self.button(row, "cloud_results", "Импортировать автономные результаты", self.sync_results)
+            self.button(row, "cloud_results", "Синхронизировать результаты с Drive", self.sync_results)
             self.button(row, "cloud_notebook", "Подготовить и открыть notebook…", self.export_notebook)
             layout.addLayout(row)
         if self.source:
@@ -341,7 +341,7 @@ class CloudDialog(QDialog):
 
     def results_synced(self, value):
         self.status.setText(
-            f"Автономных результатов: {len(value['imported'])}; ожидаются: {value['pending']}; отклонены: {value['rejected']}."
+            f"Выгружено: {len(value['exported'])}; автономных результатов: {len(value['imported'])}; ожидаются: {value['pending']}; отклонены: {value['rejected']}."
         )
         dialog = QDialog(self)
         dialog.setWindowTitle("Автономные результаты — DETACHED")

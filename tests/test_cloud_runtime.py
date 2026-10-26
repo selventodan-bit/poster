@@ -201,3 +201,115 @@ async def test_session_crash_unknown_blocks_new_post_until_manual_review(cloud, 
             server.gates["0"].set()
             await one.close()
             await two.close()
+
+
+async def test_different_projects_concurrent_timeout_and_committed_results(cloud, tmp_path):
+    lib, _, _ = cloud
+    with controlled_server() as (server, base):
+        bundles = [
+            await publish(cloud, tmp_path, [("HTTP.Post", {"url": base + "/hold/" + str(i)})])
+            for i in range(2)
+        ]
+        sessions = [NotebookSession(lib, tmp_path / str(i)) for i in range(2)]
+        try:
+            tickets = await asyncio.gather(
+                *(
+                    s.submit(b.project_id, intent="parallel-" + str(i), timeout=2 if i == 0 else 30)
+                    for i, (s, b) in enumerate(zip(sessions, bundles, strict=True))
+                )
+            )
+            for _ in range(200):
+                if len(server.calls) == 2:
+                    break
+                await asyncio.sleep(0.03)
+            assert len(server.calls) == 2
+            server.gates["1"].set()
+            states = await asyncio.gather(
+                *(s.wait(t, deadline=30) for s, t in zip(sessions, tickets, strict=True))
+            )
+            assert states[0]["runs"][0]["status"] in {"TIMED_OUT", "UNKNOWN"}
+            assert states[1]["runs"][0]["status"] == "SUCCEEDED"
+            assert len(server.calls) == 2
+        finally:
+            server.gates["0"].set()
+            for s in sessions:
+                await s.close()
+
+
+async def test_real_missing_chromium_and_runtime_refuse_before_claim(cloud, tmp_path, monkeypatch):
+    lib, _, _ = cloud
+    bundle = await publish(cloud, tmp_path, [("Browser.OpenURL", {"url": "https://never-run.invalid/"})])
+    monkeypatch.setenv("POSTER_CHROMIUM", str(tmp_path / "missing-chromium"))
+    session = NotebookSession(lib, tmp_path / "missing")
+    try:
+        assert not session.capacity.browser
+        with pytest.raises(CloudError, match="BROWSER_UNAVAILABLE"):
+            await session.submit(bundle.project_id, intent="missing")
+        assert session.process is None
+        descriptor = await lib.descriptor(await lib.find(bundle.project_id))
+        assert (await claims(lib, descriptor))[0] == []
+    finally:
+        await session.close()
+
+
+async def test_tampered_result_is_never_imported_as_success(cloud, tmp_path):
+    lib, api, recipient = cloud
+    bundle = await publish(cloud, tmp_path, [("Files.WriteText", {"path": "out.txt", "text": "verified"})])
+    session = NotebookSession(lib, tmp_path / "tamper")
+    try:
+        ticket = await session.submit(bundle.project_id, intent="tamper")
+        await session.wait(ticket, deadline=30)
+        manifest_id = ticket.claim["runs"][0][2]
+        signed = await lib.files.json(manifest_id)
+        blob = signed["outputs"]["out.txt"]["id"]
+        api.files[blob]["raw"] = b"corrupted"
+        store = Store(tmp_path / "desktop" / "dispatcher.sqlite")
+        try:
+            with pytest.raises(CloudError):
+                await ResultArchive(store).import_result(lib, ticket.claim, 0, recipient)
+            assert ResultArchive(store).rows() == []
+        finally:
+            store.close()
+    finally:
+        await session.close()
+
+
+async def test_portable_subproject_keeps_exports_and_session_protected_refs(cloud, tmp_path):
+    lib, _, recipient = cloud
+    directory = tmp_path / "nested"
+    directory.mkdir()
+    vault = Vault()
+    child = chain(
+        "Child",
+        [
+            ("JSON.Stringify", {"value": {"variable": "password"}}),
+            ("Variables.Set", {"name": "result", "value": "child-ok"}),
+        ],
+    )
+    child.variables["password"] = Variable(
+        secret=True, value=vault.put_value("SECRET_CHILD_CANARY", "child-ref")
+    )
+    child.extensions["outputs"] = ["result"]
+    save_graph(directory / "child.postergraph.json", child, vault)
+    parent = chain(
+        "Parent",
+        [
+            ("Project.Run", {"path": "child.postergraph.json", "outputs": ["result"]}),
+            ("Files.WriteText", {"path": "out.txt", "text": "nested"}),
+        ],
+    )
+    save_graph(directory / "parent.postergraph.json", parent, Vault())
+    bundle = PortableBundle.capture(
+        directory / "parent.postergraph.json", outputs=["out.txt"], recipient=recipient.public()
+    )
+    await lib.publish(bundle, name="Parent", recipient=recipient.public())
+    session = NotebookSession(lib, tmp_path / "nested-runtime")
+    try:
+        ticket = await session.submit(
+            bundle.project_id, intent="nested", secret_refs={"child-ref": "SECRET_CHILD_CANARY"}
+        )
+        state = await session.wait(ticket, deadline=30)
+        assert state["runs"][0]["status"] == "SUCCEEDED", state
+        assert b"SECRET_CHILD_CANARY" not in b"".join(bundle.files.values())
+    finally:
+        await session.close()

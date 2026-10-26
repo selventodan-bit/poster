@@ -116,8 +116,11 @@ def stop(root, role, *, crash=False):
             deadline = time.monotonic() + 15
             while time.monotonic() < deadline:
                 current = same_process(value["pid"], value["birth"])
-                if not current or current.status() == psutil.STATUS_ZOMBIE:
-                    break
+                try:
+                    if not current or current.status() == psutil.STATUS_ZOMBIE:
+                        break
+                except psutil.NoSuchProcess:
+                    break  # Exit after birth check is confirmed exit, not a failure.
                 time.sleep(0.05)
             else:
                 terminate_tree(value["pid"], value["birth"], group=True)
@@ -154,8 +157,11 @@ def inventory(root):
     alive = []
     for pid, birth in owned.items():
         process = same_process(int(pid), birth)
-        if process and process.status() != psutil.STATUS_ZOMBIE:
-            alive.append(dict(pid=int(pid), birth=birth, name=process.name()))
+        try:
+            if process and process.status() != psutil.STATUS_ZOMBIE:
+                alive.append(dict(pid=int(pid), birth=birth, name=process.name()))
+        except psutil.NoSuchProcess:
+            pass  # A process may exit between the two read-only observations.
     return dict(observed=len(owned), alive=alive)
 
 
@@ -304,7 +310,19 @@ def main():
         sys.stdout.write(json.dumps(result))
     except Exception as exc:
         # Exception text may contain private data: only its class crosses the diagnostic channel.
-        sys.stderr.write(type(exc).__name__)
+        import traceback
+
+        sys.stderr.write(
+            json.dumps(
+                dict(
+                    error_type=type(exc).__name__,
+                    frames=[
+                        Path(f.filename).name + ":" + str(f.lineno)
+                        for f in traceback.extract_tb(exc.__traceback__)[-5:]
+                    ],
+                )
+            )
+        )
         raise SystemExit(1) from None
 
 

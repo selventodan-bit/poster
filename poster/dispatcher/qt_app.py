@@ -149,7 +149,7 @@ class InputsDialog(QDialog):
             parent.agent_items,
             self,
             agent_id=target.get("agent_id") if target else None,
-            outputs=target.get("remote_outputs", []) if target else [],
+            outputs=target.get("remote_outputs", []) if target else item.get("outputs", []),
         )
         if target is not None:
             self.remote_target.setEnabled(False)

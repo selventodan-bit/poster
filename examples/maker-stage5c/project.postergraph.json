@@ -1,0 +1,176 @@
+{
+  "format": "poster.maker.graph",
+  "schema_version": 2,
+  "id": "poster-stage5c-resources-demo",
+  "name": "Stage 5C — переносимые данные",
+  "entry": "start",
+  "nodes": [
+    {
+      "id": "start",
+      "type": "Start",
+      "action_version": 1,
+      "title": "",
+      "x": 40.0,
+      "y": 40.0,
+      "params": {},
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    },
+    {
+      "id": "n0",
+      "type": "CSV.Read",
+      "action_version": 1,
+      "title": "",
+      "x": 290.0,
+      "y": 40.0,
+      "params": {
+        "path": "data.csv"
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    },
+    {
+      "id": "n1",
+      "type": "Excel.Read",
+      "action_version": 1,
+      "title": "",
+      "x": 540.0,
+      "y": 40.0,
+      "params": {
+        "path": "data.xlsx"
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    },
+    {
+      "id": "n2",
+      "type": "Files.ReadText",
+      "action_version": 1,
+      "title": "",
+      "x": 790.0,
+      "y": 40.0,
+      "params": {
+        "path": "data.json"
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": "json_text",
+      "result_path": "value",
+      "protect_result": false
+    },
+    {
+      "id": "n3",
+      "type": "JSON.Parse",
+      "action_version": 1,
+      "title": "",
+      "x": 40.0,
+      "y": 180.0,
+      "params": {
+        "text": "{{json_text}}"
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    },
+    {
+      "id": "n4",
+      "type": "Files.WriteText",
+      "action_version": 1,
+      "title": "",
+      "x": 290.0,
+      "y": 180.0,
+      "params": {
+        "path": "result.txt",
+        "text": "{{label}} — CSV, XLSX, JSON",
+        "overwrite": true
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    },
+    {
+      "id": "end",
+      "type": "End.Success",
+      "action_version": 1,
+      "title": "",
+      "x": 800.0,
+      "y": 500.0,
+      "params": {},
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    }
+  ],
+  "edges": [
+    {
+      "source": "start",
+      "port": "success",
+      "target": "n0"
+    },
+    {
+      "source": "n0",
+      "port": "success",
+      "target": "n1"
+    },
+    {
+      "source": "n1",
+      "port": "success",
+      "target": "n2"
+    },
+    {
+      "source": "n2",
+      "port": "success",
+      "target": "n3"
+    },
+    {
+      "source": "n3",
+      "port": "success",
+      "target": "n4"
+    },
+    {
+      "source": "n4",
+      "port": "success",
+      "target": "end"
+    }
+  ],
+  "view": {
+    "zoom": 1.0
+  },
+  "max_steps": 500,
+  "metadata": {
+    "poster.resources": {
+      "data.csv": "5dc6ebaeb6e2eff60565908fde7ce393f3dd4e08964ab3e5b8e8fa47ce8f03f0",
+      "data.xlsx": "1ad21b52be6bc06fd61e73b04b86f40a3d40f70d3a07ec3ff25e9393462ce7b3",
+      "data.json": "01d6202074d895c6fe96c0a41546648689d44732547538a8815b389960534cc6"
+    },
+    "poster.outputs": [
+      "result.txt"
+    ]
+  },
+  "extensions": {},
+  "secret_file": null,
+  "secret_sha256": null,
+  "variables": {
+    "label": {
+      "value": "Poster",
+      "input": true,
+      "required": true,
+      "secret": false
+    }
+  }
+}

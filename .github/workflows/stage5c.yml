@@ -12,8 +12,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
       - run: uv sync --frozen --extra dev --extra recorder --extra notebook
+      - run: uv run --no-sync python -m playwright install --with-deps chromium
       - name: Real notebook kernels, original subprocesses, encrypted results and safe replay refusal
-        run: uv run --no-sync python -m pytest -q tests/test_cloud_runtime.py tests/cloud_notebook_runtimes.py --junitxml=.poster/cloud-notebook.xml
+        run: uv run --no-sync python -m pytest -q tests/test_cloud_runtime.py tests/cloud_notebook_runtimes.py tests/cloud_browser_instances.py --junitxml=.poster/cloud-notebook.xml
       - uses: actions/upload-artifact@v4
         if: always()
         with:

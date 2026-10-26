@@ -16,7 +16,10 @@ from .drive_files import DriveFiles, Journal
 from .errors import CloudError
 from .library import Library
 
-SCOPES = ["https://www.googleapis.com/auth/drive.file", "https://www.googleapis.com/auth/drive.readonly"]
+# Notebook clients differ from the publishing desktop OAuth app. They must be
+# allowed to create results under that app's folders. A restricted drive.file
+# grant alone is insufficient; consent stays in the provider's official flow.
+SCOPES = ["https://www.googleapis.com/auth/drive"]
 GDRIVE_FSSPEC_COMMIT = "dd9bb3025b26091d4a29ac4e81cc3d88910203bd"
 
 

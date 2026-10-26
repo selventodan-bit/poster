@@ -62,6 +62,7 @@ def package(bundle, output, commit, *, embedded=False):
     examples = ROOT / "examples" / "maker-stage3b2"
     if examples.is_dir():
         shutil.copytree(examples, bundle / "examples" / "maker-stage3b2", dirs_exist_ok=True)
+    shutil.copytree(ROOT / "examples/maker-stage5c", bundle / "examples/maker-stage5c", dirs_exist_ok=True)
     info = {"commit": commit, "browser_bundled": embedded}
     launchers = {"maker": "Poster.exe", "service": "PosterService.exe", "worker": "PosterWorker.exe"}
     if embedded:
