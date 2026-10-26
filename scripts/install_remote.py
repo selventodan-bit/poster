@@ -64,9 +64,9 @@ def unit(program, state, role, *, user=None):
         + ' --root "'
         + str(state)
         + '"\n'
-        + 'WorkingDirectory="'
+        + "WorkingDirectory="
         + str(state)
-        + '"\nUMask=0077\nNoNewPrivileges=yes\nPrivateTmp=yes\nProtectSystem=strict\nReadWritePaths="'
+        + '\nUMask=0077\nNoNewPrivileges=yes\nPrivateTmp=yes\nProtectSystem=strict\nReadWritePaths="'
         + str(state)
         + '"\n'
         + "Restart=on-failure\nRestartSec=3\nKillMode=control-group\nTimeoutStopSec=45\n\n[Install]\nWantedBy="
@@ -238,8 +238,13 @@ def main():
         )
         print(json.dumps(value))
         return 0
-    except Exception:
-        print(json.dumps({"code": "INSTALL_OR_SERVICE_FAILED", "state_preserved": True}))
+    except Exception as exc:
+        code = (
+            str(exc)
+            if isinstance(exc, ValueError) and re.fullmatch("[A-Z_]+", str(exc))
+            else "INSTALL_OR_SERVICE_FAILED"
+        )
+        print(json.dumps({"code": code, "state_preserved": True}))
         return 1
 
 

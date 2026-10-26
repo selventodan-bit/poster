@@ -675,3 +675,92 @@ jobs:
           path: .poster/remote-windows-graphs-report.json
           include-hidden-files: true
           if-no-files-found: error
+
+  remote-pairing:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install ".[dev]"
+      - name: Real TLS probes expiring pairing fingerprints authorization and offline honesty
+        run: python -m pytest -q tests/test_remote_pairing.py --junitxml=.poster/remote-pairing.xml
+      - if: always()
+        run: python scripts/summarize_pytest.py .poster/remote-pairing.xml .poster/remote-pairing-report.json --label 'Remote pairing ${{ runner.os }}'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: remote-pairing-${{ matrix.os }}
+          path: .poster/remote-pairing-report.json
+          include-hidden-files: true
+          if-no-files-found: error
+
+  remote-linux-release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.12'
+      - run: uv sync --frozen --extra dev --extra recorder
+      - name: Build hash-pinned offline headless release from the exact clean SHA
+        run: uv run --no-sync python scripts/build_remote_release.py --output release-linux --wheelhouse
+      - name: Build actual earlier 5B version for the upgrade test
+        run: uv run --no-sync python scripts/build_remote_release.py --output release-linux-previous --revision ca4a0e8a1876ba4b4ec81f2834bc9816e6b5e5a2 --wheelhouse
+      - uses: actions/upload-artifact@v4
+        with:
+          name: poster-linux
+          path: release-linux/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: poster-linux-previous-upgrade-fixture
+          path: release-linux-previous/
+          if-no-files-found: error
+
+  remote-linux-deployment:
+    needs: remote-linux-release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      POSTER_LINUX_RELEASE: release-linux/poster-linux.tar.gz
+      POSTER_PREVIOUS_LINUX_RELEASE: release-linux-previous/poster-linux.tar.gz
+      POSTER_PREVIOUS_COMMIT: ca4a0e8a1876ba4b4ec81f2834bc9816e6b5e5a2
+      POSTER_TEST_SYSTEMD: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.12'
+      - run: uv sync --frozen --extra dev --extra recorder
+      - run: uv run --no-sync python -m playwright install --with-deps chromium
+      - uses: actions/download-artifact@v4
+        with:
+          name: poster-linux
+          path: release-linux
+      - uses: actions/download-artifact@v4
+        with:
+          name: poster-linux-previous-upgrade-fixture
+          path: release-linux-previous
+      - name: Actual non-root systemd Agent and Relay offline install graph stop restart update and remove
+        run: uv run --no-sync python -m pytest -q -s tests/remote_deployment_e2e.py --junitxml=.poster/remote-deployment.xml
+      - if: always()
+        run: uv run --no-sync python scripts/summarize_pytest.py .poster/remote-deployment.xml .poster/remote-deployment-tests.json --label 'Installed Linux systemd services'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: remote-linux-deployment
+          path: |
+            .poster/remote-deployment-tests.json
+            .poster/remote-deployment-report.json
+          include-hidden-files: true
+          if-no-files-found: error

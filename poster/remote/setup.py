@@ -115,5 +115,5 @@ def _agent_init(root, name, controller_file, relay_file, *, controller=None, rel
     )
     safe_json(
         root / "registration.json",
-        dict(peer=identity.public(), name=name, os="linux", version="5A.1", protocol=1),
+        dict(peer=identity.public(), name=name, os="linux", version="5B.1", protocol=1),
     )

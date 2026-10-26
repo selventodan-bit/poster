@@ -45,6 +45,9 @@ class PairingDialog(QDialog):
         form.addRow("Fingerprint Controller", self.controller)
         form.addRow("Fingerprint Agent", self.fingerprint)
         layout.addLayout(form)
+        self.heartbeat = QLabel("Ожидание подписанного heartbeat Agent.")
+        self.heartbeat.setObjectName("pairing_heartbeat")
+        layout.addWidget(self.heartbeat)
         self.actions = {}
         for name, text, callback in [
             ("export", "1–2. Проверить TLS и создать pairing-файл…", self.export),
@@ -60,6 +63,7 @@ class PairingDialog(QDialog):
             button.clicked.connect(callback)
             layout.addWidget(button)
             self.actions[name] = button
+        self.actions["test"].setEnabled(False)
         self.result = QTextEdit()
         self.result.setReadOnly(True)
         self.result.setObjectName("pairing_result")
@@ -96,6 +100,8 @@ class PairingDialog(QDialog):
             self.job = reply["job"]
             self.result.setPlainText("Задание в общей очереди: " + self.job)
         elif op == "remote_test_status":
+            if reply["status"] not in {"PENDING", "LEASED", "RUNNING"}:
+                self.job = None
             self.workdir = reply["workdir"]
             self.result.setPlainText(
                 "Задание: "
@@ -189,6 +195,10 @@ class PairingDialog(QDialog):
             self.invoke("remote_revoke", id=self.agent_id)
 
     def poll(self):
+        row = next((r for r in self.window.agent_items if r["id"] == self.agent_id), None)
+        online = bool(row and row["state"] == "TRUSTED" and row["online"])
+        self.heartbeat.setText("Подписанный heartbeat: " + ("ONLINE" if online else "OFFLINE / ожидается"))
+        self.actions["test"].setEnabled(online and not self.job)
         if self.isVisible() and self.job and not self.window.busy:
             self.invoke("remote_test_status", job=self.job)
 

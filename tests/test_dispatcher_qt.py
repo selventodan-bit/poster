@@ -241,6 +241,81 @@ def scenario(root):
             click("remote_revoke")
             wait(lambda: window.remote_agents_model.rows[0]["state"] == "REVOKED" and not window.busy)
             window.grab().save(str(root / "remote-workers-native.png"))
+            # Stage 5B wizard: real TLS probe + file pairing + wrong fingerprint rejection.
+            import socket
+            import threading
+            from poster.remote.setup import tls_files, relay_profiles
+            from poster.remote.relay import server as relay_server
+            from poster.remote.registry import read_json
+            from poster.remote.pairing import agent_pair
+
+            relay_root = root / "wizard-relay"
+            cert, key = tls_files(relay_root, "127.0.0.1")
+            with socket.socket() as sock:
+                sock.bind(("127.0.0.1", 0))
+                port = sock.getsockname()[1]
+            url = f"https://127.0.0.1:{port}"
+            relay_profiles(relay_root, url, cert)
+            relay = relay_server(
+                read_json(relay_root / "relay.json"), relay_root / "mailbox.sqlite", cert, key, port=port
+            )
+            relay_thread = threading.Thread(target=relay.serve_forever, daemon=True)
+            relay_thread.start()
+            try:
+                click("remote_pairing")
+                wizard = window.pairing_dialog
+                wait(lambda: len(wizard.controller.text()) == 64 and not window.busy)
+                wizard.url.setText(url)
+                QFileDialog.getOpenFileName = staticmethod(
+                    lambda *args: (str(relay_root / "pairing-relay.json"), "")
+                )
+                offer = root / "wizard-offer.json"
+                QFileDialog.getSaveFileName = staticmethod(lambda *args: (str(offer), ""))
+                QTimer.singleShot(20, consent)
+                QTest.mouseClick(wizard.actions["export"], Qt.MouseButton.LeftButton)
+                wait(lambda: offer.exists() and not window.busy)
+                peer = agent_pair(root / "wizard-agent", "Wizard offline", offer, wizard.controller.text())
+                QFileDialog.getOpenFileName = staticmethod(
+                    lambda *args: (str(root / "wizard-agent/registration.json"), "")
+                )
+                wizard.fingerprint.setText("0" * 64)
+                QTest.mouseClick(wizard.actions["import"], Qt.MouseButton.LeftButton)
+                wait(lambda: window.last_error == "REMOTE_FINGERPRINT" and not window.busy)
+                assert wizard.agent_id is None
+                wizard.fingerprint.setText(peer)
+                QTest.mouseClick(wizard.actions["import"], Qt.MouseButton.LeftButton)
+                wait(lambda: wizard.agent_id == peer and not window.busy)
+                QTimer.singleShot(20, consent)
+                QTest.mouseClick(wizard.actions["approve"], Qt.MouseButton.LeftButton)
+                wait(
+                    lambda: (
+                        any(
+                            r["id"] == peer and r["state"] == "TRUSTED"
+                            for r in window.remote_agents_model.rows
+                        )
+                        and not window.busy
+                    )
+                )
+                QTest.mouseClick(wizard.actions["diagnose"], Qt.MouseButton.LeftButton)
+                wait(lambda: "OFFLINE" in wizard.result.toPlainText() and not window.busy)
+                assert "TLS" in wizard.result.toPlainText()
+                wizard.grab().save(str(root / "pairing-native.png"))
+                QTimer.singleShot(20, consent)
+                QTest.mouseClick(wizard.actions["revoke"], Qt.MouseButton.LeftButton)
+                wait(
+                    lambda: (
+                        any(
+                            r["id"] == peer and r["state"] == "REVOKED"
+                            for r in window.remote_agents_model.rows
+                        )
+                        and not window.busy
+                    )
+                )
+                wizard.close()
+            finally:
+                relay.shutdown()
+                relay.server_close()
+                relay_thread.join(5)
             print(json.dumps({"qt_dispatcher": "passed", "workers": pids, "closed_gui_survives": True}))
     finally:
         request(window.root, "shutdown")

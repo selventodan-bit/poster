@@ -3,6 +3,8 @@
 import argparse
 import hashlib
 import json
+import platform
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -14,12 +16,23 @@ import venv
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def build(output, *, wheelhouse=False):
+def build(output, *, wheelhouse=False, revision=None):
     output.mkdir(parents=True, exist_ok=True)
     if subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT):
         raise ValueError("Commit code before building a release tied to its SHA")
-    commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    if revision and not re.fullmatch("[0-9a-f]{40}", revision):
+        raise ValueError("Use a full reviewed Git SHA")
+    commit = subprocess.check_output(["git", "rev-parse", revision or "HEAD"], cwd=ROOT, text=True).strip()
     with tempfile.TemporaryDirectory(prefix="poster-linux-release-") as temporary:
+        # Build only committed files in a fresh tree; ignored build/lib cannot leak stale modules.
+        source = Path(temporary) / "source"
+        source.mkdir()
+        snapshot = Path(temporary) / "source.tar"
+        subprocess.run(
+            ["git", "archive", "--format=tar", "--output", str(snapshot), commit], cwd=ROOT, check=True
+        )
+        with tarfile.open(snapshot) as tar:
+            tar.extractall(source, filter="data")
         root = Path(temporary) / "poster-linux"
         root.mkdir()
         subprocess.run(
@@ -34,13 +47,13 @@ def build(output, *, wheelhouse=False):
                 "--output-file",
                 str(root / "requirements-remote.txt"),
             ],
-            cwd=ROOT,
+            cwd=source,
             check=True,
             stdout=subprocess.DEVNULL,
         )
-        subprocess.run(["uv", "build", "--wheel", "--out-dir", str(root / "wheels")], cwd=ROOT, check=True)
+        subprocess.run(["uv", "build", "--wheel", "--out-dir", str(root / "wheels")], cwd=source, check=True)
         wheel = next((root / "wheels").glob("*.whl"))
-        shutil.copyfile(ROOT / "scripts/install_remote.py", root / "install_remote.py")
+        shutil.copyfile(source / "scripts/install_remote.py", root / "install_remote.py")
         if wheelhouse:
             download_env = Path(temporary) / "download-env"
             venv.EnvBuilder(with_pip=True).create(download_env)
@@ -63,6 +76,8 @@ def build(output, *, wheelhouse=False):
         manifest = dict(
             format="poster.linux-release.v1",
             commit=commit,
+            wheelhouse_python=".".join(map(str, sys.version_info[:2])),
+            wheelhouse_platform=platform.system() + "/" + platform.machine(),
             wheel=wheel.relative_to(root).as_posix(),
             files={
                 p.relative_to(root).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
@@ -87,5 +102,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, default=ROOT / ".poster/linux-release")
     parser.add_argument("--wheelhouse", action="store_true")
+    parser.add_argument(
+        "--revision", help="Full reviewed SHA; useful for a real previous-version upgrade check"
+    )
     args = parser.parse_args()
-    build(args.output, wheelhouse=args.wheelhouse)
+    build(args.output, wheelhouse=args.wheelhouse, revision=args.revision)

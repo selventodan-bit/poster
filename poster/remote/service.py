@@ -91,5 +91,8 @@ def status(root, role):
         )
     except (OSError, ValueError, KeyError):
         result["running"] = False
+    result["online"] = bool(
+        result["running"] and role == "agent" and time.time() - value.get("controller_seen", 0) < 30
+    )
     result["ready"] &= result["running"]
     return result

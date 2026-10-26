@@ -367,6 +367,20 @@ def check(executable, output):
                 Vault(),
             )
             open_gui()
+            # Native frozen Stage 5B dialog, real OS input. No Linux Agent is simulated.
+            tab(3)
+            click("remote_pairing")
+            pairing_window = Desktop(backend="win32").window(title="Подключение Linux Agent — 5B")
+            pairing_window.wait("visible", timeout=20)
+            wait(
+                lambda s: "pairing_controller_fingerprint" in s.get("widgets", {}), "pairing public identity"
+            )
+            pairing_window.capture_as_image().save(output / "00-pairing-wizard.png")
+            pairing_window.set_focus()
+            keyboard.send_keys("%{F4}")
+            pairing_window.wait_not("visible", timeout=20)
+            scenarios.append("frozen_5b_pairing_dialog_native_OS_input")
+            tab(0)
             for label in ["a", "b"]:
                 add(sources / (label + ".postergraph.json"), "Frozen " + label)
             settings(2)

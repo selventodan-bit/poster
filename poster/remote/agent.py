@@ -317,7 +317,7 @@ class Agent:
                     heartbeat = dict(
                         kind="heartbeat",
                         os="linux",
-                        version="5A.1",
+                        version="5B.1",
                         protocol=1,
                         capabilities=capabilities(self.root),
                         runs=[
@@ -346,13 +346,13 @@ class Agent:
                         for body in bodies[: len(messages)]:
                             if body.get("kind") == "received":
                                 self.journal.drop(body["run_id"] + ":received")
+                        self.error = ""
                         for packet in packets:
                             try:
                                 self.handle(packet)
                             except DispatcherError:
                                 self.error = "REMOTE_PROTOCOL"
                             self.acks.append(packet["id"])
-                        self.error = ""
                     except DispatcherError as exc:
                         self.error = exc.code
                     safe_json(
@@ -366,6 +366,7 @@ class Agent:
                             birth=psutil.Process().create_time(),
                             at=time.time(),
                             phase="RUNNING",
+                            controller_seen=self.last_pulse,
                         ),
                     )
                     time.sleep(0.25)
@@ -379,7 +380,7 @@ class Agent:
                                 dict(
                                     kind="heartbeat",
                                     os="linux",
-                                    version="5A.1",
+                                    version="5B.1",
                                     protocol=1,
                                     capabilities=capabilities(self.root, phase="STOPPED"),
                                     runs=[],
