@@ -13,34 +13,38 @@ def enqueue_check(host, agent_id):
     from poster.remote.registry import validate_target
 
     validate_target(host.store, agent_id)
-    folder = private_dir(host.root / "connection-check")
+    folder = private_dir(host.root / "connection-check" / uuid.uuid4().hex)
     source = folder / "connection-check.postergraph.json"
-    if not source.exists():
-        save_graph(
-            source,
-            chain(
-                "Проверка Linux Agent",
-                [
-                    (
-                        "Files.WriteText",
-                        {
-                            "path": "poster-remote-check.txt",
-                            "text": "Poster remote connection OK",
-                            "overwrite": False,
-                        },
-                    )
-                ],
-            ),
-            Vault(),
-        )
-    item = host.catalog.inspect(source)
-    job = host.catalog.enqueue(
-        item["id"],
-        agent_id=agent_id,
-        remote_outputs=["poster-remote-check.txt"],
-        timeout=30,
-        key="remote-check:" + uuid.uuid4().hex,
+    # A fresh isolated source keeps this fixed diagnostic independent of old
+    # sources opened/edited by the user and of the snapshot tree scanner.
+    save_graph(
+        source,
+        chain(
+            "Проверка Linux Agent",
+            [
+                (
+                    "Files.WriteText",
+                    {
+                        "path": "poster-remote-check.txt",
+                        "text": "Poster remote connection OK",
+                        "overwrite": False,
+                    },
+                )
+            ],
+        ),
+        Vault(),
     )
+    item = host.catalog.inspect(source)
+    try:
+        job = host.catalog.enqueue(
+            item["id"],
+            agent_id=agent_id,
+            remote_outputs=["poster-remote-check.txt"],
+            timeout=30,
+            key="remote-check:" + uuid.uuid4().hex,
+        )
+    finally:
+        host.catalog.remove([item["id"]])  # Keep internal diagnostics out of the user project catalog.
     host.start()
     return {"job": job}
 

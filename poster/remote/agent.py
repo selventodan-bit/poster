@@ -388,8 +388,8 @@ class Agent:
                             )
                         ]
                     )
-                except DispatcherError:
-                    pass
+                except Exception:
+                    pass  # Optional STOPPED diagnostics must never bypass owned-process cleanup.
                 for worker in self.workers.values():
                     self.cancel(worker, "DISPATCHER_LOST")
                 for run_id, worker in self.workers.items():

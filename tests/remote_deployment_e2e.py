@@ -277,6 +277,8 @@ def test_installed_services_graph_stop_restart_update_identity_journal_and_remov
     p["ready"]("relay")
     p["ready"]("agent")
     wait(lambda: request(root, "remote_agents")[0]["online"])
+    # Old diagnostic sources must never affect the promised safe next check.
+    next((root / "connection-check").rglob("*.postergraph.json")).write_text("{}")
     assert check_job() != run_id
     # An active journal lock refuses update; no identity change or implicit second process.
     result = subprocess.run(
