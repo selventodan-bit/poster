@@ -5,6 +5,28 @@ on:
 permissions:
   contents: read
 jobs:
+  pinned-launcher-delivery:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.12'
+      - run: uv sync --frozen --extra dev --extra recorder --extra notebook
+      - name: Execute the shipped hash-pinned installer in a fresh environment, including Molab native filesystem
+        run: uv run --no-sync python scripts/cloud/check_pinned_install.py --output .poster/cloud-install
+      - name: Package reusable launchers, demo projects, guide and component SHA256
+        run: uv run --no-sync python scripts/cloud/package_assets.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: poster-cloud-launchers
+          path: |
+            release/cloud/
+            .poster/cloud-install/pinned-install.json
+          include-hidden-files: true
+          if-no-files-found: error
   notebook-runtime:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -15,6 +37,8 @@ jobs:
       - run: uv run --no-sync python -m playwright install --with-deps chromium
       - name: Real notebook kernels, original subprocesses, encrypted results and safe replay refusal
         run: uv run --no-sync python -m pytest -q tests/test_cloud_runtime.py tests/cloud_notebook_runtimes.py tests/cloud_browser_instances.py --junitxml=.poster/cloud-notebook.xml
+      - if: always()
+        run: uv run --no-sync python scripts/summarize_pytest.py .poster/cloud-notebook.xml .poster/cloud-notebook-report.json --label 'Stage 5C real notebook/browser processes'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -53,6 +77,8 @@ jobs:
       - run: uv sync --frozen --extra dev --extra recorder
       - name: Controlled Drive protocol, immutable resources, real loopback OAuth and OS key store
         run: uv run --no-sync python -m pytest -q tests/test_cloud_storage.py tests/test_cloud_auth.py --junitxml=.poster/cloud-core.xml
+      - if: always()
+        run: uv run --no-sync python scripts/summarize_pytest.py .poster/cloud-core.xml .poster/cloud-core-report.json --label 'Stage 5C Drive/OAuth ${{ runner.os }}'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -79,6 +105,8 @@ jobs:
         run: dbus-run-session -- xvfb-run -a uv run --no-sync python -m pytest -q tests/cloud_qt_e2e.py --junitxml=.poster/cloud-qt.xml
       - if: runner.os == 'Windows'
         run: uv run --no-sync python -m pytest -q tests/cloud_qt_e2e.py --junitxml=.poster/cloud-qt.xml
+      - if: always()
+        run: uv run --no-sync python scripts/summarize_pytest.py .poster/cloud-qt.xml .poster/cloud-qt-report.json --label 'Stage 5C Qt ${{ runner.os }}'
       - uses: actions/upload-artifact@v4
         if: always()
         with:

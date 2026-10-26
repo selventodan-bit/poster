@@ -5,6 +5,8 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import subprocess
+import sys
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -51,7 +53,7 @@ _scope["install"]("{commit}", "{archive_sha256}", "{requirements_sha}", molab=__
             cell("code", install.replace("__MOLAB__", "False")),
             cell(
                 "code",
-                'import importlib.util\nfrom poster.cloud.launcher import jupyter\n_provider = "colab" if importlib.util.find_spec("google.colab") is not None else "generic"\nposter_launcher = jupyter(_provider)\ndisplay(poster_launcher.widget)\n',
+                'import importlib.util\nfrom IPython.display import display\nfrom poster.cloud.launcher import jupyter\n_provider = "colab" if importlib.util.find_spec("google.colab") is not None else "generic"\nposter_launcher = jupyter(_provider)\ndisplay(poster_launcher.widget)\n',
             ),
             cell(
                 "markdown",
@@ -92,6 +94,17 @@ if __name__ == "__main__":
 """
     )
     (output / "Poster_Molab.py").write_text(molab, encoding="utf-8")
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "ruff",
+            "format",
+            str(output / "Poster_Molab.py"),
+            str(output / "Poster_Launcher.ipynb"),
+        ],
+        check=True,
+    )
     pins = dict(
         format="poster.notebook.release.v1",
         source_commit=commit,

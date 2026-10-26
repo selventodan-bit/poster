@@ -1,0 +1,12 @@
+{
+  "format": "poster.notebook.release.v1",
+  "source_commit": "7b1bbfc4d771b7497f5c82ea806e70accc68b504",
+  "source_archive_sha256": "e2997fa34d2f9c58cc202e626374ccb70007308852afa5561dd85fc9f183a1b1",
+  "bootstrap_sha256": "0453b5764c2c8094b75e9507aaa0c81dc46ea9122dd4e1420a57913974e065b3",
+  "requirements_sha256": "5a16453ddd0b38119f1f4ee64284164591c2c86d904cb37351016bd323501fbc",
+  "gdrive_fsspec_commit": "dd9bb3025b26091d4a29ac4e81cc3d88910203bd",
+  "files": {
+    "Poster_Launcher.ipynb": "74b5c62f6689f83225c1a84d9e9bb90cc4226fa1970d6c3e3a11cdfa04545b94",
+    "Poster_Molab.py": "4ba7aabbc9f9b9f4d2eb831c9e15ef52dd2b1da3257b9fa33788d5c2a307b525"
+  }
+}

@@ -129,3 +129,21 @@ HTTP: TLS включён, повторной отправки нет, cookies и
 и BrowserProvider. Ответ защищён по умолчанию. Excel не вычисляет формулы; читает
 только cached values. Обновление существующей книги и замена листа разрешаются отдельно.
 Подробный контракт: docs/PROJECTMAKER_3_STAGE3B2.md в GitHub.
+
+Этап 5C — Google Drive и автономные notebook:
+Меню Google Drive в Maker: подключить, сохранить, открыть, обновить, папка и история.
+При первом подключении выберите OAuth Desktop app JSON и разрешите вход в браузере.
+Tokens копировать не нужно; они защищены DPAPI текущего пользователя Windows.
+Файлы CSV/XLSX/JSON добавляются только после явного выбора; укажите возвращаемые файлы.
+В Dispatcher → Google Drive… можно открыть закреплённую версию, подготовить общий
+Colab/Jupyter или Molab Launcher и синхронизировать отдельные результаты каждого запуска.
+«Всего запусков» и «Одновременно» — разные настройки. Для пяти параллельных копий
+также установите max_workers и max_per_project не меньше 5 до запуска службы.
+Notebook работает в автономном режиме DETACHED; Windows может быть выключен.
+Local/Remote managed jobs и расписания по-прежнему требуют работающего Controller.
+После неопределённого POST повтор автоматически не выполняется.
+Демо: examples/maker-stage5c. Launcher: notebooks/Poster_Launcher.ipynb и Poster_Molab.py.
+Инструкция: docs/POSTER_STAGE5C_DRIVE_CLOUD_MULTIWORKER.md.
+Для free Colab/Molab показан ручной интерактивный workflow с параллельностью 1.
+Автоматическое выделение платных ресурсов выключено. Реальные аккаунты провайдеров
+в CI не использовались; HTTP Drive fixture не является живым Google Drive E2E.
