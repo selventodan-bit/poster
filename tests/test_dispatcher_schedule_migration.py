@@ -2,7 +2,7 @@
 
 import sqlite3
 
-from poster.dispatcher.store import APPLICATION_ID, SCHEMA, Store
+from poster.dispatcher.store import APPLICATION_ID, SCHEMA, SCHEMA_VERSION, Store
 
 
 def test_v1_upgrade_preserves_queue_and_control(tmp_path):
@@ -19,7 +19,7 @@ def test_v1_upgrade_preserves_queue_and_control(tmp_path):
     for _ in range(2):
         store = Store(path)
         try:
-            assert store.db.execute("PRAGMA user_version").fetchone()[0] == 2
+            assert store.db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
             assert store.payload("job")["inputs_cipher"] == b"encrypted"
             assert store.payload("job")["status"] == "PENDING"
             assert not store.db.execute("SELECT * FROM schedules").fetchall()

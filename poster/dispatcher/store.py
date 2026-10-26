@@ -14,7 +14,19 @@ from .models import ACTIVE, MESSAGES, TERMINAL, TRANSITIONS, DispatcherError, St
 from .security import plain_path, private_dir, restrict
 
 APPLICATION_ID = 0x50445350
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
+
+MIGRATION_3 = """
+ALTER TABLE jobs ADD COLUMN agent_id TEXT;
+ALTER TABLE jobs ADD COLUMN remote_outputs TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE schedules ADD COLUMN agent_id TEXT;
+ALTER TABLE schedules ADD COLUMN remote_outputs TEXT NOT NULL DEFAULT '[]';
+CREATE TABLE remote_agents(id TEXT PRIMARY KEY,name TEXT NOT NULL,peer TEXT NOT NULL,relay_cipher BLOB NOT NULL,state TEXT NOT NULL,last_seen REAL NOT NULL DEFAULT 0,os TEXT,version TEXT,protocol INTEGER,last_error TEXT NOT NULL DEFAULT '');
+CREATE TABLE remote_runs(run_id TEXT PRIMARY KEY REFERENCES executions(run_id),agent_id TEXT NOT NULL REFERENCES remote_agents(id),state TEXT NOT NULL,lease_until REAL NOT NULL,key_cipher BLOB);
+CREATE TABLE remote_outbox(id TEXT PRIMARY KEY,agent_id TEXT NOT NULL,body BLOB NOT NULL);
+CREATE TABLE remote_seen(id TEXT PRIMARY KEY,expires REAL NOT NULL);
+CREATE INDEX jobs_agent ON jobs(agent_id,status);
+"""
 
 # Additive migration: the 4A queue, reports and state machine remain intact.
 MIGRATION_2 = """
@@ -98,7 +110,7 @@ class Store:
         tables = {r[0] for r in self.db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         app = self.db.execute("PRAGMA application_id").fetchone()[0]
         version = self.db.execute("PRAGMA user_version").fetchone()[0]
-        if (tables and (app != APPLICATION_ID or version not in (1, SCHEMA_VERSION))) or (
+        if (tables and (app != APPLICATION_ID or version not in (1, 2, SCHEMA_VERSION))) or (
             not tables and (app or version)
         ):
             raise DispatcherError("STORE_INVALID")
@@ -130,6 +142,11 @@ class Store:
                 self.db.execute("PRAGMA user_version=1")
             if self.db.execute("PRAGMA user_version").fetchone()[0] == 1:
                 for statement in MIGRATION_2.split(";"):
+                    if statement.strip():
+                        self.db.execute(statement)
+                self.db.execute("PRAGMA user_version=2")
+            if self.db.execute("PRAGMA user_version").fetchone()[0] == 2:
+                for statement in MIGRATION_3.split(";"):
                     if statement.strip():
                         self.db.execute(statement)
                 self.db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
@@ -168,16 +185,53 @@ class Store:
         row = self.db.execute("SELECT id FROM jobs WHERE dedup_hash=?", (dedup_hash(key),)).fetchone()
         return row[0] if row else None
 
-    def enqueue(self, project_id, version, source, inputs_cipher, input_names=(), *, key=None, timeout=300):
+    def enqueue(
+        self,
+        project_id,
+        version,
+        source,
+        inputs_cipher,
+        input_names=(),
+        *,
+        key=None,
+        timeout=300,
+        agent_id=None,
+        remote_outputs=(),
+    ):
         with self.transaction():
             return self._enqueue(
-                project_id, version, source, inputs_cipher, input_names, key=key, timeout=timeout
+                project_id,
+                version,
+                source,
+                inputs_cipher,
+                input_names,
+                key=key,
+                timeout=timeout,
+                agent_id=agent_id,
+                remote_outputs=remote_outputs,
             )
 
-    def _enqueue(self, project_id, version, source, inputs_cipher, input_names=(), *, key=None, timeout=300):
+    def _enqueue(
+        self,
+        project_id,
+        version,
+        source,
+        inputs_cipher,
+        input_names=(),
+        *,
+        key=None,
+        timeout=300,
+        agent_id=None,
+        remote_outputs=(),
+    ):
         """Caller owns BEGIN IMMEDIATE, including any schedule event and cursor update."""
         if not 0.05 <= timeout <= 86400:
             raise DispatcherError("PARAMETERS_INVALID")
+        if agent_id:
+            from poster.remote.registry import validate_target, output_names
+
+            validate_target(self, agent_id)
+            remote_outputs = output_names(remote_outputs)
         now, job_id = time.time(), uuid.uuid4().hex
         hashed = dedup_hash(key)
         if hashed:
@@ -201,6 +255,10 @@ class Store:
                 now,
             ),
         )
+        self.db.execute(
+            "UPDATE jobs SET agent_id=?,remote_outputs=? WHERE id=?",
+            (agent_id, json.dumps(list(remote_outputs)), job_id),
+        )
         self.event(job_id, Status.PENDING)
         return job_id
 
@@ -208,7 +266,7 @@ class Store:
         columns = (
             "*"
             if private
-            else "id,project_id,version,input_names,dedup_hash,status,attempt,timeout,cancel_requested,owner,created,updated"
+            else "id,project_id,version,input_names,dedup_hash,status,attempt,timeout,cancel_requested,owner,created,updated,agent_id,remote_outputs"
         )
         row = self.db.execute("SELECT " + columns + " FROM jobs WHERE id=?", (job_id,)).fetchone()
         if row is None:
@@ -263,7 +321,9 @@ class Store:
             ):
                 return None
             row = self.db.execute(
-                "SELECT * FROM jobs j WHERE status='PENDING' AND NOT (EXISTS(SELECT 1 FROM schedule_events se WHERE se.job_id=j.id) AND EXISTS(SELECT 1 FROM jobs u LEFT JOIN schedule_reviews r ON r.job_id=u.id WHERE u.project_id=j.project_id AND u.status IN ('UNKNOWN','REVIEW_REQUIRED') AND r.job_id IS NULL)) AND (SELECT count(*) FROM jobs a WHERE a.project_id=j.project_id AND a.status IN ('LEASED','RUNNING'))<? ORDER BY created LIMIT 1",
+                "SELECT * FROM jobs j WHERE status='PENDING' AND (agent_id IS NULL OR EXISTS(SELECT 1 FROM remote_agents a WHERE a.id=j.agent_id AND a.state='TRUSTED' AND a.last_seen>"
+                + str(time.time() - 8)
+                + ")) AND NOT (EXISTS(SELECT 1 FROM schedule_events se WHERE se.job_id=j.id) AND EXISTS(SELECT 1 FROM jobs u LEFT JOIN schedule_reviews r ON r.job_id=u.id WHERE u.project_id=j.project_id AND u.status IN ('UNKNOWN','REVIEW_REQUIRED') AND r.job_id IS NULL)) AND (SELECT count(*) FROM jobs a WHERE a.project_id=j.project_id AND a.status IN ('LEASED','RUNNING'))<? ORDER BY created LIMIT 1",
                 (max_per_project,),
             ).fetchone()
             if row is None:
@@ -277,8 +337,16 @@ class Store:
                 "INSERT INTO executions(run_id,job_id,attempt,owner,status,leased) VALUES(?,?,?,?,'LEASED',?)",
                 (run_id, row["id"], row["attempt"] + 1, owner, now),
             )
+            if row["agent_id"]:
+                self.db.execute(
+                    "INSERT INTO remote_runs(run_id,agent_id,state,lease_until) VALUES(?,?,'OFFERED',?)",
+                    (run_id, row["agent_id"], now + 30),
+                )
             self.event(row["id"], Status.LEASED)
         return self.execution(run_id)
+
+    def is_remote(self, run_id):
+        return self.db.execute("SELECT * FROM remote_runs WHERE run_id=?", (run_id,)).fetchone()
 
     def record_process(self, run_id, owner, pid, birth):
         with self.transaction():
