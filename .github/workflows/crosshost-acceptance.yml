@@ -5,16 +5,33 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+  actions: read
 jobs:
-  infrastructure:
+  windows-linux:
     if: github.event.repository.private == false
     runs-on: windows-2022
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Download accepted frozen Windows package, never rebuild it
+        uses: actions/download-artifact@v4
+        with:
+          name: poster-maker-windows
+          run-id: '40355084531'
+          github-token: ${{ github.token }}
+          path: .poster/original-windows
+      - name: Download accepted Linux wheelhouse of the same production SHA
+        uses: actions/download-artifact@v4
+        with:
+          name: poster-linux
+          run-id: '40355084531'
+          github-token: ${{ github.token }}
+          path: .poster/original-linux
+      - name: Install only the external acceptance driver
+        run: python -m pip install ".[recorder]" -c requirements-recorder.txt pywinauto==0.6.9 Pillow==11.3.0
       - name: Install a real WSL2 Ubuntu VM without cache or additional paid resources
         uses: Vampire/setup-wsl@4c48163d9f981914dd8caa0fc335fe19cca5bff4 # v7.2.0
         with:
@@ -30,13 +47,17 @@ jobs:
             [interop]
             enabled=false
             appendWindowsPath=false
-      - name: Require an actual Linux kernel and isolated guest filesystem
-        run: python scripts/crosshost/probe_wsl2.py
+      - name: Real frozen Windows Controller to non-root Linux Agent, TLS Relay, GraphRunner
+        run: python scripts/crosshost/run_hosted.py
+        env:
+          PYTHONUTF8: '1'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: crosshost-infrastructure-capability
-          path: .poster/crosshost-infrastructure/probe.json
+          name: crosshost-safe-evidence
+          path: |
+            .poster/crosshost-infrastructure/probe.json
+            .poster/crosshost-public/
           include-hidden-files: true
           if-no-files-found: warn
           retention-days: 7

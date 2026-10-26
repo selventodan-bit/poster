@@ -11,6 +11,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
+import platform
 import re
 import signal
 import sqlite3
@@ -207,6 +208,22 @@ def action(root, name, data):
         info["uid"] = os.geteuid()
         info["program_commit"] = Path(sys.executable).resolve().parent.parent.name
         info["helper_sha256"] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+        info["os"] = dict(
+            system=platform.system(),
+            kernel=platform.release(),
+            arch=platform.machine(),
+            distribution=platform.freedesktop_os_release().get("PRETTY_NAME"),
+            boot_id=Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
+        )
+        info["roles"] = {}
+        for role in ("agent", "relay", "fixture"):
+            path = root / (role + "-process.json")
+            if path.exists():
+                record = read_json(path)
+                process = same_process(record["pid"], record["birth"])
+                info["roles"][role] = dict(
+                    **record, alive=bool(process and process.status() != psutil.STATUS_ZOMBIE)
+                )
         return info
     if name == "bundle":
         run, version = data["run"], data["version"]

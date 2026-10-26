@@ -30,6 +30,11 @@ def main():
 from pathlib import Path
 mounts=Path('/proc/mounts').read_text()
 interop=Path('/proc/sys/fs/binfmt_misc/WSLInterop')
+# Some hosted WSL builds leave the kernel-wide binfmt registration enabled
+# despite interop=false. Only bootstrap root can disable it; the test user
+# cannot restore it. Require the observed disabled state below.
+if interop.exists() and 'enabled' in interop.read_text():
+ interop.write_text('0')
 print(json.dumps(dict(os=platform.system(),kernel=platform.release(),arch=platform.machine(),
  pid=os.getpid(),boot_id=Path('/proc/sys/kernel/random/boot_id').read_text().strip(),
  mount_types=sorted(set(line.split()[2] for line in mounts.splitlines())),

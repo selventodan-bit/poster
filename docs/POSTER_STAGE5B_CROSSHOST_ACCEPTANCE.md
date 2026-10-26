@@ -45,3 +45,178 @@ requirements-remote.txt внутри hash-verified Linux release.
 Локальный архив с manifest другого SHA не допускается независимо от имени папки.
 SHA256 архивов выше сверены с аннотациями принятого CI. На фактических машинах
 скачанные bytes и BUILD_INFO/release.json проверяются повторно перед запуском.
+
+## Если hosted VM недоступна: минимальные внешние машины
+
+1. Windows 10/11 x64 с открытой, разблокированной интерактивной сессией,
+   Python 3.12 x64, OpenSSH Client и исходящими TCP 22/18443 к Linux. Закладывайте
+   4 GiB RAM и 5 GiB свободного диска. Windows не принимает входящие соединения
+   от Poster. Сам harness оператор запускает на Windows; удалённый доступ Codex
+   не обязателен. При предоставлении доступа нужен рабочий стол, а не только
+   SSH/WinRM в Session 0: harness проверяет настоящий GUI и снимает окно.
+2. Отдельная доверенная Ubuntu 24.04 x86_64, CPython 3.12, минимум 2 vCPU,
+   4 GiB RAM, 10 GiB свободного диска, NTP. Требуются административные права
+   только для OS-пакетов/firewall. Все процессы теста запускает обычный
+   пользователь `postercheck`, без sudo. Это выделенная тестовая учётная запись;
+   production identity/state не используются.
+3. DNS A-имя, например `poster-linux.example.org`, разрешается на Linux и Windows
+   в доступный IPv4 Linux. Windows должна достигать SSH **22** и TLS Relay
+   **18443** на этом адресе; текущий SSH harness использует порт 22. Ограничьте
+   входящие соединения адресом Windows/VPN. HTTP fixture слушает только Linux
+   loopback, внешний порт ему не нужен. Ни NAT port forwarding, ни firewall
+   автоматически не настраиваются. Не направляйте имя на HTTP reverse proxy:
+   тест поднимает собственный TLS Relay с DNS SAN.
+4. Для установки нужны Ubuntu mirrors, PyPI для Windows harness и официальный
+   Playwright browser CDN. Runtime Linux устанавливается из offline wheelhouse.
+   Proxy должен пропускать test hostname напрямую (`NO_PROXY`); не отключайте
+   проверку TLS. Часы обеих ОС должны быть синхронизированы.
+
+Оператор сообщает только готовность машин, ОС, публичные адреса/DNS, порты и
+способ доступа. Пароли, bearer tokens, `queue.key`, приватные SSH/TLS/identity
+ключи в чат не передаются. Покупка VPS не требуется этим документом и без
+отдельного согласия не выполняется.
+
+## Пошаговый запуск на внешних Windows и Linux
+
+1. На Windows скачайте **poster-maker-windows** и **poster-linux** из закреплённого
+   run выше. Сначала извлеките оболочки GitHub artifact. В PowerShell проверьте
+   внутренние архивы, не только соседний `.sha256`:
+
+   ```powershell
+   if ((Get-FileHash .\poster-maker-windows.zip -Algorithm SHA256).Hash.ToLower() -ne '4fabdfd5581133624cdb26e70ae6aeaa9563311bc1754dc825a7736b1af02e54') { throw 'Windows package mismatch' }
+   if ((Get-FileHash .\poster-linux.tar.gz -Algorithm SHA256).Hash.ToLower() -ne 'bcafbd27f20d8f7f8ddb32222b68efada9870d9c2a67e92c4fe473055859e731') { throw 'Linux package mismatch' }
+   Expand-Archive .\poster-maker-windows.zip C:\Poster5BFull
+   $build = Get-Content C:\Poster5BFull\BUILD_INFO.json -Raw | ConvertFrom-Json
+   if ($build.commit -ne 'f411f806d5d0fa498b556bd4e4d2c6a955bcd992') { throw 'Wrong frozen commit' }
+   foreach ($role in 'service','gui') {
+     $item = $build.launchers.$role
+     if ((Get-FileHash (Join-Path C:\Poster5BFull $item.file) -Algorithm SHA256).Hash.ToLower() -ne $item.sha256) { throw 'Launcher hash mismatch' }
+   }
+   ```
+
+2. Получите checkout `codex/poster-5b-crosshost-acceptance`, зафиксируйте его
+   `git rev-parse HEAD`. Harness может содержать исправления теста; frozen
+   production пакеты остаются f411. Не запускайте графы из checkout вместо
+   frozen Service/установленного Linux wheel. В checkout Windows:
+
+   ```powershell
+   py -3.12 -m venv .venv-crosshost
+   .\.venv-crosshost\Scripts\python.exe -m pip install ".[recorder]" -c requirements-recorder.txt pywinauto==0.6.9 Pillow==11.3.0
+   .\.venv-crosshost\Scripts\python.exe -m pip check
+   ```
+
+3. Подготовьте приватный локальный каталог Windows, без синхронизации в облако.
+   Его ACL должен разрешать доступ только текущему пользователю. Команды ниже
+   передают SID, а не содержимое ключей:
+
+   ```powershell
+   New-Item -ItemType Directory C:\Poster5BPrivate
+   $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+   icacls C:\Poster5BPrivate /inheritance:r /grant:r "*$($sid):(OI)(CI)F"
+   ssh-keygen -t ed25519 -f C:\Poster5BPrivate\postercheck_ed25519
+   ```
+
+   Передайте администратору Linux только `.pub`. Для unattended BatchMode ключ
+   должен быть доступен SSH без интерактивного запроса: через локальный ssh-agent
+   либо специально созданный ephemeral test key в защищённом файле. Секретную
+   часть не пересылайте. Администратор добавляет public key в
+   `/home/postercheck/.ssh/authorized_keys` (directory 700, file 600), запрещает
+   password login для этой учётной записи и оставляет обычный shell для helper.
+
+4. Администратор Linux устанавливает OS-пакеты:
+
+   ```bash
+   sudo apt-get update
+   sudo apt-get install openssh-server python3.12-venv ca-certificates
+   sudo systemctl enable --now ssh
+   sudo ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256
+   ```
+
+   Последняя команда выводит **публичный** host fingerprint. Сверьте его на
+   Windows по отдельному доверенному каналу. Запишите проверенную публичную
+   строку host key с именем хоста в `C:/Poster5BPrivate/known_hosts`.
+   `ssh-keyscan` сам по себе не подтверждает доверие. Проверьте вход:
+
+   ```powershell
+   ssh -T -o BatchMode=yes -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes -o UserKnownHostsFile=C:/Poster5BPrivate/known_hosts -i C:/Poster5BPrivate/postercheck_ed25519 postercheck@poster-linux.example.org id -u
+   ```
+
+   UID должен отличаться от 0. Те же pinned options используйте для SCP архива
+   Linux и `scripts/crosshost/linux_peer.py`. Helper передавайте **с этого Windows
+   checkout**, чтобы bytes и SHA256 совпадали, включая окончания строк.
+
+5. Под `postercheck`, без sudo, проверьте и установите архив:
+
+   ```bash
+   umask 077
+   cd /home/postercheck
+   echo 'bcafbd27f20d8f7f8ddb32222b68efada9870d9c2a67e92c4fe473055859e731  poster-linux.tar.gz' | sha256sum --check
+   mkdir -m 700 release checks
+   python3.12 -m tarfile -e poster-linux.tar.gz release
+   cd release/poster-linux
+   python3.12 -c 'import json; assert json.load(open("release.json"))["commit"] == "f411f806d5d0fa498b556bd4e4d2c6a955bcd992"'
+   python3.12 install_remote.py install --release "$PWD" --role agent --program /home/postercheck/poster-program --state /home/postercheck/install-placeholder --unit-dir /home/postercheck/units-staging --offline
+   /home/postercheck/poster-program/current/bin/python -m pip check
+   ```
+
+   Installer проверяет SHA256 **всех** файлов manifest и pinned dependencies.
+   `units-staging` не активируется: тест сам управляет отдельными процессами
+   Agent/Relay, включая аварийное завершение Relay. Автоматический restart службы
+   не должен скрывать этот сбой. Положите переданный helper в
+   `/home/postercheck/checks/linux_peer.py`; сравните `sha256sum` с
+   `Get-FileHash` на Windows.
+
+6. Администратор устанавливает browser OS libraries, затем пользователь скачивает
+   браузер. Этот шаг обязателен для настоящего Chromium timeout:
+
+   ```bash
+   sudo /home/postercheck/poster-program/current/bin/python -m playwright install-deps chromium
+   # Следующая команда — снова под postercheck, без sudo:
+   /home/postercheck/poster-program/current/bin/python -m playwright install chromium
+   ```
+
+7. Сохраните приватный `C:/Poster5BPrivate/crosshost.json`:
+
+   ```json
+   {
+     "windows_bundle": "C:/Poster5BFull",
+     "expected_commit": "f411f806d5d0fa498b556bd4e4d2c6a955bcd992",
+     "ssh_destination": "postercheck@poster-linux.example.org",
+     "ssh_key": "C:/Poster5BPrivate/postercheck_ed25519",
+     "known_hosts": "C:/Poster5BPrivate/known_hosts",
+     "linux_python": "/home/postercheck/poster-program/current/bin/python",
+     "linux_helper": "/home/postercheck/checks/linux_peer.py",
+     "linux_root": "/home/postercheck/checks/run-001",
+     "relay_url": "https://poster-linux.example.org:18443"
+   }
+   ```
+
+   `linux_root` и Windows output должны **ещё не существовать**. Для следующей
+   попытки выберите новые имена. Windows `queue.key` создаётся только на Windows.
+   Harness создаёт TLS key только на Linux, передаёт публичную CA через pinned
+   SSH, проверяет DNS SAN, неправильные CA/hostname/token, pins и signed heartbeat.
+   Не подготавливайте pairing вручную и не копируйте Windows state в Linux.
+
+8. В разблокированной Windows desktop session запустите:
+
+   ```powershell
+   .\.venv-crosshost\Scripts\python.exe scripts/check_remote_crosshost.py --config C:/Poster5BPrivate/crosshost.json --output C:/Poster5BPrivate/run-001
+   ```
+
+   Дождитесь выхода команды. Успех требует exit 0, `status=PASSED`,
+   `full_cross_host_acceptance=true` и **всех 18** `scenarios=PASSED`.
+   FAILED/NOT_EXECUTED/частичный список не принимаются. По умолчанию публичны
+   только безопасный `report.json` и проверенный screenshot окна; весь каталог
+   результата содержит ключи/профили и публиковаться не должен.
+
+9. До удаления приватных state сохраните локально ОС/версию ядра, SHA пакетов и
+   checkout, реальные PID с birth time, HTTP fixture hashes/types/counts,
+   returned files и readonly копию Windows SQLite (вместе с WAL/SHM либо через
+   SQLite backup). SQLite и Linux journal остаются в приватном хранилище.
+   Для публикации используйте только выбранные столбцы jobs/executions:
+   ID, status, run_id, pid, birth, timestamps, code, effects_possible; никакие
+   inputs_cipher/key_cipher/profile_cipher/credential bytes не включаются.
+   После анализа остановите принадлежащие тесту процессы и удалите ephemeral
+   SSH key/authorized_keys entry и только тестовые state. Не удаляйте чужие
+   процессы по имени. Если cleanup не удался, оператор останавливает свои
+   процессы по сохранённым PID **и времени рождения**.

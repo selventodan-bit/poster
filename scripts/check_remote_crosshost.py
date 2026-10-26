@@ -10,12 +10,14 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import platform
 import re
 import shlex
 import socket
 import sqlite3
 import subprocess
 import time
+import traceback
 from urllib.parse import urlsplit
 import uuid
 
@@ -157,6 +159,13 @@ def check(config, output):
         [str(Path(os.environ["SystemRoot"]) / "System32"), os.environ["SystemRoot"]]
     )
     processes, passed, phase, prepared = [], {}, "prepare", False
+    proof = dict(
+        windows=dict(os=platform.system(), release=platform.release(), version=platform.version()),
+        production_commit=info["commit"],
+        launchers=info["launchers"],
+        jobs=[],
+        returned_files=[],
+    )
     canary = "CROSSHOST_PRIVATE_" + uuid.uuid4().hex
 
     def ok(*names):
@@ -224,6 +233,10 @@ def check(config, output):
         window.wait("visible", timeout=60)
         for process, name in zip(processes, ("PosterService.exe", "PosterDispatcher.exe"), strict=True):
             assert Path(psutil.Process(process.pid).exe()).resolve() == bundle / name
+        proof["windows"]["processes"] = [
+            dict(pid=p.pid, birth=psutil.Process(p.pid).create_time(), executable=name)
+            for p, name in zip(processes, ("PosterService.exe", "PosterDispatcher.exe"), strict=True)
+        ]
         ok("frozen_windows_processes")
         phase = "TLS and pairing"
         client = Client(operator["controller"], "controller")
@@ -258,6 +271,11 @@ def check(config, output):
             finally:
                 client.close()
         ok("tls_hostname_certificate_auth")
+        proof["tls"] = dict(
+            url=config["relay_url"],
+            verified=True,
+            rejected=["bad_credential", "untrusted_CA", "wrong_hostname"],
+        )
         offer = output / "offer-private.json"
         public = call(
             "remote_pairing_export",
@@ -292,6 +310,9 @@ def check(config, output):
             == hashlib.sha256((Path(__file__).parent / "crosshost/linux_peer.py").read_bytes()).hexdigest()
         )
         ok("linux_processes", "pairing_fingerprints_approval", "signed_heartbeat")
+        proof["linux"] = {
+            k: observation[k] for k in ("os", "uid", "program_commit", "helper_sha256", "roles")
+        }
         window.capture_as_image().save(output / "windows-controller.png")
         fixture_url = observation["url"]
         phase = "snapshot, protected types, parallel limits"
@@ -326,6 +347,12 @@ def check(config, output):
         assert calls[0]["sha256"] == hashlib.sha256(json.dumps(secret, sort_keys=True).encode()).hexdigest()
         assert calls[0]["types"]["n"] == "int" and calls[0]["types"]["ok"] == "bool"
         ok("exact_maker_snapshot", "typed_and_protected_inputs")
+        proof["snapshot"] = dict(
+            version=item["version"],
+            sha256=hashlib.sha256(original).hexdigest(),
+            original_bytes_equal=True,
+            run_id=run,
+        )
         # Same project must remain pending while max_per_project=1.
         queued = call(
             "enqueue_batch",
@@ -350,6 +377,12 @@ def check(config, output):
         )
         time.sleep(1)
         assert call("show", id=third)["status"] == "PENDING"
+        proof["parallel"] = dict(
+            active=[{k: row.get(k) for k in ("id", "pid", "birth", "status")} for row in active],
+            observed_linux=peer.call("observe")["processes"],
+            same_project_pending=True,
+            global_limit_pending=True,
+        )
         ok("two_parallel_executions", "global_and_project_limits")
         peer.call("release", label="first")
         peer.call("release", label="second")
@@ -359,6 +392,19 @@ def check(config, output):
         value = call("show", id=first)
         assert (Path(value["workdir"]) / "out.txt").read_text() == "cross-host result"
         assert value["report"]["remote_agent"] == agent_id and value["report"]["gui_imports_forbidden"]
+        returned = output / "returned-files"
+        returned.mkdir()
+        for job, filename, expected in [
+            (first, "out.txt", b"cross-host result"),
+            (third, "third.txt", b"third"),
+        ]:
+            value = call("show", id=job)
+            raw = (Path(value["workdir"]) / filename).read_bytes()
+            assert raw == expected
+            (returned / filename).write_bytes(raw)
+            proof["returned_files"].append(
+                dict(name=filename, sha256=hashlib.sha256(raw).hexdigest(), bytes=len(raw))
+            )
         ok("linux_graphrunner_output", "windows_history")
         phase = "cancel and real browser timeout"
         cancelled, *_ = enqueue([("Logic.Delay", {"milliseconds": 120000})])
@@ -373,8 +419,10 @@ def check(config, output):
             lambda: [p for p in peer.call("observe")["processes"]["alive"] if "chrom" in p["name"].lower()]
         )
         assert seen_browser
+        proof["browser"] = dict(observed=seen_browser)
         assert terminal(browser)["status"] == "UNKNOWN"
         wait(lambda: not peer.call("observe")["processes"]["alive"])
+        proof["browser"]["alive_after_timeout"] = []
         ok("browser_timeout_cleanup", "no_orphan_browsers")
         phase = "stop and reconnect"
         before = peer.call("observe")["identity_sha256"]
@@ -384,6 +432,7 @@ def check(config, output):
         peer.call("start", role="agent")
         wait(online)
         assert peer.call("observe")["identity_sha256"] == before
+        proof["reconnect"] = dict(identity_preserved=True, roles=peer.call("observe")["roles"])
         ok("agent_disconnect_reconnect")
         phase = "partition after POST; UNKNOWN never retries"
         lost, *_ = enqueue([("HTTP.Post", {"url": fixture_url + "/lost"})], timeout=90)
@@ -396,6 +445,7 @@ def check(config, output):
         time.sleep(3)
         assert len([c for c in peer.call("observe")["calls"] if c["label"] == "lost"]) == 1
         assert call("show", id=lost)["status"] == "UNKNOWN" and len(call("show", id=lost)["history"]) == 1
+        proof["partition"] = dict(job_id=lost, status="UNKNOWN", post_count=1, history_count=1)
         ok("post_partition_unknown_no_resend")
         phase = "private boundary and revocation"
         wait(lambda: not peer.call("observe")["processes"]["alive"])
@@ -412,6 +462,11 @@ def check(config, output):
             if path.exists():
                 assert canary.encode() not in path.read_bytes()
         ok("secret_and_queue_key_boundary")
+        proof["secret_boundary"] = dict(
+            queue_key_transferred=False,
+            linux_files_checked=len(remote_files),
+            plaintext_canary_absent=True,
+        )
         call("remote_revoke", id=agent_id)
         assert not online()
         refused = call(
@@ -419,6 +474,23 @@ def check(config, output):
         )
         assert not refused["jobs"] and refused["errors"][0]["code"] == "REMOTE_REVOKED"
         ok("revoke_without_fallback")
+        proof["fixture"] = peer.call("observe")["calls"]
+        # Preserve the complete database only in private output. Publish an
+        # explicit safe column allowlist; inputs and key/profile ciphers stay local.
+        with sqlite3.connect(root / "dispatcher.sqlite") as db:
+            with sqlite3.connect(output / "windows-history-private.sqlite") as backup:
+                db.backup(backup)
+            db.row_factory = sqlite3.Row
+            proof["sqlite_history"] = [
+                dict(row)
+                for row in db.execute(
+                    "SELECT run_id,job_id,attempt,status,pid,birth,leased,started,finished,code,effects_possible "
+                    "FROM executions ORDER BY leased"
+                )
+            ]
+            proof["jobs"] = [
+                dict(row) for row in db.execute("SELECT id,status,attempt FROM jobs ORDER BY created")
+            ]
         assert set(passed) == set(SCENARIOS)
         return report(
             output / "report.json",
@@ -429,6 +501,7 @@ def check(config, output):
             linux_non_root=True,
             separate_hosts=True,
             real_tcp_tls=True,
+            proof=proof,
         )
     except Exception as exc:
         report(
@@ -437,6 +510,15 @@ def check(config, output):
             scenarios=passed,
             phase=phase,
             error_type=type(exc).__name__,
+            failure_line=next(
+                (
+                    frame.lineno
+                    for frame in reversed(traceback.extract_tb(exc.__traceback__))
+                    if Path(frame.filename).resolve() == Path(__file__).resolve()
+                ),
+                None,
+            ),
+            proof=proof,
         )
         raise RuntimeError("Cross-host failed at " + phase) from None
     finally:
