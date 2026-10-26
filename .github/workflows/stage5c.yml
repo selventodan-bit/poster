@@ -1,0 +1,25 @@
+name: stage5c-drive-cloud
+on:
+  push:
+    branches: [codex/poster-5c-drive-cloud-multiworker]
+permissions:
+  contents: read
+jobs:
+  provider-documentation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Audit official public docs, without provider credentials or paid operations
+        run: python scripts/cloud/research_providers.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stage5c-provider-documentation
+          path: .poster/stage5c-provider-docs/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
