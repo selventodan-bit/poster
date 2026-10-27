@@ -99,6 +99,7 @@ async def execute(store, execution, owner, controls):
     uncertain = False
     browser = False
     cleanup_failure = None
+    start_rejection = None
     try:
         snapshots = Snapshots(store.root)
         manifest, files = snapshots.read(job["version"])
@@ -143,6 +144,15 @@ async def execute(store, execution, owner, controls):
         for name, value in envelope.get("secrets", {}).items():
             inputs[name] = vault.put_value(value)
         if not store.start(execution["run_id"], owner, os.getpid()):
+            recorded = store.execution(execution["run_id"])
+            latest_job = store.payload(execution["job_id"], private=False)
+            start_rejection = dict(
+                recorded_pid=recorded["pid"],
+                actual_pid=os.getpid(),
+                owner_matches=recorded["owner"] == owner,
+                status=latest_job["status"],
+                cancel_requested=bool(latest_job["cancel_requested"]),
+            )
             state, code = Status.CANCELLED, "CANCEL_REQUESTED"
         else:
             profile = None
@@ -296,6 +306,8 @@ async def execute(store, execution, owner, controls):
         "project_version": job["version"],
         "attempt": execution["attempt"],
         "worker_id": os.getpid(),
+        "worker_parent_id": os.getppid(),
+        "start_rejection": start_rejection,
         "worker_executable": sys.executable,
         "worker_frozen": bool(getattr(sys, "frozen", False)),
         "status": state,
@@ -335,6 +347,16 @@ def main(argv=None):
     parser.add_argument("--owner", required=True)
     args = parser.parse_args(argv)
     os.umask(0o077)
+    if os.environ.pop("POSTER_WORKER_PID_PIPE", None) == "1":
+        import psutil
+
+        os.write(
+            1,
+            json.dumps(
+                dict(format="poster.worker.pid.v1", pid=os.getpid(), birth=psutil.Process().create_time())
+            ).encode()
+            + b"\n",
+        )
     raw = b""
     while b"\n" not in raw and len(raw) < 4096:
         chunk = os.read(0, 4096)

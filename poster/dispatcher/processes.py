@@ -5,6 +5,10 @@ import signal
 import subprocess
 import sys
 import time
+import json
+import math
+import queue
+import threading
 
 import psutil
 
@@ -181,6 +185,38 @@ class WindowsJob:
             self.handle = None
 
 
+def needs_pid_ack():
+    # Windows venv python.exe can be a redirector owning a second interpreter.
+    # Frozen executables and ordinary Python keep the original launch contract.
+    return os.name == "nt" and not getattr(sys, "frozen", False) and sys.prefix != sys.base_prefix
+
+
+def verified_worker_identity(process, launch_birth, packet):
+    """A private pipe assertion must agree with kernel identity and ancestry."""
+    try:
+        if (
+            set(packet) != {"format", "pid", "birth"}
+            or packet["format"] != "poster.worker.pid.v1"
+            or type(packet["pid"]) is not int
+            or packet["pid"] <= 0
+            or type(packet["birth"]) not in {int, float}
+            or not math.isfinite(packet["birth"])
+        ):
+            raise ValueError()
+        launched = same_process(process.pid, launch_birth)
+        worker = same_process(packet["pid"], packet["birth"])
+        if launched is None or worker is None:
+            raise ValueError()
+        if worker.pid != launched.pid and not any(
+            ancestor.pid == launched.pid and ancestor.create_time() == launch_birth
+            for ancestor in worker.parents()
+        ):
+            raise ValueError()
+        return worker.pid, worker.create_time()
+    except (ValueError, TypeError, KeyError, psutil.Error) as exc:
+        raise DispatcherError("PROCESS_CONTROL_FAILED") from exc
+
+
 class WorkerProcess:
     def __init__(self, store, execution):
         self.execution = execution
@@ -189,6 +225,7 @@ class WorkerProcess:
         self.cancelled_at = self.reason = None
         self.started = False
         try:
+            identity_pipe = needs_pid_ack()
             self.process = subprocess.Popen(
                 command(
                     "worker",
@@ -200,18 +237,38 @@ class WorkerProcess:
                     execution["owner"],
                 ),
                 cwd=store.root,
-                env={**environment(), "POSTER_DISPATCHER_RUN": execution["run_id"]},
+                env={
+                    **environment(),
+                    "POSTER_DISPATCHER_RUN": execution["run_id"],
+                    **({"POSTER_WORKER_PID_PIPE": "1"} if identity_pipe else {}),
+                },
                 stdin=subprocess.PIPE,
-                stdout=subprocess.DEVNULL,
+                stdout=subprocess.PIPE if identity_pipe else subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 **process_options(),
             )
             self.birth = psutil.Process(self.process.pid).create_time()
             if os.name == "nt":
                 self.job = WindowsJob(self.process.pid)
-            if not store.record_process(
-                execution["run_id"], execution["owner"], self.process.pid, self.birth
-            ):
+            worker_pid, worker_birth = self.process.pid, self.birth
+            if identity_pipe:
+                messages = queue.Queue(maxsize=1)
+
+                def ready():
+                    try:
+                        raw = self.process.stdout.readline(4097)
+                        messages.put(json.loads(raw) if len(raw) <= 4096 else None)
+                    except Exception:
+                        messages.put(None)
+
+                reader = threading.Thread(target=ready, daemon=True, name="worker-pid-pipe")
+                reader.start()
+                try:
+                    packet = messages.get(timeout=10)
+                except queue.Empty as exc:
+                    raise DispatcherError("PROCESS_CONTROL_FAILED") from exc
+                worker_pid, worker_birth = verified_worker_identity(self.process, self.birth, packet)
+            if not store.record_process(execution["run_id"], execution["owner"], worker_pid, worker_birth):
                 raise DispatcherError("PROCESS_CONTROL_FAILED")
         except Exception:
             self.close(force=True)
@@ -247,6 +304,8 @@ class WorkerProcess:
             reap_detached(self.execution["run_id"], getattr(self, "birth", 0))
             if self.process.stdin:
                 self.process.stdin.close()
+            if self.process.stdout:
+                self.process.stdout.close()
             try:
                 self.process.wait(timeout=5)
             except subprocess.TimeoutExpired:

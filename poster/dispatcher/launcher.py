@@ -46,7 +46,14 @@ def environment():
         k: v
         for k, v in os.environ.items()
         if k
-        not in {"POSTER_SESSION_KEY", "PYTHONHOME", "PYTHONPATH", "POSTER_PYTHON", "POSTER_DISPATCHER_RUN"}
+        not in {
+            "POSTER_SESSION_KEY",
+            "PYTHONHOME",
+            "PYTHONPATH",
+            "POSTER_PYTHON",
+            "POSTER_DISPATCHER_RUN",
+            "POSTER_WORKER_PID_PIPE",
+        }
         and not k.startswith("_PYI_")
     }
     result["PYTHONUTF8"] = "1"
