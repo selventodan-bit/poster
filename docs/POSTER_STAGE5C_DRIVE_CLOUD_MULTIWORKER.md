@@ -383,3 +383,25 @@ SHA256 каждой конкретной поставки печатается �
 [Molab remote storage](https://molab.marimo.io/blog/drive-storage),
 [gdrive-fsspec](https://github.com/marimo-team/gdrive-fsspec),
 [marimo](https://docs.marimo.io/).
+
+## Устойчивость frozen GUI-приёмки после подключения Dispatcher
+
+В `completed(connect)` Dispatcher записывает первый observer до обработки Qt
+`LayoutRequest`: появление многострочного статуса службы сдвигает ряд кнопок.
+Воспроизведение на настоящем Qt показало смену центра Google Drive с Y=43 на
+Y=73. Кнопка при этом существует и активна. Прежний frozen harness брал один
+подключённый кадр и мог нажать уже устаревшую координату; последующий timeout
+ожидания окна Drive оставался помечен общей фазой «Dispatcher cloud control».
+
+Драйвер теперь сначала активирует окно, затем требует правильный frozen PID,
+connected/idle/enabled и одинаковые координаты в двух разных свежих поколениях
+observer. После этого выполняется прежний настоящий OS click. Ожидания не
+увеличены, внутренние callback/IPC вместо кликов не используются. В public proof
+попадают только безопасные PID/координаты/этапы; при ошибке сохраняется screenshot
+fixture UI. Дополнительный настоящий Qt/QWindow regression проверяет пересчёт
+layout и попадание клика в кнопку после него.
+
+Исполняемые `poster/*`, dependency lock и bootstrap после reviewed runtime pin
+`7b1bbfc4d771b7497f5c82ea806e70accc68b504` не изменены. Исправление затрагивает
+драйвер приёмки и его тест; source/archive/dependency pins Launcher сохраняются.
+Fresh-venv установка и genuine Jupyter/marimo проверки остаются обязательными.

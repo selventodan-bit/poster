@@ -127,3 +127,83 @@ def test_maker_cloud_actions_and_existing_window_are_available(app, tmp_path):
         window.deleteLater()
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         app.processEvents()
+
+
+def test_dispatcher_cloud_os_hit_waits_for_post_connect_layout(app, tmp_path, monkeypatch):
+    """Actual service, deferred Qt layout, fresh observer frames and QWindow hit test."""
+    import os
+    from PySide6.QtCore import QPoint
+    from poster.dispatcher.qt_app import DispatcherWindow
+    from poster.dispatcher.host import request
+    import importlib.util
+
+    script = Path(__file__).resolve().parents[1] / "scripts/cloud/check_frozen.py"
+    spec = importlib.util.spec_from_file_location("cloud_frozen_driver", script)
+    driver = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(driver)
+    root = tmp_path / "Dispatcher Ж"
+    observer = tmp_path / "dispatcher-observer.json"
+    monkeypatch.setenv("POSTER_DISPATCHER_WORKSPACE", str(root))
+    monkeypatch.setenv("POSTER_DISPATCHER_OBSERVER", str(observer))
+    with serve_drive_fixture() as (_, url):
+        config = tmp_path / "fixture.json"
+        config.write_text(json.dumps(dict(mode="drive_fixture", nonce=uuid.uuid4().hex, url=url)))
+        monkeypatch.setenv("POSTER_CLOUD_TEST_CONFIG", str(config))
+        window = DispatcherWindow()
+        observed = []
+        original = window.observe
+
+        def observe():
+            original()
+            state = json.loads(observer.read_bytes())
+            if state.get("connected"):
+                point = state["widgets"].get("cloud_projects")
+                if point:
+                    observed.append((point["x"], point["y"]))
+
+        window.observe = observe
+        window.show()
+        stable = driver.StableDispatcherControl("cloud_projects", os.getpid())
+        chosen = []
+
+        def ready():
+            if not observer.exists():
+                return False
+            state = json.loads(observer.read_bytes())
+            point = stable.observe(state, observer.stat().st_mtime_ns)
+            if point:
+                chosen.append(point)
+            return bool(point)
+
+        try:
+            wait(app, ready)
+            assert len(stable.frames) >= 2
+            current = window.buttons["cloud_projects"].mapToGlobal(
+                window.buttons["cloud_projects"].rect().center()
+            )
+            assert (chosen[0]["x"], chosen[0]["y"]) == (current.x(), current.y())
+            # The first connected observer runs inside completed(connect),
+            # before Qt's pending banner LayoutRequest. It really moves.
+            assert observed[0] != observed[-1], observed
+            point = window.mapFromGlobal(QPoint(chosen[0]["x"], chosen[0]["y"]))
+            QTest.mouseClick(
+                window.windowHandle(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, point
+            )
+            wait(
+                app,
+                lambda: (
+                    hasattr(window, "cloud_dialog")
+                    and window.cloud_dialog.isVisible()
+                    and not window.cloud_dialog.busy
+                ),
+            )
+            assert window.cloud_dialog.objectName() == "poster_cloud_projects"
+            window.cloud_dialog.reject()
+            window.cloud_dialog.deleteLater()
+        finally:
+            window.close()
+            request(root, "shutdown")
+            window.pool.shutdown(wait=True, cancel_futures=True)
+            window.deleteLater()
+            QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+            app.processEvents()

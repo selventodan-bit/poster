@@ -16,6 +16,39 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(ROOT / "scripts"), str(ROOT / "tests")]
 
 
+class StableDispatcherControl:
+    """Two fresh observer generations after focus, for the expected frozen PID.
+
+    completed(connect) observes before Qt handles the banner's LayoutRequest.
+    Its first valid/connected frame can therefore contain obsolete coordinates.
+    """
+
+    def __init__(self, name, pid):
+        self.name, self.pid = name, pid
+        self.generation = self.point = None
+        self.count = 0
+        self.frames = []
+
+    def observe(self, state, generation):
+        widget = state.get("widgets", {}).get(self.name)
+        if (
+            state.get("pid") != self.pid
+            or not state.get("connected")
+            or state.get("busy")
+            or not widget
+            or not widget.get("enabled")
+        ):
+            self.point, self.count = None, 0
+            return None
+        point = (widget["x"], widget["y"])
+        if generation != self.generation:
+            self.count = self.count + 1 if point == self.point else 1
+            self.point, self.generation = point, generation
+            self.frames.append(dict(x=point[0], y=point[1]))
+            self.frames = self.frames[-8:]
+        return widget if self.count >= 2 else None
+
+
 def main():
     if os.name != "nt":
         raise RuntimeError("REAL_WINDOWS_REQUIRED")
@@ -108,6 +141,24 @@ def main():
         assert Path(p.exe()).resolve() == bundle / name
         proof["processes"].append(dict(pid=p.pid, birth=p.create_time(), executable=name))
 
+    def dispatcher_click(name):
+        dispatcher.set_focus()  # Activation/DPI/layout changes precede observation.
+        stable = StableDispatcherControl(name, dispatcher.process_id())
+
+        def ready():
+            state = snapshot(dispatcher_observer)
+            try:
+                generation = dispatcher_observer.stat().st_mtime_ns
+            except OSError:
+                return None
+            return stable.observe(state, generation)
+
+        state = wait(ready, "Dispatcher stable control: " + name)
+        proof.setdefault("dispatcher_controls", []).append(
+            dict(name=name, pid=stable.pid, frames=stable.frames)
+        )
+        mouse.click(coords=(state["x"], state["y"]))  # Real OS input, no internal callback.
+
     try:
         with serve_drive_fixture() as (api, url):
             config = private / "fixture.json"
@@ -199,12 +250,8 @@ await backend.close()
             dispatcher.wait("visible", timeout=60)
             record(dispatcher, "PosterDispatcher.exe")
             wait(lambda: snapshot(dispatcher_observer).get("connected"), "Dispatcher ready")
-            state = wait(
-                lambda: snapshot(dispatcher_observer).get("widgets", {}).get("cloud_projects"),
-                "Dispatcher cloud control",
-            )
-            dispatcher.set_focus()
-            mouse.click(coords=(state["x"], state["y"]))
+            dispatcher_click("cloud_projects")
+            phase = "Dispatcher Drive window after OS click"
             cloud.wait("visible", timeout=30)
             wait(
                 lambda: (
@@ -217,12 +264,8 @@ await backend.close()
             rows = request(queue, "projects")
             assert rows[0]["cloud"]["version"] == selected["version"]
             # Reopen and use the real frozen UI's result importer.
-            state = wait(
-                lambda: snapshot(dispatcher_observer).get("widgets", {}).get("cloud_projects"),
-                "Dispatcher cloud reopen",
-            )
-            dispatcher.set_focus()
-            mouse.click(coords=(state["x"], state["y"]))
+            dispatcher_click("cloud_projects")
+            phase = "Dispatcher Drive reopen after OS click"
             cloud.wait("visible", timeout=30)
             wait(lambda: not snapshot(observer).get("busy"), "Results ready")
             click(observer, "cloud_results", cloud)
@@ -256,6 +299,19 @@ await backend.close()
             proof["status"] = "PASSED"
     except Exception as exc:
         proof.update(phase=phase, error_type=type(exc).__name__)
+        # Payload-free state only. Never publish the complete observer, account
+        # settings, widget text, inputs or a private workspace on failure.
+        state = snapshot(dispatcher_observer)
+        control = state.get("widgets", {}).get("cloud_projects")
+        proof["dispatcher_failure"] = {
+            k: state.get(k) for k in ("pid", "connected", "busy", "error", "action")
+        }
+        proof["dispatcher_failure"]["cloud_projects"] = control
+        if "dispatcher" in locals():
+            try:
+                dispatcher.capture_as_image().save(public / "dispatcher-failure.png")
+            except Exception:
+                pass  # Diagnostics must not replace the original failure.
         raise
     finally:
         try:
