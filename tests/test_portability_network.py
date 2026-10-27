@@ -125,3 +125,17 @@ async def test_notebook_private_network_binding_never_enters_source_or_public_re
             assert b"PROXY_PRIVATE_CANARY" not in b"".join(item["raw"] for item in api.files.values())
         finally:
             await backend.close()
+
+
+async def test_actual_proxy_dns_and_connection_errors_are_payload_free(tmp_path):
+    import socket
+
+    with pytest.raises(GraphError, match="NETWORK_DNS"):
+        await probe(
+            dict(kind="http", host="poster-unreachable.invalid", port=8000), "https://example.org/", timeout=3
+        )
+    with socket.socket() as reservation:
+        reservation.bind(("127.0.0.1", 0))
+        unused = reservation.getsockname()[1]
+    with pytest.raises(GraphError, match="NETWORK_CONNECT"):
+        await probe(dict(kind="http", host="127.0.0.1", port=unused), "https://example.org/", timeout=3)

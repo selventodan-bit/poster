@@ -177,7 +177,7 @@ def main():
         proof["scenarios"].append("frozen_" + role + "_stage5d_preparation_actual_readiness")
         preparation.set_focus()
         keyboard.send_keys("{ESC}")
-        wait(lambda: not preparation.is_visible(), role + " preparation closed")
+        wait(lambda: not preparation.exists(), role + " preparation closed")
 
     try:
         with serve_drive_fixture() as (api, url):
