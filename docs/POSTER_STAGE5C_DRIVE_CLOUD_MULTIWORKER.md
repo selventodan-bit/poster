@@ -360,8 +360,8 @@ settings. Пароли, приватные ключи и tokens в чат или
 Через GitHub Actions предоставляются Windows Full ZIP, Linux runtime/wheelhouse,
 `poster-cloud-launchers.zip` (оба Launcher, demo, guide, lock/installer), отдельные
 `.sha256` и release manifests. Notebook source pin —
-`7b1bbfc4d771b7497f5c82ea806e70accc68b504`, source archive SHA256
-`e2997fa34d2f9c58cc202e626374ccb70007308852afa5561dd85fc9f183a1b1`.
+`830b6024f23f8625e4d0871a0322c4c73cf473ad`, source archive SHA256
+`c388fb6640fc8eddc8c8e283ed8a85f0c8a7e95e9ac6f8adb9effdf20dbac9a9`.
 Бинарники и CI привязаны к SHA своей финальной сборки; Launcher использует reviewed
 полный SHA кода 5C, а не плавающую ветку. Дополнительные коммиты delivery/tests/docs
 не требуют смены pin, если исполняемый код не изменён.
@@ -402,6 +402,10 @@ fixture UI. Дополнительный настоящий Qt/QWindow regressio
 layout и попадание клика в кнопку после него.
 
 Исполняемые `poster/*`, dependency lock и bootstrap после reviewed runtime pin
-`7b1bbfc4d771b7497f5c82ea806e70accc68b504` не изменены. Исправление затрагивает
-драйвер приёмки и его тест; source/archive/dependency pins Launcher сохраняются.
+`830b6024f23f8625e4d0871a0322c4c73cf473ad` не изменены. Исправление синхронизации затрагивает
+драйвер приёмки и его тест. Дополнительно importer требует строгого подмножества
+разрешённых outputs закреплённой версии даже при корректной подписи producer.
+Отказ проверен настоящим Worker и корректно подписанным/зашифрованным лишним
+файлом; архив и локальные outputs не создаются. Runtime pin/source archive hash
+пересчитаны для этой проверки, dependency hashes сохраняются.
 Fresh-venv установка и genuine Jupyter/marimo проверки остаются обязательными.
