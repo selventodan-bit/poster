@@ -54,12 +54,15 @@ def build(output, *, wheelhouse=False, revision=None):
         subprocess.run(["uv", "build", "--wheel", "--out-dir", str(root / "wheels")], cwd=source, check=True)
         wheel = next((root / "wheels").glob("*.whl"))
         shutil.copyfile(source / "scripts/install_remote.py", root / "install_remote.py")
-        (root / "docs").mkdir()
-        shutil.copyfile(
-            source / "docs/POSTER_STAGE5D_EXECUTION_PORTABILITY.md",
-            root / "docs/POSTER_STAGE5D_EXECUTION_PORTABILITY.md",
-        )
-        shutil.copytree(source / "examples/maker-stage5d", root / "examples/maker-stage5d")
+        # Optional assets belong to the archived revision, never this checkout.
+        # Upgrade tests also build releases from snapshots predating Stage 5D.
+        stage5d_doc = source / "docs/POSTER_STAGE5D_EXECUTION_PORTABILITY.md"
+        if stage5d_doc.is_file():
+            (root / "docs").mkdir()
+            shutil.copyfile(stage5d_doc, root / "docs" / stage5d_doc.name)
+        stage5d_demo = source / "examples/maker-stage5d"
+        if stage5d_demo.is_dir():
+            shutil.copytree(stage5d_demo, root / "examples/maker-stage5d")
         if wheelhouse:
             download_env = Path(temporary) / "download-env"
             venv.EnvBuilder(with_pip=True).create(download_env)
