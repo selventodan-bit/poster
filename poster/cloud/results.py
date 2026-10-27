@@ -150,6 +150,9 @@ class ResultArchive:
             )
         ):
             raise CloudError("RESULT_UNTRUSTED")
+        outputs = value.get("outputs")
+        if not isinstance(outputs, dict) or not set(outputs) <= set(bundle.manifest["outputs"]):
+            raise CloudError("RESULT_UNTRUSTED")
         # Public signature is bound to the pre-execution claim, not an arbitrary
         # key supplied by a result file. IDs separate modes and independent runs.
         old = self.find(value["issuer"], run_id)

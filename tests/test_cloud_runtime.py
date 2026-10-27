@@ -313,3 +313,38 @@ async def test_portable_subproject_keeps_exports_and_session_protected_refs(clou
         assert b"SECRET_CHILD_CANARY" not in b"".join(bundle.files.values())
     finally:
         await session.close()
+
+
+async def test_signed_result_cannot_expand_the_published_output_allowlist(cloud, tmp_path):
+    """Even a correctly signed/encrypted producer result must honor the pinned version."""
+    from poster.cloud.crypto import encrypt_output, sign_result
+    from poster.cloud.format import canonical, digest
+    from poster.cloud.results import context
+
+    lib, api, recipient = cloud
+    bundle = await publish(cloud, tmp_path, [("Files.WriteText", {"path": "out.txt", "text": "allowed"})])
+    session = NotebookSession(lib, tmp_path / "output-contract")
+    try:
+        ticket = await session.submit(bundle.project_id, intent="output-contract")
+        await session.wait(ticket, deadline=30)
+        run_id, _, manifest_id = ticket.claim["runs"][0]
+        original = await lib.files.json(manifest_id)
+        name = "undeclared.txt"
+        box = encrypt_output(recipient.public(), b"not authorized", context(ticket.claim, run_id, name))
+        blob_id = api.new_id()
+        api.create(dict(id=blob_id, name="extra.box", mimeType="application/octet-stream"), box)
+        body = {k: v for k, v in original.items() if k != "signature"}
+        body["outputs"][name] = dict(
+            id=blob_id, size=len(box), sha256=digest(box), plain_sha256=digest(b"not authorized")
+        )
+        api.files[manifest_id]["raw"] = canonical(sign_result(session.identity, body))
+        store = Store(tmp_path / "desktop" / "dispatcher.sqlite")
+        try:
+            with pytest.raises(CloudError, match="RESULT_UNTRUSTED"):
+                await ResultArchive(store).import_result(lib, ticket.claim, 0, recipient)
+            assert ResultArchive(store).rows() == []
+            assert not (store.root / "cloud-results").exists()
+        finally:
+            store.close()
+    finally:
+        await session.close()
