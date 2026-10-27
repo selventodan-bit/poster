@@ -90,3 +90,67 @@ def test_legacy_typed_input_form_does_not_require_source_or_profile_bindings(app
         dialog.close()
         parent.close()
         app.processEvents()
+
+
+def test_real_consent_dialog_shows_selected_scope_and_decline_does_not_grant(app, tmp_path, monkeypatch):  # noqa: F811
+    from PySide6.QtWidgets import QDialog, QMessageBox
+
+    monkeypatch.setenv("POSTER_CLOUD_HOME", str(tmp_path / "private-cloud"))
+    source = tmp_path / "project.postergraph.json"
+    save_graph(
+        source, chain("Consent scope", [("Files.WriteText", dict(path="out.txt", text="ok"))]), Vault()
+    )
+    profiles = Profiles(tmp_path / "profiles")
+    profile_id = profiles.create("Synthetic local profile")
+    parent = QWidget()
+    version = "b" * 64
+    dialog = PreparationDialog(
+        parent,
+        source=source,
+        profiles=profiles,
+        dispatcher_root=tmp_path / "native",
+        item=dict(project_id="project", version=version),
+    )
+    dialog.profile_choice.setCurrentIndex(dialog.profile_choice.findData(profile_id))
+    dialog.origins.setText("https://fixture.example")
+    dialog.ttl.setValue(90)
+    dialog.permitted_copies.setValue(5)
+    observed, operations = {}, []
+
+    # This unit isolates the consent controls from transport: no permission or
+    # runtime is fabricated. Other jobs exercise the actual pinned Agent.
+    def metadata(name, coroutine, callback=None):
+        coroutine.close()
+        operations.append(name)
+        assert name == "agents"
+        callback([dict(name="Pinned test Agent", id="a" * 64)])
+
+    monkeypatch.setattr(dialog, "submit", metadata)
+    remaining = [100]
+
+    def respond():
+        remaining[0] -= 1
+        modal = app.activeModalWidget()
+        if isinstance(modal, QMessageBox):
+            observed["text"] = modal.text()
+            QTest.mouseClick(modal.button(QMessageBox.StandardButton.No), Qt.MouseButton.LeftButton)
+            return
+        if isinstance(modal, QInputDialog):
+            modal.accept()
+        if remaining[0] > 0:
+            QTimer.singleShot(30, respond)
+        elif isinstance(modal, QDialog):
+            modal.reject()
+
+    dialog.show()
+    QTimer.singleShot(50, respond)
+    try:
+        QTest.mouseClick(dialog.findChild(QPushButton, "prepare_agent_consent"), Qt.MouseButton.LeftButton)
+        text = observed["text"]
+        assert "Разрешённых копий: 5" in text and "Срок разрешения, секунд: 90" in text
+        assert "a" * 64 in text and version in text and "https://fixture.example" in text
+        assert operations == ["agents"]
+    finally:
+        dialog.close()
+        parent.close()
+        app.processEvents()

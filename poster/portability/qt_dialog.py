@@ -377,17 +377,27 @@ class PreparationDialog(QDialog):
             if not accepted:
                 return
             agent = agents[labels.index(label)]
-            if not self.confirmed(
-                "Согласие на передачу",
-                "Передать выбранные cookies/localStorage этому Agent для одной копии выбранной immutable версии?",
-            ):
-                return
             origins = [s.strip() for s in self.origins.text().split(";") if s.strip()]
             profile_id, ttl, max_runs = (
                 self.selected_profile(),
                 self.ttl.value(),
                 self.permitted_copies.value(),
             )
+            if not self.confirmed(
+                "Согласие на передачу",
+                "Передать выбранные cookies/localStorage?\n"
+                + "Agent ID: "
+                + agent["id"]
+                + "\nВерсия проекта: "
+                + self.item["version"]
+                + "\nРазрешённых копий: "
+                + str(max_runs)
+                + "\nСрок разрешения, секунд: "
+                + str(ttl)
+                + "\nРазрешённые origins: "
+                + "; ".join(origins),
+            ):
+                return
 
             async def grant():
                 return await asyncio.to_thread(
