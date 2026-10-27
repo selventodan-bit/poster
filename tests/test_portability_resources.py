@@ -30,7 +30,7 @@ def test_directory_preview_dependencies_zip_bomb_and_capacity(tmp_path):
     project.mkdir()
     selected = project / "data"
     selected.mkdir()
-    (selected / "one.csv").write_text("n\n1\n")
+    (selected / "one.csv").write_bytes(b"n\n1\n")
     report = preview(project, [selected])
     assert report["files"][0]["name"] == "data/one.csv" and report["total_bytes"] == 4
     graph = chain(

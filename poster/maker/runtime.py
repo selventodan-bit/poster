@@ -429,7 +429,12 @@ class GraphRunner:
                 self.context.use_page(await self.context.session.select_tab(node.extensions["browser_tab"]))
             values = self.context.variables.resolve(node.params)
             self.context.raw_params = values
-            self.context.sensitive_action = node.protect_result or bool(secret_refs(values))
+            self.context.sensitive_action = (
+                node.protect_result
+                or bool(secret_refs(values))
+                or node.type.startswith("Browser.")
+                and self.context.session.profile is not None
+            )
             spec = self.registry.get(node.type, node.action_version)
             spec, params = self.registry.parameters(
                 node, self.context.variables.reveal(values) if spec.reveal_parameters else values

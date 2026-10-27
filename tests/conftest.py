@@ -124,7 +124,9 @@ def pytest_runtest_makereport(item, call):
         )
         print("\n::notice title=Readiness browser diagnostics::" + json.dumps(diagnostic), flush=True)
         return
-    if not item.path.name.startswith(("test_dispatcher", "remote_")):
+    if not item.path.name.startswith(
+        ("test_dispatcher", "remote_", "test_portability", "portability_", "cloud_browser_instances")
+    ):
         return
     # Hosted Windows logs are not always downloadable. Publish only fixed codes
     # and locations, never inputs, exception text, stdout/stderr or graph values.

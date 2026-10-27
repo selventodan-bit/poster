@@ -75,9 +75,9 @@ jobs:
       - run: uv sync --frozen --extra dev --extra maker
       - run: uv run --no-sync python -m playwright install --with-deps chromium
       - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y xvfb libxcb-cursor0 libxkbcommon-x11-0 libegl1 libnss3
+        run: sudo apt-get update && sudo apt-get install -y xvfb xauth dbus-daemon libegl1 libgl1 libopengl0 libxcb-cursor0 libxkbcommon-x11-0 libxcb-icccm4 libxcb-keysyms1 libxcb-xinerama0 libxcb-shape0 libatomic1 libxtst6
       - if: runner.os == 'Linux'
-        run: xvfb-run -a uv run --no-sync python -m pytest -q tests/portability_qt_e2e.py --junitxml=.poster/preparation-qt.xml
+        run: dbus-run-session -- xvfb-run -a uv run --no-sync python -m pytest -q tests/portability_qt_e2e.py --junitxml=.poster/preparation-qt.xml
       - if: runner.os == 'Windows'
         run: uv run --no-sync python -m pytest -q tests/portability_qt_e2e.py --junitxml=.poster/preparation-qt.xml
       - if: always()

@@ -354,6 +354,97 @@ def check(config, output):
         }
         window.capture_as_image().save(output / "windows-controller.png")
         fixture_url = observation["url"]
+        if call("remote_agents")[0]["version"] == "5D.1":
+            phase = "Stage 5D scoped browser session on frozen Windows to real Linux"
+            from poster.maker.profiles import Profiles
+
+            profile_key = Fernet.generate_key()
+            profile_key_file = output / "maker-profile-private.key"
+            profile_key_file.write_bytes(profile_key)
+            profiles = Profiles(output / "private-profiles", key=profile_key)
+            profile_id = profiles.create("Synthetic scoped session")
+            profiles.open(profile_id).commit(
+                dict(
+                    cookies=[
+                        dict(
+                            name="poster5d",
+                            value="POSTER_5D_SYNTHETIC_SESSION",
+                            domain="127.0.0.1",
+                            path="/",
+                            httpOnly=True,
+                            sameSite="Lax",
+                        )
+                    ],
+                    origins=[
+                        dict(
+                            origin=fixture_url,
+                            localStorage=[dict(name="poster5d", value="POSTER_5D_SYNTHETIC_STORAGE")],
+                        )
+                    ],
+                )
+            )
+            session_graph = chain(
+                "Cross-host Stage 5D session",
+                [
+                    ("Browser.OpenURL", dict(url=fixture_url + "/session-check")),
+                    ("Browser.ReadText", dict(selector="#session-authorized")),
+                    ("Files.WriteText", dict(path="session-proof.txt", text="{{authentication}}")),
+                ],
+            )
+            extraction = next(n for n in session_graph.nodes if n.type == "Browser.ReadText")
+            extraction.save_as, extraction.result_path = "authentication", "value"
+            session_source = output / "session-project.postergraph.json"
+            save_graph(session_source, session_graph, Vault())
+            session_item = call("add", source=str(session_source))
+            permit_args = dict(
+                agent_id=agent_id,
+                project_id=session_item["project_id"],
+                version=session_item["version"],
+                profile_root=str(profiles.root),
+                profile_id=profile_id,
+                key_file=str(profile_key_file),
+                origins=[fixture_url],
+                confirmed=True,
+            )
+            permit = call("session_permission_create", **permit_args)
+            queued = call(
+                "enqueue_batch",
+                items=[
+                    dict(
+                        id=session_item["id"],
+                        agent_id=agent_id,
+                        session_permission=permit["id"],
+                        remote_outputs=["session-proof.txt"],
+                    )
+                ],
+                request_id=uuid.uuid4().hex,
+            )
+            assert not queued["errors"]
+            completed = terminal(queued["jobs"][0])
+            assert completed["status"] == "SUCCEEDED"
+            returned = Path(completed["workdir"]) / "session-proof.txt"
+            assert returned.read_text() == "Session authorized"
+            permit_revocation = call("session_permission_revoke", id=permit["id"])
+            assert permit_revocation["may_have_been_disclosed"]
+            unsent = call("session_permission_create", **permit_args)
+            revoked = call("session_permission_revoke", id=unsent["id"])
+            assert revoked["revoked_before_transfer"]
+            refusal = call(
+                "enqueue_batch",
+                items=[dict(id=session_item["id"], agent_id=agent_id, session_permission=unsent["id"])],
+                request_id=uuid.uuid4().hex,
+            )
+            assert not refusal["jobs"] and refusal["errors"][0]["code"] == "PROFILE_PERMISSION"
+            proof["stage5d_session"] = dict(
+                status="PASSED",
+                agent_id=agent_id,
+                job=queued["jobs"][0],
+                linux_browser_pid=completed["history"][0]["pid"],
+                returned_sha256=hashlib.sha256(returned.read_bytes()).hexdigest(),
+                cookies_and_storage_confirmed=True,
+                revoked_before_transfer=True,
+                queue_key_transferred=False,
+            )
         phase = "snapshot, protected types, parallel limits"
         secret = dict(n=17, ok=True, nested=[None, 42, False], token=canary)
         first, item, source, original = enqueue(

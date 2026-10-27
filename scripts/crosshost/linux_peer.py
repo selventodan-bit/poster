@@ -40,6 +40,20 @@ def fixture(root):
             pass
 
         def do_GET(self):
+            if self.path == "/session-check":
+                allowed = "poster5d=POSTER_5D_SYNTHETIC_SESSION" in self.headers.get("Cookie", "")
+                self.send_response(200 if allowed else 401)
+                self.send_header("Content-Type", "text/html")
+                self.end_headers()
+                self.wfile.write(
+                    b"""<html><body>Session denied<script>
+                if (localStorage.getItem('poster5d') === 'POSTER_5D_SYNTHETIC_STORAGE') {
+                  document.body.id='session-authorized'; document.body.firstChild.textContent='Session authorized';
+                }</script></body></html>"""
+                    if allowed
+                    else b"<html><body>Session denied</body></html>"
+                )
+                return
             self.send_response(200)
             self.end_headers()
             self.wfile.write(b"<html><body>Poster cross-host fixture</body></html>")
