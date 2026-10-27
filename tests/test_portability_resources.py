@@ -224,7 +224,10 @@ def test_shipped_demo_keeps_exact_resource_hashes_on_every_platform():
     from pathlib import Path
 
     source = Path(__file__).resolve().parents[1] / "examples/maker-stage5d/project.postergraph.json"
-    bundle = PortableBundle.capture(source)
+    from poster.maker.storage import load_graph
+
+    graph, _ = load_graph(source)
+    bundle = PortableBundle.capture(source, outputs=graph.metadata["poster.outputs"])
     assert bundle.manifest["outputs"] == ["results/data.csv", "results/ready.txt"]
     assert bundle.files["inputs/data.csv"] == b"name,value\nportable,5D\n"
     assert bundle.verify().manifest["capabilities"]["browser"]
