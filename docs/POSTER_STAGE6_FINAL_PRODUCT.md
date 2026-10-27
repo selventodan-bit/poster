@@ -55,6 +55,7 @@ release builders и все четыре принятых workflows. Старую
 | S6-05 | P1 | Нет непрерывной проверки GUI edit/save/reopen всех 78 действий; нужно выявить и закрыть реальные несоответствия | OPEN |
 | S6-06 | P1 | Доставка должна включать актуальные user guide, RC identity, совместимые pinned Launchers и финальные evidence | OPEN |
 | S6-07 | P2 | Несколько редактируемых документов/расширенный trace viewer, импорт ZennoLab, arbitrary code blocks | DEFERRED: не обязательные P0/P1 согласованного runtime |
+| S6-09 | P0 | Maker key used chmod only on Windows; existing queue-key ACL was not rechecked. Owner-only DACL and plain-path checks now protect both, without key regeneration | FIXED_LOCAL: 21 key/Host/Worker tests passed; Windows ACL CI pending |
 | S6-08 | P2 | Signing/auto-updater | DEFERRED: signing infrastructure отсутствует; безопасное ручное обновление |
 
 Сравнение с ProjectMaker/ZennoPoster проводится по пользовательским сценариям:

@@ -23,6 +23,7 @@ def workspace_path():
 def queue_key(root):
     """Do not regenerate a missing key for existing encrypted state or use cwd keys."""
     root = private_dir(root)
+    restrict(root, directory=True)
     path = plain_path(root / "queue.key")
     with FileLock(str(root / "queue-key.lock"), timeout=10):
         if not path.exists():
@@ -32,6 +33,7 @@ def queue_key(root):
                 stream.write(Fernet.generate_key())
             restrict(path)
         try:
+            restrict(path)
             key = path.read_bytes().strip()
             Fernet(key)
         except Exception as exc:
