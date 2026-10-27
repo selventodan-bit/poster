@@ -11,6 +11,7 @@ from poster.maker.model import GraphError
 from poster.maker.fixtures import serve_maker
 from poster.portability.network import Network, NetworkProfiles, policy, probe
 from portability_proxy_fixture import proxy
+from test_cloud_runtime import cloud  # noqa: F401
 
 
 @pytest.mark.parametrize("kind", ["http", "https", "socks5"])
@@ -80,3 +81,47 @@ async def test_real_parallel_browser_networks_have_separate_connections(tmp_path
             ] == ["0", "1"]
         finally:
             await asyncio.gather(*(browser.close() for browser in browsers))
+
+
+async def test_notebook_private_network_binding_never_enters_source_or_public_result(
+    cloud,  # noqa: F811
+    tmp_path,
+    monkeypatch,
+):
+    from poster.cloud.launcher import Launcher
+    from poster.cloud.package import PortableBundle
+    from poster.cloud.providers import ProviderConnection
+    from poster.cloud.desktop import DesktopCloud
+    from poster.maker.storage import save_graph, Vault
+
+    library, api, recipient = cloud
+    with serve_maker() as (_, base), proxy("socks5", tmp_path) as (server, config):
+        graph = chain("Notebook network", [("HTTP.Get", {"url": base + "/login"})])
+        graph.metadata["poster.network"] = dict(binding="company-proxy", allow_override=False)
+        source = tmp_path / "network.postergraph.json"
+        save_graph(source, graph, Vault())
+        bundle = PortableBundle.capture(source, recipient=recipient.public())
+        await library.publish(bundle, name=graph.name, recipient=recipient.public())
+        monkeypatch.setenv("POSTER_SECRET_PROXY", json.dumps(config))
+        backend = Launcher(
+            "generic",
+            connection=ProviderConnection(
+                library, DesktopCloud(tmp_path / "cloud-private", files=library.files)
+            ),
+            root=tmp_path / "runtime",
+        )
+        try:
+            await backend.connect()
+            inspection = await backend.inspect(bundle.project_id, bundle.version)
+            assert inspection["bindings"]["Сеть проекта (private JSON)"] == "@network"
+            result = await backend.run(
+                bundle.project_id,
+                bundle.version,
+                bindings={"Сеть проекта (private JSON)": "POSTER_SECRET_PROXY"},
+            )
+            assert result["runs"][0]["status"] == "SUCCEEDED", result
+            assert server.hits == 1
+            assert "PROXY_PRIVATE_CANARY" not in json.dumps(result)
+            assert b"PROXY_PRIVATE_CANARY" not in b"".join(item["raw"] for item in api.files.values())
+        finally:
+            await backend.close()

@@ -106,6 +106,14 @@ class MakerController:
             adopted = self.session() if selected else None
             if not adopted:
                 await self.close()
+            session = adopted or self.session_factory(profile)
+            from poster.portability.network import NetworkProfiles
+
+            network = (
+                NetworkProfiles().resolve(graph.metadata["poster.network"])
+                if graph.metadata.get("poster.network")
+                else None
+            )
             runner = GraphRunner(
                 graph,
                 vault=vault,
@@ -114,8 +122,23 @@ class MakerController:
                 on_event=lambda data: self.emit("runtime", data),
                 workdir=workdir,
                 project_path=project_path,
+                provider=session.provider,
+                network=network,
             )
-            runner.context.session = adopted or self.session_factory(profile)
+            runner.context.session = session
+            if network:
+                session.network = network
+            if graph.metadata.get("poster.resources"):
+                if not project_path:
+                    raise GraphError("FILE_MISSING")
+                from poster.cloud.package import stage_resources
+                from poster.portability.blobs import FileBlob
+
+                resources = {
+                    name: FileBlob.capture(project_path.parent / name)
+                    for name in graph.metadata["poster.resources"]
+                }
+                stage_resources(graph, resources, runner.context.files.root)
             self.recorder = self.tools = self.inspector = None
             self.runner = runner
         if selected:

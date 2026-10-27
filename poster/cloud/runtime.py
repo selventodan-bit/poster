@@ -85,6 +85,7 @@ class NotebookSession:
             }
         }
         env["PYTHONUTF8"] = "1"
+        env["POSTER_NETWORK_HOME"] = str(self.root / "private-network")
         # No provider OAuth/ADC/API tokens or inherited queue/session keys.
         self.process = subprocess.Popen(
             [sys.executable, "-m", "poster.cloud.supervisor", str(self.root / "queue")],
@@ -134,6 +135,7 @@ class NotebookSession:
         secrets=None,
         secret_refs=None,
         timeout=300,
+        network=None,
     ):
         if intent is None:
             raise CloudError("INPUT_INVALID")  # UI explicitly prepares a new intent.
@@ -147,6 +149,7 @@ class NotebookSession:
                 secrets=secrets or {},
                 secret_refs=secret_refs or {},
                 timeout=timeout,
+                network=network,
             )
             if intent in self.intents:
                 if self.intents[intent].arguments != arguments:
@@ -159,6 +162,15 @@ class NotebookSession:
             if bundle.manifest.get("result_recipient") is None:
                 raise CloudError("RECIPIENT_REQUIRED")
             await self.start()
+            from poster.maker.model import Graph
+
+            graph = Graph.model_validate_json(bundle.files[bundle.manifest["main"]])
+            if network is not None:
+                if not graph.metadata.get("poster.network"):
+                    raise CloudError("INPUT_INVALID")
+                await self._rpc(
+                    "network_bind", binding=graph.metadata["poster.network"]["binding"], config=network
+                )
             source = bundle.materialize(self.root / "projects" / uuid.uuid4().hex)
             item = await self._rpc("add", source=str(source))
             spec = dict(

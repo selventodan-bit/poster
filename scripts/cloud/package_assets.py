@@ -12,6 +12,8 @@ output.mkdir(parents=True, exist_ok=True)
 paths = [
     ROOT / "notebooks",
     ROOT / "examples/maker-stage5c",
+    ROOT / "examples/maker-stage5d",
+    ROOT / "docs/POSTER_STAGE5D_EXECUTION_PORTABILITY.md",
     ROOT / "docs/POSTER_STAGE5C_DRIVE_CLOUD_MULTIWORKER.md",
     ROOT / "requirements-cloud-runtime.txt",
     ROOT / "scripts/cloud/bootstrap.py",

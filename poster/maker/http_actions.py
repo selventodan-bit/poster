@@ -95,7 +95,8 @@ class HTTPState:
 
 def session(ctx):
     if ctx.http is None:
-        ctx.http = HTTPState(getattr(ctx, "network", None))
+        network = getattr(ctx, "network", None)
+        ctx.http = HTTPState(network) if network and network.kind != "direct" else HTTPState()
     return ctx.http
 
 

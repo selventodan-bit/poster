@@ -81,6 +81,7 @@ def main():
         POSTER_GUI_TEST_OUTPUT=str(maker_observer),
         POSTER_DISPATCHER_OBSERVER=str(dispatcher_observer),
         POSTER_DISPATCHER_WORKSPACE=str(queue),
+        POSTER_PREPARATION_TEST_OUTPUT=str(private / "preparation-observer.json"),
     )
     owned = []
     phase = "prepare"
@@ -159,6 +160,25 @@ def main():
         )
         mouse.click(coords=(state["x"], state["y"]))  # Real OS input, no internal callback.
 
+    def preparation_check(window, role):
+        observer_path = private / "preparation-observer.json"
+        observer_path.unlink(missing_ok=True)
+        window.set_focus()
+        keyboard.send_keys("^+p")
+        preparation = Desktop(backend="win32").window(title="Подготовка проекта к запуску")
+        preparation.wait("visible", timeout=30)
+        wait(lambda: snapshot(observer_path).get("visible"), role + " preparation ready")
+        click(observer_path, "preparation_tab_3", preparation)
+        click(observer_path, "readiness_target", preparation)
+        keyboard.send_keys("{END}{ENTER}")  # Generic Jupyter: measure the current Windows runtime.
+        click(observer_path, "prepare_readiness", preparation)
+        wait(lambda: snapshot(observer_path).get("runtime_verified"), role + " preparation actual readiness")
+        preparation.capture_as_image().save(public / (role + "-preparation.png"))
+        proof["scenarios"].append("frozen_" + role + "_stage5d_preparation_actual_readiness")
+        preparation.set_focus()
+        keyboard.send_keys("{ESC}")
+        wait(lambda: not preparation.is_visible(), role + " preparation closed")
+
     try:
         with serve_drive_fixture() as (api, url):
             config = private / "fixture.json"
@@ -196,6 +216,7 @@ def main():
             wait(
                 lambda: snapshot(maker_observer).get("graph", {}).get("id") == graph.id, "Maker opened graph"
             )
+            preparation_check(maker, "maker")
             click(maker_observer, "cloud_save", maker)
             cloud = Desktop(backend="win32").window(title="Google Drive — проекты Poster")
             cloud.wait("visible", timeout=30)
@@ -281,6 +302,20 @@ await backend.close()
             result_window.set_focus()
             keyboard.send_keys("{ESC}")
             click(observer, "cloud_close", cloud)
+            dispatcher.set_focus()
+            first = wait(
+                lambda: next(
+                    (row for row in snapshot(dispatcher_observer).get("projects", []) if row.get("visible")),
+                    None,
+                ),
+                "Dispatcher project row",
+            )
+            mouse.click(coords=(first["x"], first["y"]))
+            wait(
+                lambda: any(row.get("selected") for row in snapshot(dispatcher_observer).get("projects", [])),
+                "Dispatcher selected project",
+            )
+            preparation_check(dispatcher, "dispatcher")
             dispatcher.close()
             request(queue, "shutdown")
             proof["results"] = [

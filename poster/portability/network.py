@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import dataclass, field
 import ipaddress
 import logging
+import os
 import re
 import socket
 import ssl
@@ -190,7 +191,7 @@ async def probe(config, url, *, timeout=10):
 
 class NetworkProfiles:
     def __init__(self, root=None):
-        self.secrets = SecretStore(root)
+        self.secrets = SecretStore(root or os.environ.get("POSTER_NETWORK_HOME"))
 
     def rows(self):
         data = self.secrets.get("network-profiles") or {}

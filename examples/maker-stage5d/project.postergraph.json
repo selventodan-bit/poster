@@ -1,0 +1,168 @@
+{
+  "format": "poster.maker.graph",
+  "schema_version": 2,
+  "id": "393ca0c51fca4a39b180493f4a74fe4d",
+  "name": "Stage 5D — переносимый проект",
+  "entry": "start",
+  "nodes": [
+    {
+      "id": "start",
+      "type": "Start",
+      "action_version": 1,
+      "title": "",
+      "x": 40.0,
+      "y": 40.0,
+      "params": {},
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    },
+    {
+      "id": "n0",
+      "type": "Files.Copy",
+      "action_version": 1,
+      "title": "",
+      "x": 290.0,
+      "y": 40.0,
+      "params": {
+        "source": "inputs/data.csv",
+        "destination": "results/data.csv"
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    },
+    {
+      "id": "n1",
+      "type": "CSV.Read",
+      "action_version": 1,
+      "title": "",
+      "x": 540.0,
+      "y": 40.0,
+      "params": {
+        "path": "inputs/data.csv"
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    },
+    {
+      "id": "n2",
+      "type": "Browser.OpenURL",
+      "action_version": 1,
+      "title": "",
+      "x": 790.0,
+      "y": 40.0,
+      "params": {
+        "url": "https://example.org/"
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    },
+    {
+      "id": "n3",
+      "type": "Browser.ReadText",
+      "action_version": 1,
+      "title": "",
+      "x": 40.0,
+      "y": 180.0,
+      "params": {
+        "selector": "body"
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    },
+    {
+      "id": "n4",
+      "type": "Files.WriteText",
+      "action_version": 1,
+      "title": "",
+      "x": 290.0,
+      "y": 180.0,
+      "params": {
+        "path": "results/ready.txt",
+        "text": "Portable project completed"
+      },
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    },
+    {
+      "id": "end",
+      "type": "End.Success",
+      "action_version": 1,
+      "title": "",
+      "x": 800.0,
+      "y": 500.0,
+      "params": {},
+      "extensions": {},
+      "breakpoint": false,
+      "save_as": null,
+      "result_path": "",
+      "protect_result": false
+    }
+  ],
+  "edges": [
+    {
+      "source": "start",
+      "port": "success",
+      "target": "n0"
+    },
+    {
+      "source": "n0",
+      "port": "success",
+      "target": "n1"
+    },
+    {
+      "source": "n1",
+      "port": "success",
+      "target": "n2"
+    },
+    {
+      "source": "n2",
+      "port": "success",
+      "target": "n3"
+    },
+    {
+      "source": "n3",
+      "port": "success",
+      "target": "n4"
+    },
+    {
+      "source": "n4",
+      "port": "success",
+      "target": "end"
+    }
+  ],
+  "view": {
+    "zoom": 1.0
+  },
+  "max_steps": 500,
+  "metadata": {
+    "poster.resources": {
+      "inputs/data.csv": "4588aa95bd9905d0d1792ae3915c4b01e0bf7c2e2e2c138d2154593ab7ef7d7a"
+    },
+    "poster.outputs": [
+      "results/data.csv",
+      "results/ready.txt"
+    ]
+  },
+  "extensions": {},
+  "secret_file": null,
+  "secret_sha256": null,
+  "variables": {}
+}

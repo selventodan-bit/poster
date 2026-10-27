@@ -183,6 +183,11 @@ class MakerWindow(QMainWindow, ToolsMixin):
         self.probe_busy = False
         self.probe_serial = 0
         self.build_cloud_menu()
+        preparation = self.menuBar().addMenu("Подготовка проекта")
+        action = preparation.addAction("Профили, сеть, ресурсы и готовность…")
+        action.setObjectName("maker_preparation")
+        action.setShortcut("Ctrl+Shift+P")
+        action.triggered.connect(self.open_preparation)
 
     def guard(self, operation):
         try:
@@ -339,6 +344,25 @@ class MakerWindow(QMainWindow, ToolsMixin):
         self.canvas.fit()
         self.status_label.setText("Открыта облачная версия " + value["version"][:12])
 
+    def open_preparation(self):
+        if not self.editable() or not self.profile_closed():
+            return
+        self.save()
+        if not self.path:
+            return
+        from poster.portability.qt_dialog import PreparationDialog
+
+        def changed(metadata):
+            self.document.graph.metadata = dict(metadata)
+            self.refresh_profiles()
+            self.changed()
+            self.save()
+
+        self.preparation_dialog = PreparationDialog(
+            self, source=self.path, profiles=self.profiles, changed=changed
+        )
+        self.preparation_dialog.show()
+
     def cloud_published(self, value):
         self.document.graph.metadata["poster.resources"] = value["resources"]
         self.document.graph.metadata["poster.outputs"] = value["outputs"]
@@ -491,6 +515,17 @@ class MakerWindow(QMainWindow, ToolsMixin):
 
     def profile(self):
         key = self.document.graph.metadata.get("browser_profile")
+        if key and self.path:
+            from poster.portability.local import profile_binding
+
+            binding = profile_binding(self.path)
+            if binding and binding["profile_id"] == key:
+                from poster.dispatcher.security import plain_path
+
+                selected_key = (
+                    plain_path(binding["key_file"]).read_bytes().strip() if binding.get("key_file") else None
+                )
+                return Profiles(binding["root"], key=selected_key).open(key)
         return self.profiles.open(key) if key else None
 
     def submit(self, coroutine, name):
@@ -854,6 +889,8 @@ class MakerWindow(QMainWindow, ToolsMixin):
             pass
 
     def closeEvent(self, event):
+        if getattr(self, "preparation_dialog", None):
+            self.preparation_dialog.close()
         if self.close_ready:
             self.observer.stop()
             self.browser.dispose()

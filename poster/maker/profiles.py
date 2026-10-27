@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from contextlib import contextmanager
+import json
 import re
 from urllib.parse import urlsplit
 
@@ -19,13 +20,22 @@ RESTORE = """state=>{
 
 
 class Profiles:
-    def __init__(self, root):
+    def __init__(self, root, *, key=None):
         from poster.dispatcher.security import private_dir
 
         try:
             self.root = private_dir(Path(root))
+            from cryptography.fernet import Fernet
+
+            self.cipher = Fernet(key) if key else None
         except Exception as exc:
             raise GraphError("PROFILE_INVALID") from exc
+
+    def decrypt(self, raw):
+        return json.loads(self.cipher.decrypt(raw)) if self.cipher else decrypt_bytes(raw)
+
+    def encrypt(self, value):
+        return self.cipher.encrypt(json.dumps(value).encode()) if self.cipher else encrypt_session(value)
 
     def path(self, name):
         if not re.fullmatch(r"profile_[a-f0-9]{12,32}", name):
@@ -48,7 +58,7 @@ class Profiles:
         self.unreadable = []
         for path in sorted(self.root.glob("profile_*.enc")):
             try:
-                value = decrypt_bytes(read_bounded(self.path(path.stem)))
+                value = self.decrypt(read_bounded(self.path(path.stem)))
                 result.append((path.stem, value["name"]))
             except Exception:
                 self.unreadable.append(path.stem)
@@ -58,7 +68,7 @@ class Profiles:
         if not name.strip() or len(name) > 100:
             raise GraphError("PROFILE_INVALID")
         key = "profile_" + identity()
-        atomic(self.path(key), encrypt_session({"name": name, "revision": 0, "state": {}}))
+        atomic(self.path(key), self.encrypt({"name": name, "revision": 0, "state": {}}))
         from poster.dispatcher.security import restrict
 
         restrict(self.path(key))
@@ -71,7 +81,7 @@ class Profiles:
         try:
             from poster.portability.sessions import normalize
 
-            data = decrypt_bytes(read_bounded(path))
+            data = self.decrypt(read_bounded(path))
             if (
                 set(data) != {"name", "revision", "state"}
                 or not isinstance(data["name"], str)
@@ -134,11 +144,14 @@ class Profile:
         normalize(state)
         path = self.store.path(self.key)
         with self.store.ownership(self.key), FileLock(str(path) + ".lock"):
-            previous = decrypt_bytes(read_bounded(path))
+            try:
+                previous = self.store.decrypt(read_bounded(path))
+            except Exception as exc:
+                raise GraphError("PROFILE_INVALID") from exc
             if previous["revision"] != self.data["revision"]:
                 raise GraphError("PROFILE_CONFLICT")
             updated = {"name": self.data["name"], "revision": previous["revision"] + 1, "state": state}
-            raw = encrypt_session(updated)
+            raw = self.store.encrypt(updated)
             if len(raw) > 10_000_000:
                 raise GraphError("FILE_TOO_LARGE")
             atomic(path, raw)

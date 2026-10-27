@@ -112,6 +112,10 @@ async def execute(store, execution, owner, controls):
         )
         sys.meta_path.insert(0, HeadlessGuard(browser))
         if browser:
+            import psutil
+
+            if psutil.virtual_memory().available < 256 * 1024 * 1024:
+                raise DispatcherError("MEMORY_LIMIT")
             from ..browser import find_browser
 
             try:

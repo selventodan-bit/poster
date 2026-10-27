@@ -19,6 +19,8 @@ from .data_errors import ERRORS as DATA_ERRORS
 from poster.portability.network import Network, ERRORS as NETWORK_ERRORS
 
 ERRORS = {
+    "MEMORY_LIMIT": "Недостаточно доступной RAM для ограниченной передачи.",
+    "DISK_LIMIT": "Недостаточно свободного места для ресурсов и результатов.",
     **NETWORK_ERRORS,
     "PROFILE_BUSY": "Профиль используется другим запуском. Остановите его перед изменением профиля.",
     "PROFILE_SCOPE": "Выберите разрешённые сайты для переноса браузерной сессии.",

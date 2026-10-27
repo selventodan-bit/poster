@@ -161,9 +161,48 @@ class InputsDialog(QDialog):
         self.timeout.setRange(1, 86400)
         self.timeout.setValue(parent.timeout.value())
         form.addRow("Время этого задания, с", self.timeout)
+        from poster.portability.network import NetworkProfiles
+
+        self.network_override = QComboBox()
+        self.network_override.setObjectName("job_network_override")
+        self.network_override.addItem("Сеть из проекта", None)
+        for row in NetworkProfiles().rows():
+            self.network_override.addItem(row["name"] + " · " + row["kind"], row["id"])
+        form.addRow("Явная замена сети", self.network_override)
+        self.session_permission = QComboBox()
+        self.session_permission.setObjectName("job_session_permission")
+        self.session_permission.addItem("Чистая сессия Agent (без переноса)", None)
+        import time
+
+        for permit in parent.session_permits:
+            if (
+                permit["project_id"] == item["project_id"]
+                and permit["version"] == item["version"]
+                and not permit["revoked"]
+                and permit["expires"] > time.time()
+                and permit["remaining"] > 0
+            ):
+                self.session_permission.addItem(permit["agent_id"] + " · " + permit["id"], permit["id"])
+        form.addRow("Согласие переноса", self.session_permission)
+        self.profile_execution = QComboBox()
+        self.profile_execution.setObjectName("job_profile_mode")
+        for title, key in [
+            ("Чистая независимая сессия", "clean"),
+            ("Независимая копия профиля для каждой копии", "isolated"),
+            ("Общий профиль, выполнение последовательно", "shared"),
+        ]:
+            self.profile_execution.addItem(title, key)
+        form.addRow("Сессия каждой копии", self.profile_execution)
         self.profile_path, self.profile_key = QLineEdit(), QLineEdit()
         self.profile_rows = []
         self.profile_path.setObjectName("job_profile")
+        self.profile_path.textChanged.connect(
+            lambda text: (
+                self.profile_execution.setCurrentIndex(1)
+                if text and self.profile_execution.currentData() == "clean"
+                else None
+            )
+        )
         self.profile_key.setObjectName("job_profile_key")
         self.profile_path.setPlaceholderText("Необязательно: profile_….enc; иначе новая сессия")
         self.profile_key.setPlaceholderText("session.key Maker для этого профиля")
@@ -179,6 +218,12 @@ class InputsDialog(QDialog):
                 self.profile_key.clear()
 
         self.remote_target.agent.currentIndexChanged.connect(profile_mode)
+        from poster.portability.local import profile_binding
+
+        binding = profile_binding(item["source"])
+        if binding and binding.get("profile_id"):
+            self.profile_path.setText(str(Path(binding["root"]) / (binding["profile_id"] + ".enc")))
+            self.profile_key.setText(binding.get("key_file") or "")
         if item.get("browser"):
             for title, edit, pattern in [
                 ("Профиль Chrome", self.profile_path, "Профиль (profile_*.enc)"),
@@ -325,6 +370,7 @@ class DispatcherWindow(QMainWindow):
         self.schedule_order, self.schedule_descending = "next_due", False
         self.project_items = []
         self.agent_items = []
+        self.session_permits = []
         self.schedule_total = 0
         self.history_schedule = None
         self.root = workspace_path()
@@ -353,6 +399,11 @@ class DispatcherWindow(QMainWindow):
         return button
 
     def build(self):
+        preparation = self.menuBar().addMenu("Подготовка проекта")
+        action = preparation.addAction("Профили, сеть, ресурсы и готовность…")
+        action.setObjectName("dispatcher_preparation")
+        action.setShortcut("Ctrl+Shift+P")
+        action.triggered.connect(self.open_preparation)
         central = QWidget()
         self.setCentralWidget(central)
         layout = QVBoxLayout(central)
@@ -908,6 +959,7 @@ class DispatcherWindow(QMainWindow):
                 self.service = value["service"]
                 self.project_items = value["projects"]
                 self.agent_items = value["agents"]
+                self.session_permits = value.get("session_permits", [])
                 self.replace_rows(self.remote_agents, self.agent_items)
                 self.replace_rows(self.schedules, value["schedules"]["rows"])
                 self.schedule_total = value["schedules"]["total"]
@@ -1096,6 +1148,26 @@ class DispatcherWindow(QMainWindow):
         self.cloud_dialog = CloudDialog(self, opened=self.cloud_project_imported, dispatcher_root=self.root)
         self.cloud_dialog.show()
 
+    def open_preparation(self):
+        items = self.selected(self.projects)
+        if len(items) != 1:
+            self.banner.setText("Выберите один проект для подготовки.")
+            return
+        from poster.portability.qt_dialog import PreparationDialog
+        from poster.maker.profiles import Profiles
+        from poster.auth import ensure_local_key
+
+        ensure_local_key(self.root / "private")
+        self.preparation_dialog = PreparationDialog(
+            self,
+            source=items[0]["source"],
+            profiles=Profiles(self.root / "browser-profiles"),
+            dispatcher_root=self.root,
+            item=items[0],
+            changed=lambda metadata: self.call("add", source=items[0]["source"]),
+        )
+        self.preparation_dialog.show()
+
     def cloud_project_imported(self, value):
         cloud = {k: value[k] for k in ("project_id", "version", "folder_id")}
         self.submit("add", lambda: request(self.root, "add", source=value["source"], cloud=cloud))
@@ -1132,11 +1204,16 @@ class DispatcherWindow(QMainWindow):
                     "count": dialog.copies.value(),
                     "max_concurrent": dialog.parallel.value(),
                     "timeout": dialog.timeout.value(),
+                    "network_override": dialog.network_override.currentData(),
+                    "session_permission": dialog.session_permission.currentData(),
+                    "profile_mode": "isolated"
+                    if dialog.profile_execution.currentData() == "clean"
+                    else dialog.profile_execution.currentData(),
                     "profile_root": str(Path(dialog.profile_path.text()).parent)
-                    if dialog.profile_path.text()
+                    if dialog.profile_path.text() and dialog.profile_execution.currentData() != "clean"
                     else None,
                     "profile_id": Path(dialog.profile_path.text()).stem
-                    if dialog.profile_path.text()
+                    if dialog.profile_path.text() and dialog.profile_execution.currentData() != "clean"
                     else None,
                     "profile_key_file": dialog.profile_key.text() or None,
                 }
@@ -1268,6 +1345,8 @@ class DispatcherWindow(QMainWindow):
         )
 
     def closeEvent(self, event):
+        if getattr(self, "preparation_dialog", None):
+            self.preparation_dialog.close()
         self.closed = True
         self.timer.stop()
         self.pool.shutdown(wait=False, cancel_futures=True)

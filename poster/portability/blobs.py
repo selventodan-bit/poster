@@ -23,7 +23,7 @@ DISK_RESERVE = 32 * 1024 * 1024
 
 
 def capacity(root, required, *, memory=None, disk=None):
-    if not 0 <= required <= MAX_BUNDLE_BYTES:
+    if not 0 <= required <= MAX_BUNDLE_BYTES * 96:
         raise CloudError("PACKAGE_LIMIT")
     if (psutil.virtual_memory().available if memory is None else memory) < MIN_MEMORY:
         raise CloudError("MEMORY_LIMIT")

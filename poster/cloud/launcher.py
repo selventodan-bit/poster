@@ -33,6 +33,9 @@ def project_inputs(bundle):
         for ref in graph_secret_refs(graph):
             if ref not in aliases.values():
                 aliases[ref] = ref
+    main = Graph.model_validate_json(bundle.files[bundle.manifest["main"]])
+    if main.metadata.get("poster.network"):
+        aliases["Сеть проекта (private JSON)"] = "@network"
     return dict(inputs=definitions, bindings=aliases)
 
 
@@ -77,6 +80,14 @@ class Launcher:
         inspection = project_inputs(bundle)
         raw = resolve_bindings(self.provider, bindings or {})
         values = {inspection["bindings"].get(k, k): v for k, v in raw.items()}
+        network = None
+        if "@network" in values:
+            from poster.portability.network import Network
+
+            try:
+                network = Network.parse(json.loads(values.pop("@network"))).private()
+            except (ValueError, TypeError):
+                raise CloudError("SECRET_REQUIRED") from None
         required = set(bundle.manifest["required_secret_refs"])
         graph = __import__("poster.maker.model", fromlist=["Graph"]).Graph.model_validate_json(
             bundle.files[bundle.manifest["main"]]
@@ -94,6 +105,7 @@ class Launcher:
             secrets={k: v for k, v in values.items() if k in secret_inputs},
             secret_refs={k: v for k, v in values.items() if k in required},
             timeout=timeout,
+            network=network,
         )
         self.last = await self.session.wait(self.ticket, deadline=timeout * count + 30)
         return self.last

@@ -63,6 +63,7 @@ def package(bundle, output, commit, *, embedded=False):
     if examples.is_dir():
         shutil.copytree(examples, bundle / "examples" / "maker-stage3b2", dirs_exist_ok=True)
     shutil.copytree(ROOT / "examples/maker-stage5c", bundle / "examples/maker-stage5c", dirs_exist_ok=True)
+    shutil.copytree(ROOT / "examples/maker-stage5d", bundle / "examples/maker-stage5d", dirs_exist_ok=True)
     info = {"commit": commit, "browser_bundled": embedded}
     launchers = {"maker": "Poster.exe", "service": "PosterService.exe", "worker": "PosterWorker.exe"}
     if embedded:
@@ -85,6 +86,7 @@ def package(bundle, output, commit, *, embedded=False):
         "POSTER_STAGE5A_REMOTE_LINUX_WORKER.md",
         "POSTER_STAGE5B_REMOTE_DEPLOYMENT.md",
         "POSTER_STAGE5C_DRIVE_CLOUD_MULTIWORKER.md",
+        "POSTER_STAGE5D_EXECUTION_PORTABILITY.md",
     ):
         shutil.copyfile(ROOT / "docs" / doc, bundle / "docs" / doc)
     shutil.copytree(ROOT / "notebooks", bundle / "notebooks", dirs_exist_ok=True)

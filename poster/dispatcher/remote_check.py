@@ -7,7 +7,7 @@ from .models import DispatcherError
 from .security import private_dir
 
 
-def enqueue_check(host, agent_id):
+def enqueue_check(host, agent_id, *, browser=False):
     from poster.maker.example_projects import chain
     from poster.maker.storage import save_graph, Vault
     from poster.remote.registry import validate_target
@@ -21,7 +21,8 @@ def enqueue_check(host, agent_id):
         source,
         chain(
             "Проверка Linux Agent",
-            [
+            ([("Browser.ReadText", {"selector": "body"})] if browser else [])
+            + [
                 (
                     "Files.WriteText",
                     {
@@ -46,7 +47,7 @@ def enqueue_check(host, agent_id):
     finally:
         host.catalog.remove([item["id"]])  # Keep internal diagnostics out of the user project catalog.
     host.start()
-    return {"job": job}
+    return {"job": job, "browser_tested": browser}
 
 
 def check_status(host, job):

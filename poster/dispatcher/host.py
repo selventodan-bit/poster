@@ -330,6 +330,10 @@ class Host:
 
     def dispatch(self, value):
         op = value.pop("op")
+        if op == "network_bind":
+            from poster.portability.network import NetworkProfiles
+
+            return NetworkProfiles().put("Private runtime binding", value["config"], value["binding"])
         if op.startswith("session_permission_"):
             from poster.portability.permissions import SessionPermissions
 
@@ -393,7 +397,7 @@ class Host:
             if op == "remote_test":
                 from .remote_check import enqueue_check
 
-                return enqueue_check(self, value["id"])
+                return enqueue_check(self, value["id"], browser=value.get("browser", False))
             if op == "remote_test_status":
                 from .remote_check import check_status
 
@@ -485,6 +489,8 @@ class Host:
         if op == "projects":
             return self.projects()
         if op == "dashboard":
+            from poster.portability.permissions import SessionPermissions
+
             schedule_query = value.pop("schedule_query", {})
             return {
                 "service": self.dispatch({"op": "ping"}),
@@ -492,6 +498,7 @@ class Host:
                 "jobs": self.jobs(**value),
                 "schedules": Schedules(self.store).rows(**schedule_query),
                 "agents": Registry(self.store).rows(),
+                "session_permits": SessionPermissions(self.store).rows(),
             }
         if op == "add":
             cloud = value.pop("cloud", None)

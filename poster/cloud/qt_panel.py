@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from .desktop import DesktopCloud
-from .errors import CloudError, MESSAGES
+from .errors import MESSAGES
 
 
 class AsyncBridge(QObject):
@@ -49,7 +49,7 @@ class AsyncBridge(QObject):
                 error = None
             except Exception as exc:
                 result = None
-                error = exc.code if isinstance(exc, CloudError) else "DRIVE_UNAVAILABLE"
+                error = getattr(exc, "code", "DRIVE_UNAVAILABLE")
             if not self.closed:
                 self.completed.emit(name, result, error)
 
