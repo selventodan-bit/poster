@@ -19,7 +19,7 @@ from cryptography.fernet import Fernet
 from filelock import FileLock
 import httpx
 
-from poster.dispatcher.security import private_dir, restrict
+from poster.dispatcher.security import plain_path, private_dir, restrict
 from poster.maker.storage import atomic
 from poster.storage.drive import GoogleToken
 from .errors import CloudError
@@ -80,13 +80,41 @@ class SecretStore:
     """Windows DPAPI per user. Other OSes: private local Fernet for explicit hosts."""
 
     def __init__(self, root=None):
-        self.root = private_dir(Path(root) if root else default_root())
+        from ..product.locking import connection_lease
+
+        self.root = plain_path(Path(root) if root else default_root())
+        self._data_lease = connection_lease(self.root)
+        try:
+            private_dir(self.root)
+        except BaseException:
+            self._data_lease.close()
+            raise
         self.path = self.root / "credentials.bin"
         self.lock = FileLock(str(self.root / "credentials.lock"))
 
+    def close(self):
+        lease = getattr(self, "_data_lease", None)
+        if lease:
+            lease.close()
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass
+
+    def _ensure_open(self):
+        if not self._data_lease.owned:
+            from ..product.locking import connection_lease
+
+            self._data_lease = connection_lease(self.root)
+            private_dir(self.root)
+
     def _cipher(self):
-        path = self.root / "credentials.key"
+        path = plain_path(self.root / "credentials.key")
         if not path.exists():
+            if self.path.exists():
+                raise CloudError("AUTH_REQUIRED")
             try:
                 with path.open("xb") as stream:
                     stream.write(Fernet.generate_key())
@@ -94,6 +122,8 @@ class SecretStore:
             except FileExistsError:
                 pass
         if path.is_symlink():
+            raise CloudError("AUTH_REQUIRED")
+        if path.stat().st_size > 4096:
             raise CloudError("AUTH_REQUIRED")
         return Fernet(path.read_bytes())
 
@@ -120,10 +150,12 @@ class SecretStore:
             raise CloudError("AUTH_REQUIRED") from exc
 
     def get(self, name):
+        self._ensure_open()
         with self.lock:
             return self._read().get(name)
 
     def get_or_create(self, name, factory):
+        self._ensure_open()
         with self.lock:
             value = self._read().get(name)
             if value is None:
@@ -132,6 +164,7 @@ class SecretStore:
             return value
 
     def put(self, name, value):
+        self._ensure_open()
         with self.lock:
             data = self._read()
             if value is None:

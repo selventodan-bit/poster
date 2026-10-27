@@ -98,7 +98,17 @@ def dedup_hash(value):
 
 class Store:
     def __init__(self, path):
+        from ..product.locking import connection_lease
+
         self.path = plain_path(path)
+        self._data_lease = connection_lease(self.path.parent)
+        try:
+            self._open()
+        except BaseException:
+            self._data_lease.close()
+            raise
+
+    def _open(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.root = private_dir(self.path.with_name(self.path.name + ".data"))
         if not self.path.exists():
@@ -193,7 +203,10 @@ class Store:
                 restrict(item)
 
     def close(self):
-        self.db.close()
+        try:
+            self.db.close()
+        finally:
+            self._data_lease.close()
 
     def _migration_backup(self, version):
         """A verified private snapshot precedes any schema/journal changes."""

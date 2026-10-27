@@ -113,3 +113,30 @@ def test_runner_cannot_forge_product_maintenance_namespace(tmp_path):
     with pytest.raises(GraphError):
         sandbox.write(".poster-product-locks/forged/restore-pending.json", b"{}")
     assert not (tmp_path / "run/.poster-product-locks").exists()
+
+
+def test_real_database_reader_blocks_restore_with_verified_pid_birth(tmp_path):
+    import psutil
+
+    root = tmp_path / "database-workspace"
+    root.mkdir()
+    program = 'from poster.dispatcher.store import Store;import sys\nfrom pathlib import Path\ns=Store(Path(sys.argv[1]));print("READY",flush=True);sys.stdin.readline();s.close()'
+    child = subprocess.Popen(
+        [sys.executable, "-c", program, str(root / "dispatcher.sqlite")],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert child.stdout.readline().strip() == "READY"
+        with pytest.raises(DispatcherError) as caught:
+            with offline([root]):
+                pass
+        assert caught.value.code == "PRODUCT_BUSY"
+        assert caught.value.owner["verified"] and caught.value.owner["pid"] == child.pid
+        assert caught.value.owner["birth"] == psutil.Process(child.pid).create_time()
+    finally:
+        child.communicate("\n", timeout=10)
+    assert child.returncode == 0
+    with offline([root]):
+        pass

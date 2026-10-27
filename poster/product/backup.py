@@ -1,6 +1,6 @@
 """Explicit, encrypted offline product snapshots. No graph or job is executed."""
 
-from contextlib import contextmanager
+from contextlib import contextmanager, closing
 import hashlib
 import json
 import os
@@ -14,14 +14,28 @@ import uuid
 import zipfile
 
 from poster.dispatcher.models import DispatcherError
-from poster.dispatcher.security import plain_path, private_dir, restrict
+from poster.dispatcher.security import plain_path, restrict
 from . import crypto
-from .locking import offline
+from .locking import offline, registry_path
+from . import scratch
 
 MAX_FILES = 20000
 MAX_FILE = 4 * 1024**3
 MAX_MANIFEST = 16 * 1024**2
 FORMAT = "poster.product.backup.v1"
+
+
+def archive_path(value):
+    path = plain_path(value)
+    if path.is_relative_to(registry_path()) or any(
+        part == ".poster-product-locks"
+        or part.startswith((".poster-stage-", ".poster-backup-", ".poster-verify-", "poster-product-start-"))
+        or ".poster-before-" in part
+        or ".poster-interrupted-" in part
+        for part in path.parts
+    ):
+        raise DispatcherError("BACKUP_SCOPE")
+    return path
 
 
 def default_roots(maker):
@@ -75,6 +89,9 @@ def roots_checked(roots):
         ):
             raise DispatcherError("BACKUP_SCOPE")
         p = plain_path(path)
+        registry = registry_path()
+        if p.is_relative_to(registry) or registry.is_relative_to(p):
+            raise DispatcherError("BACKUP_SCOPE")
         if (
             p == Path(p.anchor)
             or Path.home().resolve().is_relative_to(p)
@@ -209,7 +226,13 @@ def digest(path):
 
 
 def sqlite_snapshot(source, target):
-    with sqlite3.connect(source.as_uri() + "?mode=ro", uri=True) as src, sqlite3.connect(target) as dst:
+    target = plain_path(target)
+    target.touch(mode=0o600, exist_ok=False)
+    restrict(target)
+    with (
+        closing(sqlite3.connect(source.as_uri() + "?mode=ro", uri=True)) as src,
+        closing(sqlite3.connect(target)) as dst,
+    ):
         src.backup(dst)
         if (
             dst.execute("PRAGMA integrity_check").fetchone()[0] != "ok"
@@ -224,7 +247,7 @@ def create(roots, destination, password, *, confirmed=False):
         raise DispatcherError("BACKUP_PASSPHRASE")
     crypto.validate_password(password)
     roots = roots_checked(roots)
-    destination = plain_path(destination)
+    destination = archive_path(destination)
     if destination.exists() or any(destination == p or destination.is_relative_to(p) for p in roots.values()):
         raise DispatcherError("BACKUP_SCOPE")
     if not destination.parent.is_dir():
@@ -235,9 +258,9 @@ def create(roots, destination, password, *, confirmed=False):
             plan = inventory(roots)
             if not plan["scopes"]:
                 raise DispatcherError("BACKUP_SCOPE")
-            space(destination.parent, plan["bytes"] * 3 + MAX_MANIFEST * 2)
-            with tempfile.TemporaryDirectory(prefix=".poster-backup-", dir=destination.parent) as temp:
-                temp = private_dir(temp)
+            space(destination.parent, plan["bytes"] + MAX_MANIFEST * 2)
+            space(scratch.base(), plan["bytes"] * 2 + MAX_MANIFEST * 2)
+            with scratch.directory("backup") as (temp, _scratch_id):
                 archive = temp / "snapshot.zip"
                 manifest = dict(
                     format=FORMAT,
@@ -469,13 +492,14 @@ def validate(archive, roots):
 
 
 @contextmanager
-def opened(source, password, roots, temporary_parent, *, expected_sha256=None):
+def opened(source, password, roots, temporary_parent=None, *, expected_sha256=None):
     roots = roots_checked(roots)
     try:
-        source = plain_path(source)
-        space(temporary_parent, source.stat().st_size * 2 + MAX_MANIFEST)
-        with tempfile.TemporaryDirectory(prefix=".poster-verify-", dir=temporary_parent) as temp:
-            temp = private_dir(temp)
+        source = archive_path(source)
+        # Plaintext never enters a public/network backup directory. The legacy
+        # temporary_parent argument remains accepted for internal callers.
+        space(scratch.base(), source.stat().st_size * 2 + MAX_MANIFEST)
+        with scratch.directory("verify") as (temp, scratch_id):
             snapshot = temp / "source.pbackup"
             sha, count = hashlib.sha256(), 0
             with source.open("rb") as src, snapshot.open("xb") as dst:
@@ -492,6 +516,7 @@ def opened(source, password, roots, temporary_parent, *, expected_sha256=None):
             decrypted = temp / "snapshot.zip"
             crypto.decrypt(snapshot, decrypted, password)
             with zipfile.ZipFile(decrypted, "r") as archive:
+                archive._poster_scratch_id = scratch_id
                 manifest = validate(archive, roots)
                 manifest["archive_sha256"] = actual_sha
                 yield archive, manifest
@@ -502,6 +527,6 @@ def opened(source, password, roots, temporary_parent, *, expected_sha256=None):
 
 
 def inspect(source, password, roots):
-    source = plain_path(source)
+    source = archive_path(source)
     with opened(source, password, roots, source.parent) as (_, manifest):
         return manifest

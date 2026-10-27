@@ -1,5 +1,6 @@
 """Migratable, value-free knowledge. Imported rules are hypotheses, never HTTP credentials or proof."""
 
+from contextlib import closing
 import hashlib
 import hmac
 import json
@@ -199,6 +200,18 @@ class KnowledgeBase:
     schema_version = 2
 
     def __init__(self, path: Path):
+        from ..product.locking import connection_lease
+
+        self._data_lease = connection_lease(path.parent)
+        try:
+            self._open(path)
+        except BaseException:
+            if getattr(self, "db", None) is not None:
+                self.db.close()
+            self._data_lease.close()
+            raise
+
+    def _open(self, path):
         path.parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(path)
         version = self.db.execute("PRAGMA user_version").fetchone()[0]
@@ -577,11 +590,14 @@ class KnowledgeBase:
     def backup(self, path):
         if path.exists():
             raise FileExistsError(path)
-        with sqlite3.connect(path) as target:
+        with closing(sqlite3.connect(path)) as target:
             self.db.backup(target)
-        with sqlite3.connect(path) as target:
+        with closing(sqlite3.connect(path)) as target:
             if target.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
                 raise ValueError("Invalid knowledge backup")
 
     def close(self):
-        self.db.close()
+        try:
+            self.db.close()
+        finally:
+            self._data_lease.close()

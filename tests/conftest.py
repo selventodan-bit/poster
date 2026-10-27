@@ -207,3 +207,10 @@ def pytest_runtest_makereport(item, call):
         except (OSError, ValueError, sqlite3.Error):
             pass
     print("\n::error title=Dispatcher diagnostics::" + json.dumps(diagnostic), flush=True)
+
+
+@pytest.fixture(autouse=True)
+def isolated_product_lease_registry(tmp_path, monkeypatch):
+    # Real OS locks and PID/birth records, isolated from the developer's own
+    # running apps. Child processes inherit this same per-test registry.
+    monkeypatch.setenv("POSTER_PRODUCT_LOCK_HOME", str(tmp_path / ".poster-product-locks"))

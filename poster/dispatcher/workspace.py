@@ -21,6 +21,13 @@ def workspace_path():
 
 
 def queue_key(root):
+    from ..product.locking import connection_lease
+
+    with connection_lease(root):
+        return _queue_key(root)
+
+
+def _queue_key(root):
     """Do not regenerate a missing key for existing encrypted state or use cwd keys."""
     root = private_dir(root)
     restrict(root, directory=True)
@@ -34,7 +41,9 @@ def queue_key(root):
             restrict(path)
         try:
             restrict(path)
-            key = path.read_bytes().strip()
+            from ..auth import read_key
+
+            key = read_key(path)
             Fernet(key)
         except Exception as exc:
             raise DispatcherError("KEY_INVALID") from exc

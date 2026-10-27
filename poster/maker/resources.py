@@ -13,6 +13,16 @@ MAX_DATA = 1_000_000
 MAX_FILE = 10_000_000
 
 
+def lifecycle_path(path):
+    return any(
+        part == ".poster-product-locks"
+        or part.startswith((".poster-stage-", ".poster-verify-", ".poster-backup-", "poster-product-start-"))
+        or ".poster-before-" in part
+        or ".poster-interrupted-" in part
+        for part in path.parts
+    )
+
+
 @dataclass
 class Budget:
     steps: int
@@ -38,7 +48,11 @@ class Budget:
 
 class FileSandbox:
     def __init__(self, root=None, *, allow_external=False):
+        from poster.product.locking import registry_path
+
         self.root = Path(root or tempfile.mkdtemp(prefix="poster-run-")).absolute().resolve()
+        if lifecycle_path(self.root) or self.root.is_relative_to(registry_path()):
+            raise GraphError("FILE_PATH_INVALID")
         self.root.mkdir(parents=True, exist_ok=True)
         self.allow_external = allow_external
         self.budget = None
@@ -47,13 +61,17 @@ class FileSandbox:
         if not text or "\x00" in str(text):
             raise GraphError("FILE_PATH_INVALID")
         text = str(text)
-        if ".poster-product-locks" in Path(text.replace("\\", "/")).parts:
+        if lifecycle_path(Path(text.replace("\\", "/"))):
             raise GraphError("FILE_PATH_INVALID")
         if os.name != "nt" and PureWindowsPath(text).drive:
             raise GraphError("FILE_OUTSIDE_WORKDIR")
         path = Path(text.replace("\\", "/"))
         path = path if path.is_absolute() else self.root / path
         resolved = path.resolve()
+        from poster.product.locking import registry_path
+
+        if lifecycle_path(resolved) or resolved.is_relative_to(registry_path()):
+            raise GraphError("FILE_PATH_INVALID")
         if not self.allow_external and not resolved.is_relative_to(self.root):
             raise GraphError("FILE_OUTSIDE_WORKDIR")
         for part in [path, *path.parents]:

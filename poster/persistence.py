@@ -4,7 +4,7 @@ import json
 import sqlite3
 import time
 import uuid
-from contextlib import contextmanager
+from contextlib import contextmanager, closing
 from pathlib import Path
 
 from filelock import FileLock
@@ -35,17 +35,38 @@ CREATE TABLE IF NOT EXISTS replay_artifacts(
 
 class State:
     def __init__(self, path: Path):
+        from .product.locking import connection_lease
+
         self.path = path
+        self._data_lease = connection_lease(path.parent)
+        try:
+            self._open(path)
+        except BaseException:
+            if getattr(self, "db", None) is not None:
+                self.db.close()
+            self._data_lease.close()
+            raise
+
+    def _open(self, path):
         path.parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(path, timeout=30)
         self.db.row_factory = sqlite3.Row
+        tables = {r[0] for r in self.db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if tables:
+            if "schema_version" not in tables or [
+                r[0] for r in self.db.execute("SELECT version FROM schema_version")
+            ] != [1]:
+                raise ValueError("Unsupported database schema version")
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.executescript(SCHEMA)
         if self.db.execute("SELECT version FROM schema_version").fetchone()[0] != 1:
             raise ValueError("Unsupported database schema version")
 
     def close(self):
-        self.db.close()
+        try:
+            self.db.close()
+        finally:
+            self._data_lease.close()
 
     @contextmanager
     def engine_lock(self):
@@ -166,7 +187,7 @@ class State:
         if destination.resolve() == self.path.resolve() or destination.exists():
             raise ValueError("Backup destination must be a new file")
         destination.parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(destination) as target:
+        with closing(sqlite3.connect(destination)) as target:
             self.db.backup(target)
             if target.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
                 raise ValueError("Backup integrity check failed")
@@ -175,12 +196,17 @@ class State:
     def restore(snapshot: Path, destination: Path):
         if destination.exists():
             raise ValueError("Restore destination must not exist")
-        with sqlite3.connect(f"file:{snapshot.resolve()}?mode=ro", uri=True) as src:
+        from .product.locking import connection_lease
+
+        with (
+            connection_lease(destination.parent),
+            closing(sqlite3.connect(f"file:{snapshot.resolve()}?mode=ro", uri=True)) as src,
+        ):
             if src.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
                 raise ValueError("Invalid snapshot")
             version = src.execute("SELECT version FROM schema_version").fetchone()[0]
             if version != 1:
                 raise ValueError("Unsupported snapshot version")
             destination.parent.mkdir(parents=True, exist_ok=True)
-            with sqlite3.connect(destination) as dst:
+            with closing(sqlite3.connect(destination)) as dst:
                 src.backup(dst)

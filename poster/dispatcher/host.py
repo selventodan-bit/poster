@@ -96,6 +96,13 @@ def request(root, operation, **arguments):
 
 
 def ensure_service(root):
+    from ..product.locking import connection_lease
+
+    with connection_lease(root):
+        return _ensure_service(root)
+
+
+def _ensure_service(root):
     root = private_dir(root)
     with FileLock(str(root / "startup.lock"), timeout=25):
         try:
@@ -719,7 +726,7 @@ def main():
     parser.add_argument("--workspace", type=Path, default=None)
     parser.add_argument("--autostart", choices=["status", "enable", "disable"])
     args = parser.parse_args()
-    root = private_dir(args.workspace or workspace_path())
+    root = plain_path(args.workspace or workspace_path())
     if args.autostart:
         from .autostart import configure
 
@@ -753,7 +760,9 @@ def main():
     except Exception as exc:
         from filelock import Timeout
 
-        if not isinstance(exc, Timeout):
+        if not isinstance(exc, Timeout) and not (
+            isinstance(exc, DispatcherError) and exc.code in {"RESTORE_RECOVERY", "PRODUCT_BUSY"}
+        ):
             safe_json(
                 root / "startup-error.json",
                 {"code": exc.code if isinstance(exc, DispatcherError) else "SERVICE_FAILED"},

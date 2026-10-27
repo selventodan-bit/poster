@@ -110,3 +110,30 @@ Source архива копируется в приватный неизменя�
 оставаться вне переименовываемого дерева), проверить реальные PID/birth владельцев,
 все ранние crash-границы, remote grants/POST, GUI maintenance/first-run, 78 actions,
 upgrade и полный CI. Этот checkpoint не является завершением Stage 6.
+
+## Продолжение: проверенный локальный блок восстановления
+
+80/80 targeted checks PASSED: product, миграции, ключи, Cloud auth и настоящий
+Service/Worker. Журнал v2 записывается до staging; приватный scratch имеет отдельный
+проверяемый ledger PID/birth/inode. Системные locks вынесены за восстанавливаемые
+деревья. Поддерживаются вложенные logical roots и старые adjacent recovery markers.
+Проверены ранние os._exit, внешний SIGKILL/TerminateProcess, commit boundaries,
+повторный recovery, реальная ошибка os.replace, отказ при нехватке места, смена
+CWD, сохранение ключей/профилей, локальный отзыв настоящих SessionPermissions и
+очистка remote offer/outbox. Отзыв у удалённого получателя остаётся UNCONFIRMED.
+
+Настоящие Service и Worker отправляют один POST в собственный HTTP fixture, затем
+Service аварийно завершается. Backup/restore и новый Service/start сохраняют
+REVIEW_REQUIRED и счётчик POST=1. Найдена и исправлена несовместимость: изменение
+UNKNOWN execution на REVIEW_REQUIRED нарушало проверку существующего report.
+Теперь execution остаётся UNKNOWN, job требует review; исходное подтверждение
+сохраняется и проверяется прежним валидатором. SUCCEEDED не переписывается.
+
+Upgrade fixture действительно создаётся исходным кодом принятого 5D
+`f733210a89a7a30d3d87669f85942bb403e0f9df`, извлечённым git archive, а затем
+открывается/копируется/восстанавливается новым кодом. Проверяются identity,
+queue key, encrypted Cloud state, проект и результат. Это ещё не испытание
+физической перезагрузки ПК или потери питания диска.
+
+Windows-specific ACL/nested/crash checks должны пройти CI нового SHA.
+GUI обслуживания, 78 forms/actions и итоговая поставка остаются в работе.

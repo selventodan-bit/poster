@@ -1,68 +1,24 @@
 """Staged, journalled same-user recovery. Restored jobs never run automatically."""
 
+from contextlib import closing
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
-import shutil
 import sqlite3
 import time
 import uuid
 
 from poster.dispatcher.models import DispatcherError
 from poster.dispatcher.security import plain_path, private_dir, restrict
-from . import backup, crypto
-from .locking import lock_root, offline
-
-
-def sync_directory(path):
-    if os.name != "nt":
-        fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            os.fsync(fd)
-        finally:
-            os.close(fd)
-
-
-def durable(path, value):
-    path = plain_path(path)
-    private_dir(path.parent)
-    temporary = path.with_name("." + path.name + "." + uuid.uuid4().hex)
-    try:
-        with temporary.open("xb") as f:
-            restrict(temporary)
-            f.write(json.dumps(value, allow_nan=False).encode())
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(temporary, path)
-        sync_directory(path.parent)
-    finally:
-        temporary.unlink(missing_ok=True)
-
-
-def remove_owned(path):
-    path = plain_path(path)
-    if path.is_dir():
-        # Refuse links anywhere before recursive removal, including Windows
-        # junctions. Only transaction-owned staging/new roots reach this helper.
-        for child in path.rglob("*"):
-            plain_path(child)
-        shutil.rmtree(path)
-    elif path.exists():
-        path.unlink()
+from . import backup, crypto, scratch
+from .locking import lock_root, lock_path, legacy_lock_path, legacy_folders, offline
+from .atomic import durable, sync_directory, remove_owned, file_identity
 
 
 def checkpoint(phase):
     """A test may observe/kill the real process at a durable boundary."""
-
-
-def file_identity(path):
-    path = plain_path(path)
-    if not path.exists():
-        return None
-    stat = path.stat()
-    return [stat.st_dev, stat.st_ino]
 
 
 def sanitize_native(path):
@@ -89,7 +45,7 @@ def sanitize_native(path):
                     )
                     store.event(job, target, "REVIEW_REQUIRED")
             db.execute(
-                "UPDATE executions SET status='REVIEW_REQUIRED',code='REVIEW_REQUIRED',pid=NULL,birth=NULL,finished=? WHERE status IN ('LEASED','RUNNING','UNKNOWN')",
+                "UPDATE executions SET status='UNKNOWN',code='REVIEW_REQUIRED',pid=NULL,birth=NULL,finished=? WHERE status IN ('LEASED','RUNNING','UNKNOWN')",
                 (now,),
             )
             db.execute("UPDATE schedules SET enabled=0,paused_code='REVIEW_REQUIRED'")
@@ -115,7 +71,7 @@ def sanitize_native(path):
 def sanitize_legacy(path):
     if not path.exists():
         return
-    with sqlite3.connect(path) as db:
+    with closing(sqlite3.connect(path)) as db:
         if db.execute("PRAGMA application_id").fetchone()[0] != 0:
             raise DispatcherError("BACKUP_INVALID")
         tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
@@ -138,15 +94,24 @@ def sanitize_legacy(path):
 
 def journal_checked(path, roots):
     try:
-        value = json.loads(plain_path(path).read_bytes())
+        path = plain_path(path)
+        if path.stat().st_size > 100000:
+            raise ValueError()
+        value = json.loads(path.read_bytes())
         tx = value["id"]
         if (
-            value["format"] != "poster.restore.v1"
+            value["format"] not in {"poster.restore.v1", "poster.restore.v2"}
             or not re.fullmatch("[a-f0-9]{32}", tx)
             or value["binding"] != backup.binding()
-            or value["phase"] not in {"PREPARED", "APPLYING", "COMMITTED", "ROLLED_BACK"}
+            or value["phase"] not in {"STAGING", "PREPARED", "APPLYING", "COMMITTED", "ROLLED_BACK"}
         ):
             raise ValueError()
+        v2 = value["format"] == "poster.restore.v2"
+        prepared = value.get("prepared", True)
+        if type(prepared) is not bool or (not prepared and value["phase"] not in {"STAGING", "ROLLED_BACK"}):
+            raise ValueError()
+        if v2 and value.get("scratch") is not None:
+            scratch.record_path(value["scratch"])
         entries = value["entries"]
         if not isinstance(entries, list) or not 1 <= len(entries) <= len(roots):
             raise ValueError()
@@ -161,9 +126,11 @@ def journal_checked(path, roots):
             previous = target.with_name("." + target.name + ".poster-before-" + tx)
             if row["base"] != str(base) or row["previous"] != str(previous):
                 raise ValueError()
-            for key in ("old_id", "new_id"):
+            for key in ["old_id", "new_id", "base_id"] if v2 else ["old_id", "new_id"]:
                 identity = row[key]
-                if identity is None and key == "old_id" and not row["existed"]:
+                if identity is None and (
+                    (key == "old_id" and not row["existed"]) or (key != "old_id" and not prepared)
+                ):
                     continue
                 if (
                     not isinstance(identity, list)
@@ -171,9 +138,13 @@ def journal_checked(path, roots):
                     or any(type(n) is not int or n < 0 for n in identity)
                 ):
                     raise ValueError()
-            for p in [base, previous, target]:
-                plain_path(p)
-        if plain_path(path) != lock_root(roots[entries[0]["scope"]]) / "restore-transaction.json":
+            for item in [base, previous, target]:
+                plain_path(item)
+        target = roots[entries[0]["scope"]]
+        if path not in {
+            lock_path(target) / "restore-transaction.json",
+            legacy_lock_path(target) / "restore-transaction.json",
+        }:
             raise ValueError()
         return value
     except Exception as exc:
@@ -183,14 +154,18 @@ def journal_checked(path, roots):
 def discover(roots):
     roots = backup.roots_checked(roots)
     journals = set()
-    for root in roots.values():
-        folder = lock_root(root)
+    folders = {lock_path(p) for root in roots.values() for p in [root, *root.parents]}
+    folders |= legacy_folders(roots.values())
+    allowed = {folder for p in roots.values() for folder in [lock_path(p), legacy_lock_path(p)]}
+    for folder in folders:
         marker = folder / "restore-pending.json"
         if marker.exists():
             try:
+                if marker.stat().st_size > 20000:
+                    raise ValueError()
                 value = json.loads(plain_path(marker).read_bytes())
                 journal = plain_path(value["journal"])
-                if journal.parent not in {lock_root(p) for p in roots.values()}:
+                if journal.parent not in allowed:
                     raise ValueError()
                 checked = journal_checked(journal, roots)
                 if value["id"] != checked["id"]:
@@ -205,38 +180,66 @@ def discover(roots):
     return sorted(journals)
 
 
+def quarantine(path, destination):
+    """Preserve interrupted installed data; never recursively erase a live target."""
+    if destination.exists():
+        raise DispatcherError("RESTORE_RECOVERY")
+    os.replace(path, destination)
+    sync_directory(path.parent)
+
+
 def rollback(journal, roots):
     value = journal_checked(journal, roots)
-    if value["phase"] != "COMMITTED":
-        for row in reversed(value["entries"]):
-            target, previous, base = map(Path, [row["target"], row["previous"], row["base"]])
-            if previous.exists():
-                if file_identity(previous) != row["old_id"]:
-                    raise DispatcherError("RESTORE_RECOVERY")
-                if target.exists():
-                    if file_identity(target) != row["new_id"]:
+    if value["phase"] not in {"COMMITTED", "ROLLED_BACK"}:
+        if value.get("prepared", True):
+            for row in reversed(value["entries"]):
+                target, previous = map(Path, [row["target"], row["previous"]])
+                failed = target.with_name("." + target.name + ".poster-interrupted-" + value["id"])
+                if previous.exists():
+                    if file_identity(previous) != row["old_id"]:
                         raise DispatcherError("RESTORE_RECOVERY")
-                    remove_owned(target)
-                os.replace(previous, target)
-                sync_directory(target.parent)
-            elif target.exists():
-                identity = file_identity(target)
-                if not row["existed"] and identity == row["new_id"]:
-                    remove_owned(target)
+                    if target.exists():
+                        if file_identity(target) != row["new_id"]:
+                            raise DispatcherError("RESTORE_RECOVERY")
+                        quarantine(target, failed)
+                    os.replace(previous, target)
                     sync_directory(target.parent)
-                elif identity != row["old_id"]:
+                elif target.exists():
+                    identity = file_identity(target)
+                    if not row["existed"] and identity == row["new_id"]:
+                        quarantine(target, failed)
+                    elif identity != row["old_id"]:
+                        raise DispatcherError("RESTORE_RECOVERY")
+                elif row["existed"]:
                     raise DispatcherError("RESTORE_RECOVERY")
-            elif row["existed"]:
-                raise DispatcherError("RESTORE_RECOVERY")
         value["phase"] = "ROLLED_BACK"
         durable(journal, value)
+    if value["phase"] == "COMMITTED":
+        if any(file_identity(Path(row["target"])) != row["new_id"] for row in value["entries"]):
+            raise DispatcherError("RESTORE_RECOVERY")
     for row in value["entries"]:
         base = Path(row["base"])
         if base.exists():
-            remove_owned(base)
-        marker = lock_root(roots[row["scope"]]) / "restore-pending.json"
-        marker.unlink(missing_ok=True)
-        sync_directory(marker.parent)
+            known = row.get("base_id") == file_identity(base)
+            if value["format"] == "poster.restore.v1":
+                known = file_identity(base / "data") == row["new_id"] or not any(base.iterdir())
+            if known:
+                remove_owned(base)
+                sync_directory(base.parent)
+            else:
+                # Death between mkdir and recording its inode gives no licence
+                # to remove unknown contents. Retain the folder for inspection.
+                quarantine(base, base.with_name(base.name.replace(".poster-stage-", ".poster-orphan-", 1)))
+        for folder in {lock_path(roots[row["scope"]]), legacy_lock_path(roots[row["scope"]])}:
+            marker = folder / "restore-pending.json"
+            if marker.exists():
+                data = json.loads(plain_path(marker).read_bytes())
+                if data != dict(id=value["id"], journal=str(journal)):
+                    raise DispatcherError("RESTORE_RECOVERY")
+                marker.unlink()
+                sync_directory(marker.parent)
+    if value.get("scratch"):
+        scratch.cleanup(value["scratch"])
     journal.unlink()
     sync_directory(journal.parent)
     return value["phase"]
@@ -247,7 +250,9 @@ def recover(roots, *, confirmed=False):
         raise DispatcherError("RESTORE_RECOVERY")
     roots = backup.roots_checked(roots)
     with offline(roots.values(), allow_recovery=True):
-        return [rollback(p, roots) for p in discover(roots)]
+        result = [rollback(p, roots) for p in discover(roots)]
+        scratch.cleanup_abandoned()
+        return result
 
 
 def restore(source, password, roots, *, expected_sha256, confirmed=False):
@@ -256,43 +261,67 @@ def restore(source, password, roots, *, expected_sha256, confirmed=False):
     if not isinstance(expected_sha256, str) or not re.fullmatch("[a-f0-9]{64}", expected_sha256):
         raise DispatcherError("BACKUP_INVALID")
     roots = backup.roots_checked(roots)
-    source = plain_path(source)
+    source = backup.archive_path(source)
+    if any(source == p or source.is_relative_to(p) for p in roots.values()):
+        raise DispatcherError("BACKUP_SCOPE")
     with offline(roots.values()):
         if discover(roots):
             raise DispatcherError("RESTORE_RECOVERY")
-        with backup.opened(source, password, roots, source.parent, expected_sha256=expected_sha256) as (
-            archive,
-            manifest,
-        ):
+        with backup.opened(source, password, roots, expected_sha256=expected_sha256) as (archive, manifest):
             tx = uuid.uuid4().hex
             entries = []
-            journal = None
             summary = {}
+            checkpoint("BEFORE_STAGING")
+            for scope in manifest["scopes"]:
+                name = scope["name"]
+                target = roots[name]
+                base = target.parent / (".poster-stage-" + tx + "-" + name)
+                previous = target.with_name("." + target.name + ".poster-before-" + tx)
+                if base.exists() or previous.exists():
+                    raise DispatcherError("BACKUP_IO")
+                entries.append(
+                    dict(
+                        scope=name,
+                        target=str(target),
+                        base=str(base),
+                        previous=str(previous),
+                        existed=target.exists(),
+                        old_id=file_identity(target),
+                        new_id=None,
+                        base_id=None,
+                    )
+                )
+            journal = lock_root(roots[entries[0]["scope"]]) / "restore-transaction.json"
+            value = dict(
+                format="poster.restore.v2",
+                id=tx,
+                binding=backup.binding(),
+                phase="STAGING",
+                prepared=False,
+                entries=entries,
+                scratch=getattr(archive, "_poster_scratch_id", None),
+            )
             try:
-                for scope in manifest["scopes"]:
+                durable(journal, value)
+                for row in entries:
+                    durable(
+                        lock_root(roots[row["scope"]]) / "restore-pending.json",
+                        dict(id=tx, journal=str(journal)),
+                    )
+                checkpoint("STAGING")
+                file_index = 0
+                for scope, row in zip(manifest["scopes"], entries, strict=True):
                     name = scope["name"]
-                    target = roots[name]
-                    # A user may restore below a shared parent. Do not change
-                    # that parent's permissions; only our staging tree is private.
+                    target, base = Path(row["target"]), Path(row["base"])
+                    # Staging and renames stay on this target's filesystem.
                     plain_path(target.parent).mkdir(parents=True, exist_ok=True, mode=0o700)
                     backup.space(
                         target.parent, sum(f["size"] for f in manifest["files"] if f["scope"] == name)
                     )
-                    base = target.parent / (".poster-stage-" + tx + "-" + name)
-                    previous = target.with_name("." + target.name + ".poster-before-" + tx)
-                    if base.exists() or previous.exists():
-                        raise DispatcherError("BACKUP_IO")
-                    private_dir(base)
-                    entries.append(
-                        dict(
-                            scope=name,
-                            target=str(target),
-                            base=str(base),
-                            previous=str(previous),
-                            existed=target.exists(),
-                            old_id=file_identity(target),
-                        )
-                    )
+                    base.mkdir(mode=0o700)
+                    restrict(base, directory=True)
+                    row["base_id"] = file_identity(base)
+                    durable(journal, value)
                     if scope["kind"] == "directory":
                         private_dir(base / "data")
                     for item in manifest["directories"]:
@@ -313,15 +342,15 @@ def restore(source, password, roots, *, expected_sha256, confirmed=False):
                                 count += len(raw)
                                 dst.write(raw)
                                 sha.update(raw)
+                                checkpoint("STAGE_FILE_" + str(file_index))
                             dst.flush()
                             os.fsync(dst.fileno())
                         if count != item["size"] or sha.hexdigest() != item["sha256"]:
                             raise DispatcherError("BACKUP_INVALID")
+                        file_index += 1
                     sync_directory(base)
-                    entries[-1]["new_id"] = file_identity(base / "data")
-                # Logical state roots can be nested inside one physical tree.
-                # Quarantine the configured queues even when a parent owns the
-                # archive bytes; they must never be treated as ordinary resources.
+                    row["new_id"] = file_identity(base / "data")
+                    durable(journal, value)
                 for logical_name, logical_path in roots.items():
                     row = next((r for r in entries if logical_path.is_relative_to(Path(r["target"]))), None)
                     if row is None:
@@ -329,6 +358,14 @@ def restore(source, password, roots, *, expected_sha256, confirmed=False):
                     staged = Path(row["base"]) / "data"
                     if logical_path != Path(row["target"]):
                         staged /= logical_path.relative_to(Path(row["target"]))
+                    if logical_name == "location" and staged.is_file():
+                        if staged.stat().st_size > 20000:
+                            raise DispatcherError("BACKUP_INVALID")
+                        location = json.loads(staged.read_bytes())
+                        if location.get("format") != "poster.maker.location.v1" or plain_path(
+                            location.get("path", "")
+                        ) != roots.get("maker"):
+                            raise DispatcherError("BACKUP_SCOPE")
                     if logical_name == "dispatcher" or logical_name.startswith("dispatcher_"):
                         if (staged / "dispatcher.sqlite").is_file():
                             summary.setdefault("native_original_statuses", {})[logical_name] = (
@@ -337,20 +374,8 @@ def restore(source, password, roots, *, expected_sha256, confirmed=False):
                     if logical_name == "maker" or logical_name.startswith("maker_"):
                         if (staged / "state.sqlite").is_file():
                             sanitize_legacy(staged / "state.sqlite")
-                journal = lock_root(roots[entries[0]["scope"]]) / "restore-transaction.json"
-                value = dict(
-                    format="poster.restore.v1",
-                    id=tx,
-                    binding=backup.binding(),
-                    phase="PREPARED",
-                    entries=entries,
-                )
+                value.update(prepared=True, phase="PREPARED")
                 durable(journal, value)
-                for row in entries:
-                    durable(
-                        lock_root(roots[row["scope"]]) / "restore-pending.json",
-                        dict(id=tx, journal=str(journal)),
-                    )
                 checkpoint("PREPARED")
                 value["phase"] = "APPLYING"
                 durable(journal, value)
@@ -369,7 +394,7 @@ def restore(source, password, roots, *, expected_sha256, confirmed=False):
                 value["phase"] = "COMMITTED"
                 durable(journal, value)
                 checkpoint("COMMITTED")
-                rollback(journal, roots)  # COMMITTED only removes markers/stages.
+                rollback(journal, roots)
                 return dict(
                     status="PASSED",
                     archive_sha256=manifest["archive_sha256"],
@@ -377,20 +402,15 @@ def restore(source, password, roots, *, expected_sha256, confirmed=False):
                     previous_directories=[r["previous"] for r in entries if r["existed"]],
                     manual_review=True,
                     schedules_disabled=True,
+                    remote_revocation="UNCONFIRMED",
                     **summary,
                 )
             except BaseException as exc:
                 try:
-                    if journal is not None and journal.exists():
+                    if journal.exists():
                         rollback(journal, roots)
-                    else:
-                        for row in entries:
-                            if Path(row["base"]).exists():
-                                remove_owned(Path(row["base"]))
                 except Exception as recovery:
                     raise DispatcherError("RESTORE_RECOVERY") from recovery
-                if isinstance(exc, DispatcherError):
-                    raise
-                if not isinstance(exc, Exception):
+                if isinstance(exc, DispatcherError) or not isinstance(exc, Exception):
                     raise
                 raise DispatcherError("BACKUP_IO") from exc

@@ -33,6 +33,12 @@ def decrypt_bytes(encrypted: bytes) -> dict:
     raise InvalidToken
 
 
+def read_key(path):
+    if path.stat().st_size > 4096 or path.stat().st_nlink != 1:
+        raise ValueError("KEY_INVALID")
+    return path.read_bytes().strip()
+
+
 def ensure_local_key(private_dir: Path, *, legacy_home: Path | None = None):
     """Desktop convenience: create a private local key outside all exported projects."""
     if os.environ.get("POSTER_SESSION_KEY"):
@@ -48,7 +54,7 @@ def ensure_local_key(private_dir: Path, *, legacy_home: Path | None = None):
     legacy = plain_path((legacy_home or Path.home()) / ".poster" / "session.key")
     # Reuse, never overwrite, the key that can decrypt existing Windows projects.
     if not path.exists() and legacy.is_file():
-        value = legacy.read_bytes().strip()
+        value = read_key(legacy)
         Fernet(value)
         restrict(legacy)
         os.environ["POSTER_SESSION_KEY"] = value.decode("ascii")
@@ -60,10 +66,10 @@ def ensure_local_key(private_dir: Path, *, legacy_home: Path | None = None):
         except FileExistsError:
             pass  # A concurrent first start already created the only key.
     restrict(path)
-    value = path.read_bytes().strip()
+    value = read_key(path)
     Fernet(value)
     if legacy.is_file():
-        previous = legacy.read_bytes().strip()
+        previous = read_key(legacy)
         Fernet(previous)
         restrict(legacy)
         if previous != value and previous not in _legacy_keys:

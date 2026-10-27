@@ -66,7 +66,7 @@ class DesktopCloud:
             if self.fixture.get("mode") != "drive_fixture" or len(self.fixture.get("nonce", "")) != 32:
                 raise CloudError("INTEGRITY")
             root = path.parent / ("isolated-cloud-" + self.fixture["nonce"])
-        self.root = private_dir(Path(root) if root else default_root())
+        self.root = plain_path(Path(root) if root else default_root())
         self.store = SecretStore(self.root)
         self.auth = DesktopOAuth(self.store)
         self.client = None

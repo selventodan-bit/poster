@@ -45,6 +45,7 @@ PRIVATE_SUFFIXES = {
     ".db",
     ".enc",
     ".ipynb",
+    ".pbackup",
 }
 
 
