@@ -65,3 +65,28 @@ def test_real_preparation_profile_network_and_runtime_report(app, tmp_path, monk
         dialog.close()
         parent.close()
         app.processEvents()
+
+
+def test_legacy_typed_input_form_does_not_require_source_or_profile_bindings(app, tmp_path, monkeypatch):  # noqa: F811
+    from PySide6.QtWidgets import QSpinBox
+    from poster.dispatcher.qt_app import InputsDialog
+
+    monkeypatch.setenv("POSTER_CLOUD_HOME", str(tmp_path / "private-cloud"))
+    parent = QWidget()
+    parent.agent_items = []
+    parent.timeout = QSpinBox()
+    parent.timeout.setRange(1, 86400)
+    parent.timeout.setValue(300)
+    dialog = InputsDialog(
+        dict(name="Legacy form", inputs=[dict(name="flag", type="bool", secret=False, required=True)]), parent
+    )
+    try:
+        dialog.show()
+        app.processEvents()
+        dialog.fields[0][4].setCurrentIndex(1)
+        assert dialog.values() == ({"flag": True}, {})
+        assert not dialog.profile_path.text()
+    finally:
+        dialog.close()
+        parent.close()
+        app.processEvents()

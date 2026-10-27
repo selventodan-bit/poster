@@ -174,7 +174,7 @@ class InputsDialog(QDialog):
         self.session_permission.addItem("Чистая сессия Agent (без переноса)", None)
         import time
 
-        for permit in parent.session_permits:
+        for permit in getattr(parent, "session_permits", []):
             if (
                 permit["project_id"] == item["project_id"]
                 and permit["version"] == item["version"]
@@ -220,7 +220,7 @@ class InputsDialog(QDialog):
         self.remote_target.agent.currentIndexChanged.connect(profile_mode)
         from poster.portability.local import profile_binding
 
-        binding = profile_binding(item["source"])
+        binding = profile_binding(item["source"]) if item.get("source") else None
         if binding and binding.get("profile_id"):
             self.profile_path.setText(str(Path(binding["root"]) / (binding["profile_id"] + ".enc")))
             self.profile_key.setText(binding.get("key_file") or "")
