@@ -78,9 +78,11 @@ def origin(url):
 
 
 class HTTPState:
-    def __init__(self):
+    def __init__(self, network=None):
+        from poster.portability.network import Network
+
         self.client = httpx.AsyncClient(
-            trust_env=False, follow_redirects=False, transport=httpx.AsyncHTTPTransport(retries=0)
+            trust_env=False, follow_redirects=False, transport=Network.parse(network).transport()
         )
         self.tainted = False
         self.headers = {}
@@ -93,7 +95,7 @@ class HTTPState:
 
 def session(ctx):
     if ctx.http is None:
-        ctx.http = HTTPState()
+        ctx.http = HTTPState(getattr(ctx, "network", None))
     return ctx.http
 
 
@@ -218,6 +220,8 @@ async def request(ctx, p, method=None, download=False):
                 ) as r:
                     raw = await bounded_body(r, p.max_response_bytes)
                     status, response_headers = r.status_code, dict(r.headers)
+                    if status == 407 and ctx.network.kind != "direct":
+                        raise GraphError("NETWORK_AUTH")
                     if (
                         sum(len(k) + len(v) for k, v in response_headers.items()) > 65536
                         or len(state.client.cookies.jar) > 1000
@@ -265,8 +269,16 @@ async def request(ctx, p, method=None, download=False):
             },
         ) from exc
     except httpx.ConnectError as exc:
+        if ctx.network.kind != "direct":
+            from poster.portability.network import error_code
+
+            raise GraphError(error_code(exc)) from None
         raise GraphError("HTTP_CONNECT") from exc
     except httpx.HTTPError as exc:
+        if isinstance(exc, httpx.ProxyError) and ctx.network.kind != "direct":
+            from poster.portability.network import error_code
+
+            raise GraphError(error_code(exc)) from None
         raise GraphError("HTTP_WRITE_UNKNOWN" if method not in {"GET", "HEAD"} else "HTTP_NETWORK") from exc
     if p.expected_status and status not in p.expected_status:
         raise GraphError("HTTP_STATUS", details={"status": status, "retried": False})

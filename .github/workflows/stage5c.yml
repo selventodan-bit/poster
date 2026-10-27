@@ -1,7 +1,7 @@
 name: stage5c-drive-cloud
 on:
   push:
-    branches: [codex/poster-5c-drive-cloud-multiworker]
+    branches: [codex/poster-5c-drive-cloud-multiworker, codex/poster-5d-execution-portability]
 permissions:
   contents: read
 jobs:

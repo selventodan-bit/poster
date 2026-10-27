@@ -16,9 +16,10 @@ class ChromiumProvider:
     name = "chromium"
 
     async def start(self, driver, headless):
-        self.browser = await driver.chromium.launch(
-            **chromium_options(headless, driver.chromium.executable_path)
-        )
+        options = chromium_options(headless, driver.chromium.executable_path)
+        if getattr(self, "network", None):
+            options["proxy"] = self.network.chromium()
+        self.browser = await driver.chromium.launch(**options)
         self.context = await self.browser.new_context()
         return self.browser, self.context, await self.context.new_page()
 

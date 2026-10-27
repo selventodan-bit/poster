@@ -40,3 +40,28 @@ Drive/Recorder/другие проекты; неподдерживаемая к�
 Google Drive/Colab/Molab live accounts по-прежнему не предоставлены:
 `CLOUD_PROVIDER_NOT_EXECUTED`. Drive fixtures и реальные локальные Jupyter/marimo
 не выдаются за live provider E2E. Платные ресурсы не создаются.
+
+## Реализованные блоки: сессия и сеть
+
+Dispatcher хранит временное согласие в своей существующей SQLite: конкретный
+доверенный Agent ID, immutable project/version, выбранные origins, срок 5–900 секунд
+и число копий. Пакет дополнительно зашифрован для закреплённой identity Agent,
+подписан Controller и привязан к run ID. Отзыв до отправки останавливает передачу;
+после возможной отправки cookies нельзя отозвать у получателя — требуется выход
+на самом сайте. Для каждого перенесённого экземпляра создаётся отдельный профиль.
+Очередь, планировщик и GraphRunner остаются прежними; queue.key не передаётся.
+
+Сетевой профиль хранится в приватном SecretStore (Windows DPAPI; на явном Linux
+host — Fernet и права пользователя). В публичном графе только logical binding
+и разрешение override. HTTP backend поддерживает direct, HTTP/HTTPS и SOCKS5 с
+авторизацией. Chromium поддерживает HTTP/HTTPS и SOCKS5 без авторизации; его
+SOCKS5 с credentials и proxy для встроенного Qt отклоняются до внешнего действия.
+Пользовательский CA HTTPS proxy поддержан HTTP backend, но не Chromium.
+Credentials не включаются в server URL/argv и передаются Worker в зашифрованном
+payload. Проверка proxy делает один GET, проверяет TLS и возвращает безопасный
+код DNS/TLS/auth/connect/timeout без URL, заголовков и тела ответа.
+
+Локальные доказательства: 53 проверки session/network/native store/registry/Drive
+PASSED; отдельно реальная цепочка Controller → TLS Relay → Linux Agent → Chromium
+восстановила синтетический вход и очистила временный профиль. Это Linux fixture,
+не свидетельство Windows↔Linux или live Google Drive. Финальный CI ещё впереди.

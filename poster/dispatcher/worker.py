@@ -146,7 +146,11 @@ async def execute(store, execution, owner, controls):
                 from ..maker.profiles import Profile, Profiles
 
                 value = envelope["profile"]
-                profile_lock = FileLock(value["lock"])
+                profile_lock = FileLock(
+                    str(run_dir / "isolated-profile.lock")
+                    if value.get("mode") == "isolated"
+                    else value["lock"]
+                )
                 wait_reported = False
                 while not controls.reason:
                     try:
@@ -194,6 +198,7 @@ async def execute(store, execution, owner, controls):
                 project_path=source,
                 max_seconds=job["timeout"],
                 profile=profile,
+                network=envelope.get("network"),
                 on_event=event,
             )
             task = asyncio.create_task(runner.run(breakpoints=False))

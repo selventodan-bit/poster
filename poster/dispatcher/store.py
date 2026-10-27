@@ -14,7 +14,12 @@ from .models import ACTIVE, MESSAGES, TERMINAL, TRANSITIONS, DispatcherError, St
 from .security import plain_path, private_dir, restrict
 
 APPLICATION_ID = 0x50445350
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
+
+MIGRATION_7 = """
+CREATE TABLE session_permits(id TEXT PRIMARY KEY,agent_id TEXT NOT NULL,project_id TEXT NOT NULL,version TEXT NOT NULL,expires REAL NOT NULL,remaining INTEGER NOT NULL,revoked INTEGER NOT NULL DEFAULT 0,data_cipher BLOB NOT NULL);
+CREATE TABLE session_transfers(run_id TEXT PRIMARY KEY,permit_id TEXT NOT NULL REFERENCES session_permits(id),sent INTEGER NOT NULL DEFAULT 0,packet_cipher BLOB NOT NULL);
+"""
 
 MIGRATION_6 = """
 ALTER TABLE jobs ADD COLUMN batch_id TEXT;
@@ -119,7 +124,7 @@ class Store:
         tables = {r[0] for r in self.db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         app = self.db.execute("PRAGMA application_id").fetchone()[0]
         version = self.db.execute("PRAGMA user_version").fetchone()[0]
-        if (tables and (app != APPLICATION_ID or version not in (1, 2, 3, 4, 5, SCHEMA_VERSION))) or (
+        if (tables and (app != APPLICATION_ID or version not in (1, 2, 3, 4, 5, 6, SCHEMA_VERSION))) or (
             not tables and (app or version)
         ):
             raise DispatcherError("STORE_INVALID")
@@ -172,6 +177,11 @@ class Store:
                 self.db.execute("PRAGMA user_version=5")
             if self.db.execute("PRAGMA user_version").fetchone()[0] == 5:
                 for statement in MIGRATION_6.split(";"):
+                    if statement.strip():
+                        self.db.execute(statement)
+                self.db.execute("PRAGMA user_version=6")
+            if self.db.execute("PRAGMA user_version").fetchone()[0] == 6:
+                for statement in MIGRATION_7.split(";"):
                     if statement.strip():
                         self.db.execute(statement)
                 self.db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")

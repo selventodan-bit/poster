@@ -73,12 +73,20 @@ def enqueue_snapshot(
     batch_id=None,
     batch_limit=32,
     cloud_origin=None,
+    session_permission=None,
+    profile_mode="shared",
+    network_override=None,
+    network_root=None,
 ):
     """Admit the inspected immutable version, never recapture a moving source."""
     if key is not None and (previous := store.find_key(key)):
         return previous
     if agent_id and profile_id:
         raise DispatcherError("REMOTE_PROFILE")
+    if session_permission:
+        from poster.portability.permissions import SessionPermissions
+
+        SessionPermissions(store).validate(session_permission, agent_id, project_id, version)
     if agent_id:
         # Old 5B workers lack resource staging and session SecretRef bindings.
         # Refuse BEFORE admission, rather than discovering this after a POST.
@@ -88,7 +96,12 @@ def enqueue_snapshot(
         graph = Graph.model_validate_json(files[manifest["main"]])
         validate_target(store, agent_id)
         agent = store.db.execute("SELECT version FROM remote_agents WHERE id=?", (agent_id,)).fetchone()
-        if (secret_refs or graph.metadata.get("poster.resources")) and agent["version"] != "5C.1":
+        if (graph.metadata.get("poster.network") or network_override) and agent["version"] != "5D.1":
+            raise DispatcherError("REMOTE_VERSION")
+        if (secret_refs or graph.metadata.get("poster.resources")) and agent["version"] not in {
+            "5C.1",
+            "5D.1",
+        }:
             raise DispatcherError("REMOTE_VERSION")
     cipher, names = prepare_snapshot(
         store,
@@ -102,7 +115,19 @@ def enqueue_snapshot(
         project_key=project_key,
         profile_key_file=profile_key_file,
         cloud_origin=cloud_origin,
+        profile_mode=profile_mode,
+        network_override=network_override,
+        network_root=network_root,
     )
+    if session_permission:
+        from .security import unseal
+
+        if len(cipher) > 750_000:
+            raise DispatcherError("REMOTE_LIMIT")
+
+        envelope = unseal(cipher)
+        envelope["session_permission"] = session_permission
+        cipher = seal(envelope)
     return store.enqueue(
         project_id,
         version,
@@ -131,6 +156,9 @@ def prepare_snapshot(
     project_key=None,
     profile_key_file=None,
     cloud_origin=None,
+    profile_mode="shared",
+    network_override=None,
+    network_root=None,
 ):
     """Validate once and retain encrypted inputs for manual or scheduled admission."""
     snapshots = Snapshots(store.root)
@@ -165,6 +193,21 @@ def prepare_snapshot(
     except Exception as exc:
         raise DispatcherError("INPUT_INVALID") from exc
     envelope = {"inputs": inputs, "secrets": secrets}
+    from poster.portability.network import Network, NetworkProfiles
+    from poster.maker.model import GraphError
+
+    try:
+        requested = graph.metadata.get("poster.network")
+        network = (
+            NetworkProfiles(network_root).resolve(requested, override=network_override)
+            if requested or network_override
+            else Network()
+        )
+        network.check(browser=any(n.type.startswith("Browser.") for n in graph.nodes))
+        if network.kind != "direct" or graph.metadata.get("poster.network"):
+            envelope["network"] = network.private()
+    except GraphError as exc:
+        raise DispatcherError(exc.code) from None
     if cloud_origin:
         from poster.cloud.format import identifier, version_id
 
@@ -187,6 +230,8 @@ def prepare_snapshot(
             raise DispatcherError("KEY_INVALID") from exc
         # Encrypted with the queue key; never an argv/environment hand-off.
         envelope["project_key"] = project_key
+    if profile_mode not in {"shared", "isolated"}:
+        raise DispatcherError("PARAMETERS_INVALID")
     if profile_id:
         if not profile_root:
             raise DispatcherError("PARAMETERS_INVALID")
@@ -211,6 +256,7 @@ def prepare_snapshot(
             "key": profile_id,
             "data": profile.data,
             "lock": str(profiles.path(profile_id)) + ".dispatcher-execution.lock",
+            "mode": profile_mode,
         }
     return seal(envelope), sorted(set(inputs) | set(secrets))
 

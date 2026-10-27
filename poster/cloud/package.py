@@ -198,7 +198,10 @@ class PortableBundle:
             if graph.model_dump_json() != before:
                 raise CloudError("PRIVATE_RESOURCE")
             graph.secret_file = graph.secret_sha256 = None
-            graph.metadata = {}
+            from poster.portability.network import policy
+
+            network_policy = policy(graph.metadata.get("poster.network"))
+            graph.metadata = {"poster.network": network_policy} if network_policy else {}
             exports = graph.extensions.get("outputs")
             graph.extensions = {}
             if exports is not None:

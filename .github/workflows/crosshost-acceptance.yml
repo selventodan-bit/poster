@@ -1,14 +1,14 @@
 name: crosshost-acceptance
 on:
   push:
-    branches: [codex/poster-5b-crosshost-acceptance, codex/poster-5c-drive-cloud-multiworker]
+    branches: [codex/poster-5b-crosshost-acceptance, codex/poster-5c-drive-cloud-multiworker, codex/poster-5d-execution-portability]
   workflow_dispatch:
 permissions:
   contents: read
   actions: read
 jobs:
   current-windows:
-    if: github.ref_name == 'codex/poster-5c-drive-cloud-multiworker'
+    if: github.ref_name != 'codex/poster-5b-crosshost-acceptance'
     runs-on: windows-2022
     timeout-minutes: 25
     steps:
@@ -24,7 +24,7 @@ jobs:
           path: release/
           if-no-files-found: error
   current-linux:
-    if: github.ref_name == 'codex/poster-5c-drive-cloud-multiworker'
+    if: github.ref_name != 'codex/poster-5b-crosshost-acceptance'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -41,7 +41,7 @@ jobs:
           if-no-files-found: error
   frozen-drive-notebook:
     needs: [current-windows]
-    if: github.ref_name == 'codex/poster-5c-drive-cloud-multiworker'
+    if: github.ref_name != 'codex/poster-5b-crosshost-acceptance'
     runs-on: windows-2022
     timeout-minutes: 20
     steps:
@@ -76,7 +76,7 @@ jobs:
           if-no-files-found: error
   windows-linux:
     needs: [current-windows, current-linux]
-    if: always() && github.event.repository.private == false && (github.ref_name != 'codex/poster-5c-drive-cloud-multiworker' || (needs.current-windows.result == 'success' && needs.current-linux.result == 'success'))
+    if: always() && github.event.repository.private == false && (github.ref_name == 'codex/poster-5b-crosshost-acceptance' || (needs.current-windows.result == 'success' && needs.current-linux.result == 'success'))
     runs-on: windows-2022
     timeout-minutes: 45
     steps:
@@ -85,7 +85,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Download accepted frozen Windows package, never rebuild it
-        if: github.ref_name != 'codex/poster-5c-drive-cloud-multiworker'
+        if: github.ref_name == 'codex/poster-5b-crosshost-acceptance'
         uses: actions/download-artifact@v4
         with:
           name: poster-maker-windows
@@ -93,7 +93,7 @@ jobs:
           github-token: ${{ github.token }}
           path: .poster/original-windows
       - name: Download accepted Linux wheelhouse of the same production SHA
-        if: github.ref_name != 'codex/poster-5c-drive-cloud-multiworker'
+        if: github.ref_name == 'codex/poster-5b-crosshost-acceptance'
         uses: actions/download-artifact@v4
         with:
           name: poster-linux
@@ -101,13 +101,13 @@ jobs:
           github-token: ${{ github.token }}
           path: .poster/original-linux
       - name: Download newly built Windows package from THIS exact workflow run
-        if: github.ref_name == 'codex/poster-5c-drive-cloud-multiworker'
+        if: github.ref_name != 'codex/poster-5b-crosshost-acceptance'
         uses: actions/download-artifact@v4
         with:
           name: crosshost-current-windows
           path: .poster/original-windows
       - name: Download newly built Linux wheelhouse from THIS exact workflow run
-        if: github.ref_name == 'codex/poster-5c-drive-cloud-multiworker'
+        if: github.ref_name != 'codex/poster-5b-crosshost-acceptance'
         uses: actions/download-artifact@v4
         with:
           name: crosshost-current-linux
@@ -133,7 +133,7 @@ jobs:
         run: python scripts/crosshost/run_hosted.py
         env:
           PYTHONUTF8: '1'
-          POSTER_CROSSHOST_CURRENT: ${{ github.ref_name == 'codex/poster-5c-drive-cloud-multiworker' && '1' || '0' }}
+          POSTER_CROSSHOST_CURRENT: ${{ github.ref_name != 'codex/poster-5b-crosshost-acceptance' && '1' || '0' }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:

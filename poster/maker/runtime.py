@@ -16,8 +16,10 @@ from .variables import Variables, draft_parameters
 from .storage import Vault
 from .resources import Budget, FileSandbox, MAX_DATA
 from .data_errors import ERRORS as DATA_ERRORS
+from poster.portability.network import Network, ERRORS as NETWORK_ERRORS
 
 ERRORS = {
+    **NETWORK_ERRORS,
     "PROFILE_BUSY": "Профиль используется другим запуском. Остановите его перед изменением профиля.",
     "PROFILE_SCOPE": "Выберите разрешённые сайты для переноса браузерной сессии.",
     "PROFILE_INCOMPATIBLE": "Выбранная среда не поддерживает безопасный перенос этой сессии. Выберите чистую сессию.",
@@ -61,14 +63,16 @@ ERRORS = {
 
 
 class BrowserSession:
-    def __init__(self, headless=True, *, provider="chromium", profile=None):
+    def __init__(self, headless=True, *, provider="chromium", profile=None, network=None):
         self.headless = headless
         self.provider = make_provider(provider)
         self.profile = profile
+        self.network = Network.parse(network)
         self.playwright = self.browser = self.context = self.page = None
         self.tabs = {}
 
     async def start(self):
+        self.network.check(browser=True, provider=self.provider.name)
         from playwright.async_api import async_playwright
 
         starting = asyncio.create_task(async_playwright().start())
@@ -80,6 +84,8 @@ class BrowserSession:
             raise
         try:
             self.record_binding = self.inspector_binding = False
+            if self.network.kind != "direct":
+                self.provider.network = self.network
             self.browser, self.context, self.page = await self.provider.start(self.playwright, self.headless)
             self.tabs = {"main": self.page}
             if self.profile:
@@ -151,12 +157,14 @@ class Context:
         inputs=None,
         provider="chromium",
         profile=None,
+        network=None,
         workdir=None,
         allow_external_files=False,
     ):
         self.vault = vault
         self.variables = Variables(definitions or {}, vault, inputs)
-        self.session = BrowserSession(headless, provider=provider, profile=profile)
+        self.network = Network.parse(network)
+        self.session = BrowserSession(headless, provider=provider, profile=profile, network=network)
         self.navigation_serial = 0
         self.action_serial = 0
         self.navigation_event = asyncio.Event()
@@ -292,6 +300,7 @@ class GraphRunner:
         inputs=None,
         provider="chromium",
         profile=None,
+        network=None,
         workdir=None,
         allow_external_files=False,
         project_path=None,
@@ -301,6 +310,19 @@ class GraphRunner:
         project_root=None,
     ):
         self.graph = graph.validate_structure().model_copy(deep=True)
+        from poster.portability.network import policy
+
+        if policy(self.graph.metadata.get("poster.network")) and network is None:
+            raise GraphError("NETWORK_MISSING")
+        Network.parse(network).check(
+            browser=any(
+                n.type.startswith("Browser.")
+                or n.type == "Logic.If"
+                and n.params.get("condition") != "equals"
+                for n in self.graph.nodes
+            ),
+            provider=provider if isinstance(provider, str) else provider.name,
+        )
         self.owns_budget = budget is None
         self.registry = registry or default_registry()
         self.context = Context(
@@ -310,6 +332,7 @@ class GraphRunner:
             inputs=inputs,
             provider=provider,
             profile=profile,
+            network=network,
             workdir=workdir,
             allow_external_files=allow_external_files,
         )

@@ -55,6 +55,13 @@ class Controller:
         if sum(map(len, files.values())) > 10_000_000:
             raise DispatcherError("REMOTE_LIMIT")
         payload = unseal(job["inputs_cipher"])
+        permission_id = payload.pop("session_permission", None)
+        if permission_id:
+            from poster.portability.permissions import SessionPermissions
+
+            payload["session_grant"] = SessionPermissions(self.store).prepare(
+                permission_id, row["agent_id"], job["project_id"], job["version"], run_id, self.identity
+            )
         from poster.auth import session_key
 
         master = session_key()
@@ -446,6 +453,15 @@ class Controller:
                         outgoing = []
                         size = 0
                         for body in bodies:
+                            if body.get("kind") == "offer":
+                                from poster.portability.permissions import SessionPermissions
+
+                                if not SessionPermissions(self.store).before_send(body["run_id"]):
+                                    self.drop(body["run_id"] + ":offer")
+                                    self.store.complete(
+                                        body["run_id"], Status.FAILED, code="PROFILE_PERMISSION"
+                                    )
+                                    continue
                             packet = pack(self.identity, peer, body)
                             length = len(raw_json(packet))
                             if size + length > MAX_MESSAGE:

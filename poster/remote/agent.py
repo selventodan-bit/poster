@@ -165,8 +165,37 @@ class Agent:
         atomic(snapshot / "manifest.json", canonical(offer["manifest"]))
         atomic(snapshot / "bundle.enc", un64(offer["bundle"]))
         job = dict(offer["job"], inputs_cipher=offer["inputs"])
+        from cryptography.fernet import Fernet
+
+        cipher = Fernet(grant["key"].encode())
+        payload = json.loads(cipher.decrypt(un64(offer["inputs"])))
+        capsule = payload.pop("session_grant", None)
+        if capsule:
+            from poster.portability.transfer import open_session
+
+            state = open_session(
+                self.identity,
+                self.peer,
+                capsule,
+                binding=dict(
+                    run_id=run_id, project_id=offer["job"]["project_id"], version=offer["job"]["version"]
+                ),
+            )
+            payload["profile"] = dict(
+                key="profile_" + run_id,
+                data=dict(name="Explicit transferred session", revision=0, state=state),
+                lock=str(root / "private-profile.lock"),
+                mode="isolated",
+            )
+            job["inputs_cipher"] = b64(cipher.encrypt(raw_json(payload)))
         # JSON cannot carry bytes, adapter converts only the encrypted field at handoff.
         execution = offer["execution"]
+        startup = (
+            raw_json(dict(key=grant["key"], job=job, execution=execution, lease=self.last_pulse + LEASE))
+            + b"\n"
+        )
+        if len(startup) > 2_000_000:
+            raise DispatcherError("REMOTE_LIMIT")
         env = {
             k: v
             for k, v in os.environ.items()
@@ -211,10 +240,7 @@ class Agent:
 
         worker["reader"] = threading.Thread(target=read, daemon=True)
         worker["reader"].start()
-        process.stdin.write(
-            raw_json(dict(key=grant["key"], job=job, execution=execution, lease=self.last_pulse + LEASE))
-            + b"\n"
-        )
+        process.stdin.write(startup)
         process.stdin.flush()
 
     def cancel(self, worker, reason):

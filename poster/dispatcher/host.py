@@ -330,6 +330,17 @@ class Host:
 
     def dispatch(self, value):
         op = value.pop("op")
+        if op.startswith("session_permission_"):
+            from poster.portability.permissions import SessionPermissions
+
+            permissions = SessionPermissions(self.store)
+            if op == "session_permission_create":
+                return permissions.create(**value)
+            if op == "session_permission_list":
+                return permissions.rows()
+            if op == "session_permission_revoke":
+                return permissions.revoke(value["id"])
+            raise DispatcherError("PARAMETERS_INVALID")
         if op.startswith("cloud_result"):
             from poster.cloud.results import ResultArchive, TERMINAL
             from poster.cloud.format import identifier, version_id
@@ -576,6 +587,9 @@ class Host:
                                 profile_root=item.get("profile_root"),
                                 profile_id=item.get("profile_id"),
                                 profile_key_file=item.get("profile_key_file"),
+                                profile_mode=item.get("profile_mode", "shared"),
+                                session_permission=item.get("session_permission"),
+                                network_override=item.get("network_override"),
                                 key=key,
                                 agent_id=item.get("agent_id"),
                                 remote_outputs=item.get("remote_outputs", []),

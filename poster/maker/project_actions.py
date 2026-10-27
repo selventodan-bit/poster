@@ -65,6 +65,7 @@ async def run_project(ctx, p):
         vault=vault,
         registry=ctx.registry,
         inputs=inputs,
+        network=ctx.network,
         workdir=ctx.files.root,
         allow_external_files=ctx.files.allow_external,
         project_path=child_path,

@@ -618,3 +618,67 @@ def test_secretref_snapshot_bytes_and_master_key_boundary(remote, tmp_path, monk
         server.shutdown()
         server.server_close()
         thread.join(5)
+
+
+def test_explicit_scoped_session_reaches_real_agent_browser(remote, tmp_path):
+    import asyncio
+    from poster.maker.fixtures import serve_maker, DEMO_PASSWORD
+    from poster.maker.runtime import BrowserSession
+    from poster.maker.profiles import Profiles
+
+    root = remote["controller"]
+    from poster.auth import session_key
+
+    profile_key = tmp_path / "private-profile.key"
+    profile_key.write_bytes(session_key())
+    profiles = Profiles(tmp_path / "private-profiles")
+    profile = profiles.create("CI synthetic account")
+    with serve_maker() as (_, base):
+
+        async def login():
+            browser = BrowserSession(True, profile=profiles.open(profile))
+            try:
+                await browser.start()
+                await browser.page.goto(base + "/login")
+                await browser.page.locator("#user").fill("demo")
+                await browser.page.locator("#password").fill(DEMO_PASSWORD)
+                await browser.page.locator("#login").click()
+                await browser.page.locator("#account").wait_for()
+                await browser.profile.save(browser)
+            finally:
+                await browser.close()
+
+        asyncio.run(login())
+        graph = chain(
+            "Permitted remote session",
+            [("Browser.OpenURL", {"url": base + "/account"}), ("Browser.ReadText", {"selector": "#account"})],
+        )
+        source = tmp_path / "session.postergraph.json"
+        save_graph(source, graph, Vault())
+        item = request(root, "add", source=str(source))
+        permit = request(
+            root,
+            "session_permission_create",
+            agent_id=remote["agent_id"],
+            project_id=item["project_id"],
+            version=item["version"],
+            profile_root=str(profiles.root),
+            key_file=str(profile_key),
+            profile_id=profile,
+            origins=[base],
+            confirmed=True,
+        )
+        value = request(
+            root,
+            "enqueue_batch",
+            items=[dict(id=item["id"], agent_id=remote["agent_id"], session_permission=permit["id"])],
+            request_id=graph.id,
+        )
+        assert not value["errors"], value
+        result = terminal(remote, value["jobs"][0])
+        assert result["status"] == "SUCCEEDED", result
+        assert result["history"][0]["pid"] != remote["info"]["pid"]
+        revoked = request(root, "session_permission_revoke", id=permit["id"])
+        assert revoked["may_have_been_disclosed"]
+        # The Agent receipt cleans its temporary profile and encrypted staging tree.
+        wait(lambda: not list((remote["agent_root"] / "runs").glob("*/profile")))
