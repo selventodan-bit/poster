@@ -63,6 +63,11 @@ def build(output, *, wheelhouse=False, revision=None):
         stage5d_demo = source / "examples/maker-stage5d"
         if stage5d_demo.is_dir():
             shutil.copytree(stage5d_demo, root / "examples/maker-stage5d")
+        for doc in ("POSTER_STAGE6_FINAL_PRODUCT.md", "POSTER_USER_GUIDE.md", "ZENNO_PARITY_MATRIX.md"):
+            selected = source / "docs" / doc
+            if selected.is_file():
+                (root / "docs").mkdir(exist_ok=True)
+                shutil.copyfile(selected, root / "docs" / doc)
         if wheelhouse:
             download_env = Path(temporary) / "download-env"
             venv.EnvBuilder(with_pip=True).create(download_env)

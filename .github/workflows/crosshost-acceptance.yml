@@ -1,7 +1,7 @@
 name: crosshost-acceptance
 on:
   push:
-    branches: [codex/poster-5b-crosshost-acceptance, codex/poster-5c-drive-cloud-multiworker, codex/poster-5d-execution-portability]
+    branches: [codex/poster-5b-crosshost-acceptance, codex/poster-5c-drive-cloud-multiworker, codex/poster-5d-execution-portability, codex/poster-6-product-finalization]
   workflow_dispatch:
 permissions:
   contents: read

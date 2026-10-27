@@ -190,6 +190,9 @@ class MakerWindow(QMainWindow, ToolsMixin):
         action.setObjectName("maker_preparation")
         action.setShortcut("Ctrl+Shift+P")
         action.triggered.connect(self.open_preparation)
+        from ..product.qt import install
+
+        install(self)
 
     def guard(self, operation):
         try:

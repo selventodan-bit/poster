@@ -62,6 +62,7 @@ def lock_root(root):
     registry = private_dir(registry_path())
     restrict(registry, directory=True)
     folder = private_dir(lock_path(root))
+    restrict(folder, directory=True)
     index = folder / "root.json"
     if not index.exists():
         safe_json(index, dict(format="poster.lease.root.v1", path=str(root)))

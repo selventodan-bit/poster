@@ -65,6 +65,10 @@ def package(bundle, output, commit, *, embedded=False):
     shutil.copytree(ROOT / "examples/maker-stage5c", bundle / "examples/maker-stage5c", dirs_exist_ok=True)
     shutil.copytree(ROOT / "examples/maker-stage5d", bundle / "examples/maker-stage5d", dirs_exist_ok=True)
     info = {"commit": commit, "browser_bundled": embedded}
+    if (ROOT / "docs/POSTER_USER_GUIDE.md").is_file():
+        info.update(
+            product="Poster 3.0", stage="6", release_candidate=True, maintenance="Poster.exe --maintenance"
+        )
     launchers = {"maker": "Poster.exe", "service": "PosterService.exe", "worker": "PosterWorker.exe"}
     if embedded:
         launchers["gui"] = "PosterDispatcher.exe"
@@ -89,6 +93,10 @@ def package(bundle, output, commit, *, embedded=False):
         "POSTER_STAGE5D_EXECUTION_PORTABILITY.md",
     ):
         shutil.copyfile(ROOT / "docs" / doc, bundle / "docs" / doc)
+    for doc in ("POSTER_STAGE6_FINAL_PRODUCT.md", "POSTER_USER_GUIDE.md", "ZENNO_PARITY_MATRIX.md"):
+        source = ROOT / "docs" / doc
+        if source.is_file():
+            shutil.copyfile(source, bundle / "docs" / doc)
     shutil.copytree(ROOT / "notebooks", bundle / "notebooks", dirs_exist_ok=True)
     licenses(bundle, embedded)
     name = "poster-maker-windows" if embedded else "poster-windows"

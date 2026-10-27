@@ -1,4 +1,17 @@
-Poster 3.0 — ProjectMaker + Dispatcher, этап 5B (Windows 10/11 x64)
+FIRST RUN / ОБНОВЛЕНИЕ / ВОССТАНОВЛЕНИЕ
+Полное руководство: docs/POSTER_USER_GUIDE.md. В Maker: «Начало и помощь».
+Данные нового Maker: %LOCALAPPDATA%\Poster\Maker; прежняя .poster принимается
+на месте через помощь, без перемещения ключей. При обновлении полностью распакуйте
+новый ZIP в новую папку, сохраните данные и завершите старую Service.
+«Помощь и данные → Резервные копии и восстановление…» открывает отдельное окно
+обслуживания. Закройте Maker/Dispatcher, явно остановите Service и автозапуск.
+.pbackup полностью шифруется и включает приватные ключи только с вашим согласием.
+Восстановление: исходная машина/пользователь/пути, сначала просмотр и SHA256.
+При прерванном restore обычный Poster.exe автоматически открывает обслуживание.
+После restore расписания отключены, потенциальные внешние эффекты требуют review.
+Копию и пароль храните отдельно; ни очередь, ни ключи не публикуйте в Drive.
+
+Poster 3.0 — ProjectMaker + Dispatcher, Stage 6 Release Candidate (Windows 10/11 x64)
 
 DISPATCHER (Full): двойной щелчок PosterDispatcher.exe или кнопка Dispatcher в Maker.
 Добавить проект… → выбрать сохранённый .postergraph.json → В очередь → заполнить
@@ -12,7 +25,8 @@ UNKNOWN / Нужна ручная проверка не повторяются �
 экспортирует приватный offer на 15 минут, сверяет Agent fingerprint перед импортом
 и отдельно запрашивает доверие. ONLINE требует подписанного heartbeat; тестовый
 граф возвращает файл и SHA256. Установка Linux/systemd, ошибки и пределы:
-docs/POSTER_STAGE5B_REMOTE_DEPLOYMENT.md. Windows/Linux cross-host пока NOT_EXECUTED.
+docs/POSTER_STAGE5B_REMOTE_DEPLOYMENT.md. Контролируемый Windows/Linux cross-host: 18 сценариев; итоговые evidence относятся к SHA поставки.
+Публичный WAN/VPS и личные Google/Colab/Molab аккаунты отдельно не подтверждены.
 
 Прежний ручной workflow 5A: в отдельной вкладке экспортируйте публичную
 идентичность Controller, загрузите registration.json Linux Agent и приватный

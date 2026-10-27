@@ -78,6 +78,7 @@ async def test_real_record_popup_iframe_edit_breakpoint_save_replay(tmp_path, pr
         # The SAME portable graph runs through both providers, including Linux without GUI.
         for replay_provider in dict.fromkeys([provider, "chromium"]):
             saved, vault = load_graph(path)
+            login_before = server.login_count
             runner = GraphRunner(saved, vault=vault, provider=replay_provider)
             try:
                 assert await runner.run() == "PAUSED"
@@ -89,7 +90,7 @@ async def test_real_record_popup_iframe_edit_breakpoint_save_replay(tmp_path, pr
                     await runner.context.session.tabs["main"].locator("#main-note").input_value()
                     == "after-popup"
                 )
-                assert server.login_count >= 2
+                await eventually(lambda count=login_before: server.login_count >= count + 1)
                 save_graph(path, runner.graph, vault)
             finally:
                 await runner.close()

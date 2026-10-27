@@ -151,10 +151,24 @@ restore.restore(p['archive'],p['password'],{k:Path(v) for k,v in p['roots'].item
         sha=product["sha"],
         phase=phase,
     )
-    process = subprocess.run(
-        [sys.executable, "-c", program], input=json.dumps(data), text=True, capture_output=True, timeout=45
+    import psutil
+
+    process = subprocess.Popen(
+        [sys.executable, "-c", program],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
     )
+    birth = psutil.Process(process.pid).create_time()
+    process.communicate(json.dumps(data), timeout=45)
     assert process.returncode == 77
+    from product_evidence import save
+
+    save(
+        "restore-crash-" + phase,
+        dict(phase=phase, pid=process.pid, birth=birth, exit_code=process.returncode),
+    )
     with pytest.raises(DispatcherError):
         with application_lease(roots["maker"], "maker"):
             pass
@@ -302,8 +316,21 @@ restore.restore(p['archive'],p['password'],p['roots'],expected_sha256=p['sha'],c
         assert signal_file.exists() and process.poll() is None
         owner = psutil.Process(process.pid)
         assert owner.create_time() > 0
+        birth = owner.create_time()
         owner.kill()  # SIGKILL / Windows TerminateProcess; no Python cleanup.
         process.wait(timeout=15)
+        from product_evidence import save
+
+        save(
+            "restore-external-kill",
+            dict(
+                phase="STAGE_FILE_0",
+                pid=process.pid,
+                birth=birth,
+                exit_code=process.returncode,
+                external_kill=True,
+            ),
+        )
         assert restore.recover(product["roots"], confirmed=True) == ["ROLLED_BACK"]
         assert (product["roots"]["maker"] / "marker.txt").read_text() == "current-version"
         assert not list(signal_file.parent.rglob(".poster-stage-*"))
@@ -396,7 +423,23 @@ def test_restored_unknown_post_is_not_replayed_by_real_service_and_worker(tmp_pa
             ]
             time.sleep(0.5)
             assert len(server.calls) == 1
-            assert request(roots["dispatcher"], "show", id=job)["status"] == "REVIEW_REQUIRED"
+            final = request(roots["dispatcher"], "show", id=job)
+            assert final["status"] == "REVIEW_REQUIRED"
+            from product_evidence import save
+
+            save(
+                "real-post-restore",
+                dict(
+                    worker_pid=execution["pid"],
+                    worker_birth=execution["birth"],
+                    restarted_service_pid=info["pid"],
+                    restarted_service_birth=info["birth"],
+                    post_count=len(server.calls),
+                    job_status=final["status"],
+                    execution_status=final["history"][0]["status"],
+                    report_status=final["report"]["status"] if final["report"] else None,
+                ),
+            )
         finally:
             server.gates["0"].set()
             if not stopped(info):

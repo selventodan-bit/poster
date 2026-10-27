@@ -1,4 +1,8 @@
-# Poster 3.0 — ProjectMaker + Dispatcher, этап 5B
+# Poster 3.0 — ProjectMaker + Dispatcher, Stage 6 RC
+
+[Руководство пользователя](docs/POSTER_USER_GUIDE.md) · [Актуальная матрица](docs/ZENNO_PARITY_MATRIX.md) · [Приёмка Stage 6](docs/POSTER_STAGE6_FINAL_PRODUCT.md).
+
+В Full: «Начало и помощь» показывает папки данных и путь к настройке; «Помощь и данные» открывает защищённое offline обслуживание. Перед копированием/обновлением остановите Service и закройте остальные окна. Копия `.pbackup` шифруется, включает приватные ключи по явному согласию и восстанавливается только на исходной машине/под исходным пользователем. После restore расписания отключены, возможные внешние эффекты требуют ручной проверки.
 
 **Remote deployment 5B:** [установка Agent/Relay, мастер подключения, диагностика и статус Windows/Linux проверки](docs/POSTER_STAGE5B_REMOTE_DEPLOYMENT.md).
 

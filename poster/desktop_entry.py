@@ -17,6 +17,10 @@ def main():
         return host_main()
     os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(Path(".poster/browsers").absolute()))
     try:
+        if "--maintenance" in sys.argv:
+            from poster.product.qt import launch
+
+            return launch()
         if Path(sys.executable).stem.casefold() == "posterdispatcher" or "--dispatcher" in sys.argv:
             from poster.dispatcher.qt_app import launch
 
@@ -34,6 +38,14 @@ def main():
     except Exception as error:
         from poster.dispatcher.models import DispatcherError
 
+        if (
+            isinstance(error, DispatcherError)
+            and error.code == "RESTORE_RECOVERY"
+            and "--maintenance" not in sys.argv
+        ):
+            from poster.product.qt import launch
+
+            return launch()
         message = (
             str(error)
             if isinstance(error, DispatcherError)

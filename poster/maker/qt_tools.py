@@ -223,7 +223,9 @@ class ToolsMixin(DataToolsMixin):
                     )
                     widget.setMaximumHeight(90)
                 else:
-                    widget = QLineEdit("" if secret else display(value))
+                    widget = QLineEdit(
+                        "" if secret or value is None and prop.kind == "optional_integer" else display(value)
+                    )
                     if secret:
                         widget.setEchoMode(QLineEdit.EchoMode.Password)
                         widget.setPlaceholderText("Защищено; пустое поле сохраняет ссылку")
@@ -297,6 +299,8 @@ class ToolsMixin(DataToolsMixin):
                     value = json.loads(value)
                 elif prop.kind == "value":
                     value = parse(value)
+                elif prop.kind == "optional_integer" and "{{" not in value:
+                    value = None if value.strip() in {"", "null"} else int(value)
                 elif prop.kind == "integer" and "{{" not in value:
                     value = int(value)
                 if self.secret_fields.get(name) and self.secret_fields[name].isChecked():

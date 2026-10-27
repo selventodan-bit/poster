@@ -14,14 +14,14 @@ for distribution in ("playwright", "httpx", "pydantic", "cryptography", "fileloc
 gui = Analysis(
     [str(root / "poster/desktop_entry.py")], pathex=[str(root)],
     binaries=pw_binaries, datas=data,
-    hiddenimports=pw_hidden + (["poster.maker.qt_app", "poster.maker.qt_host", "poster.dispatcher.qt_app"] if embedded else []),
-    excludes=[] if embedded else ["PySide6", "poster.maker.qt_app", "poster.maker.qt_host", "poster.dispatcher.qt_app"],
+    hiddenimports=pw_hidden + (["poster.maker.qt_app", "poster.maker.qt_host", "poster.dispatcher.qt_app", "poster.product.qt"] if embedded else []),
+    excludes=[] if embedded else ["poster.product.qt", "PySide6", "poster.maker.qt_app", "poster.maker.qt_host", "poster.dispatcher.qt_app"],
     runtime_hooks=[hook],
 )
 headless = Analysis(
     [str(root / "poster/dispatcher/runtime_entry.py")], pathex=[str(root)],
     binaries=pw_binaries, datas=data, hiddenimports=pw_hidden,
-    excludes=["PySide6", "tkinter", "_tkinter", "poster.maker.qt_app", "poster.maker.qt_host",
+    excludes=["poster.product.qt", "PySide6", "tkinter", "_tkinter", "poster.maker.qt_app", "poster.maker.qt_host",
               "poster.dispatcher.qt_app", "poster.recorder.app"], runtime_hooks=[hook],
 )
 gui_pyz = PYZ(gui.pure)

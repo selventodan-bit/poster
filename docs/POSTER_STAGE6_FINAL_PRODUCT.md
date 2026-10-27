@@ -137,3 +137,34 @@ queue key, encrypted Cloud state, проект и результат. Это е�
 
 Windows-specific ACL/nested/crash checks должны пройти CI нового SHA.
 GUI обслуживания, 78 forms/actions и итоговая поставка остаются в работе.
+
+## Интерфейс и сплошная приёмка действий
+
+Qt формы всех 78 actions локально проходят apply/save/reopen. Найдены и исправлены
+P1: optional_integer у Strings.Transform не принимал пустую границу substring;
+валидация черновика WaitPopup ошибочно требовала создать модель без обязательных
+полей до применения введённых параметров. Новые формы используют прежние модели
+и прежний Registry; HTTP fixed methods и SecretRef сохраняют контракт.
+
+Измерение оригинальных execute из исходного GraphRunner: 78/78 с успешным возвратом,
+127 passed, 4 прежних platform skips (Qt provider/Tk без дисплея). Это не заявление
+о полном внешнем E2E каждого action: HTTP/browser/files проверяются на своих
+fixtures; семантические ошибки, исключения, ограничения, loop/subproject и SecretRef
+покрываются прежними maker suites и новыми terminal/tab/delete cases.
+
+Добавлены «Начало и помощь», GUI принятия прежнего Maker, пути к данным, руководство,
+безопасная диагностика и отдельное offline обслуживание через тот же Poster.exe.
+Пароль не передаётся в argv/env, поля очищаются, операции выполняются в QThread.
+Архив нужно проверить до restore; preview связан с SHA и исходными путями. При
+прерванном restore обычный Full автоматически открывает обслуживание до создания
+частичного workspace. Проверены три настоящих Qt-сценария, включая recovery после
+os._exit на OLD_MOVED. Локальный Qt использует offscreen; настоящий Windows GUI и
+Linux Xvfb проверяются отдельными jobs, frozen Windows — исходным OS-input harness.
+
+Сохранены 55 прежних jobs; добавлены 6: recovery, original-actions и product-gui
+на Ubuntu/Windows. Recovery JSON требует 22/22 категорий PASSED, без skipped/missing
+случаев; новые публичные отчёты содержат SHA, source_dirty, OS/kernel и отдельные
+синтетические PID/birth/POST/SQLite статусы. Сырой JUnit/секреты не публикуются.
+Windows/Linux/Cloud builders включают руководство и матрицу; старые release snapshots
+получают только свои собственные versioned assets. Окончательные RC/pins/CI ещё
+проверяются на финальном SHA.

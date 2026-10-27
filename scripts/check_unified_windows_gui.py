@@ -558,6 +558,29 @@ def check(executable, output):
         assert snapshot()["legacy"]["local_report"]["publications"] == 3
         assert not snapshot()["legacy"]["ports"]
         scenarios.append("legacy_local_test_server_shutdown")
+        if info.get("stage") == "6":
+            click("product_help")
+            help_title = "Poster — начало работы, данные и диагностика"
+            help_window = Desktop(backend="win32").window(title=help_title)
+            help_window.wait("visible", timeout=20)
+            assert (
+                "help_diagnostics"
+                in wait(lambda s: "help_diagnostics" in s.get("positions", {}), "Stage 6 help")["positions"]
+            )
+            help_window.capture_as_image().save(output / "06-stage6-help.png")
+            diagnostic = output / "stage6-safe-diagnostics.json"
+            click("help_diagnostics")
+            input_dialog("Безопасная диагностика", str(diagnostic))
+            wait(lambda s: diagnostic.is_file(), "Stage 6 safe diagnostic saved")
+            text = diagnostic.read_text(encoding="utf-8")
+            value = json.loads(text)
+            assert value["format"] == "poster.diagnostics.v1" and value["frozen"]
+            assert value["build"]["commit"] == info["commit"]
+            assert DEMO_PASSWORD not in text and str(executable.parent) not in text
+            help_window.set_focus()
+            keyboard.send_keys("%{F4}", pause=0.12)
+            help_window.wait_not("visible", timeout=15)
+            scenarios.append("stage6_native_help_safe_diagnostic_exact_frozen_build")
         close()
         scenarios.append("all_owned_processes_exit")
         report = {

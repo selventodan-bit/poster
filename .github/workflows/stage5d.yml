@@ -1,7 +1,7 @@
 name: stage5d-execution-portability
 on:
   push:
-    branches: [codex/poster-5d-execution-portability]
+    branches: [codex/poster-5d-execution-portability, codex/poster-6-product-finalization]
   workflow_dispatch:
 permissions:
   contents: read

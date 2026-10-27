@@ -528,8 +528,13 @@ class App(DesktopMixin, ClipboardMixin):
 
 
 def launch(initial_tab="maker"):
-    root = tk.Tk()
-    app = App(root)
-    if initial_tab == "maker":
-        app.notebook.select(app.maker.frame)
-    root.mainloop()
+    from ..product.locking import application_lease
+
+    # Lite keeps its established adjacent workspace; it must still respect an
+    # offline restore of that same tree before Tk/App can create any files.
+    with application_lease(Path(".poster"), "maker"):
+        root = tk.Tk()
+        app = App(root)
+        if initial_tab == "maker":
+            app.notebook.select(app.maker.frame)
+        root.mainloop()

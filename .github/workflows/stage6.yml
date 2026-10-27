@@ -1,0 +1,96 @@
+name: stage6-product-finalization
+on:
+  push:
+    branches: [codex/poster-6-product-finalization]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  recovery:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.12'
+      - run: uv sync --frozen --extra dev --extra recorder
+      - name: Encrypted backup, real process death, native POST once, actual accepted 5D producer and Windows ACLs
+        run: uv run --no-sync python scripts/check_product_stage6.py recovery
+      - if: always()
+        run: uv run --no-sync python scripts/summarize_pytest.py .poster/stage6-recovery.xml .poster/stage6-recovery-report.json --label 'Stage 6 recovery'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stage6-recovery-${{ matrix.os }}
+          path: |
+            .poster/stage6-recovery-report.json
+            .poster/stage6-recovery-scenarios.json
+            .poster/product-public/
+          include-hidden-files: true
+          if-no-files-found: error
+  original-actions:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.12'
+      - run: uv sync --frozen --extra dev --extra recorder
+      - run: uv run --no-sync python -m playwright install --with-deps chromium
+      - name: Every original action actually returns through GraphRunner, plus errors and protected fixtures
+        run: uv run --no-sync python scripts/check_product_stage6.py actions
+      - if: always()
+        run: uv run --no-sync python scripts/summarize_pytest.py .poster/stage6-actions.xml .poster/stage6-actions-report.json --label 'Stage 6 original actions'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stage6-actions-${{ matrix.os }}
+          path: |
+            .poster/stage6-actions-report.json
+            .poster/stage6-original-actions.json
+          include-hidden-files: true
+          if-no-files-found: error
+  product-gui:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    env:
+      POSTER_QT_TEST_NO_SANDBOX: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.12'
+      - run: uv sync --frozen --extra dev --extra maker
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb xauth dbus-daemon libegl1 libgl1 libopengl0 libxcb-cursor0 libxkbcommon-x11-0 libxcb-icccm4 libxcb-keysyms1 libxcb-xinerama0 libxcb-shape0 libatomic1 libxtst6
+      - if: runner.os == 'Linux'
+        run: dbus-run-session -- xvfb-run -a uv run --no-sync python scripts/check_product_stage6.py gui
+      - if: runner.os == 'Windows'
+        run: uv run --no-sync python scripts/check_product_stage6.py gui
+      - if: always()
+        run: uv run --no-sync python scripts/summarize_pytest.py .poster/stage6-gui.xml .poster/stage6-gui-report.json --label 'Stage 6 product Qt'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stage6-gui-${{ matrix.os }}
+          path: |
+            .poster/stage6-gui-report.json
+            .poster/product-qt-public/
+          include-hidden-files: true
+          if-no-files-found: error

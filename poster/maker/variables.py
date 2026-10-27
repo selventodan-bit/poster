@@ -20,7 +20,7 @@ def has_reference(value):
 
 def draft_parameters(spec, values):
     """Validate static fields now and dynamic fields with their declared defaults."""
-    defaults = spec.params().model_dump(mode="json")
+    defaults = spec.params.model_construct().model_dump(mode="json")
     check = {**defaults, **values}
     for key, value in values.items():
         if has_reference(value) or (spec.reveal_parameters and secret_refs(value)):

@@ -16,6 +16,9 @@ paths = [
     ROOT / "docs/POSTER_STAGE5D_EXECUTION_PORTABILITY.md",
     ROOT / "docs/POSTER_STAGE5C_DRIVE_CLOUD_MULTIWORKER.md",
     ROOT / "requirements-cloud-runtime.txt",
+    ROOT / "docs/POSTER_STAGE6_FINAL_PRODUCT.md",
+    ROOT / "docs/POSTER_USER_GUIDE.md",
+    ROOT / "docs/ZENNO_PARITY_MATRIX.md",
     ROOT / "scripts/cloud/bootstrap.py",
 ]
 files = []
