@@ -139,3 +139,83 @@ async def test_actual_proxy_dns_and_connection_errors_are_payload_free(tmp_path)
         unused = reservation.getsockname()[1]
     with pytest.raises(GraphError, match="NETWORK_CONNECT"):
         await probe(dict(kind="http", host="127.0.0.1", port=unused), "https://example.org/", timeout=3)
+
+
+def test_two_original_workers_keep_private_network_bindings(tmp_path, monkeypatch):
+    import psutil
+    from pathlib import Path
+    from poster.dispatcher.store import Store
+    from poster.dispatcher.service import enqueue
+    from poster.dispatcher.processes import terminate_tree
+    from poster.maker.storage import save_graph, Vault
+    from test_dispatcher_service import controlled_server, launch, finish, wait
+
+    monkeypatch.setenv("POSTER_NETWORK_HOME", str(tmp_path / "private-network"))
+    store = Store(tmp_path / "queue.sqlite")
+    process = None
+    with (
+        controlled_server() as (server, base),
+        proxy("http", tmp_path / "http") as (one, first),
+        proxy("socks5", tmp_path / "socks") as (two, second),
+    ):
+        try:
+            jobs = []
+            for index, config in enumerate([first, second]):
+                binding = NetworkProfiles().put("Network " + str(index), config)
+                graph = chain(
+                    "Original worker " + str(index),
+                    [
+                        (
+                            "HTTP.SetCookie",
+                            dict(name="instance", value="worker-" + str(index), url=base, secure=False),
+                        ),
+                        ("HTTP.Get", dict(url=base + "/hold/" + str(index))),
+                        ("Files.WriteText", dict(path="out.txt", text="worker-" + str(index))),
+                    ],
+                )
+                graph.metadata["poster.network"] = dict(binding=binding, allow_override=False)
+                folder = tmp_path / ("project-" + str(index))
+                folder.mkdir()
+                source = folder / "project.postergraph.json"
+                save_graph(source, graph, Vault())
+                jobs.append(enqueue(store, source))
+            process = launch(store)
+            wait(lambda: len(server.calls) == 2)
+            active = store.active()
+            assert len({row["pid"] for row in active}) == 2 and len(active) == 2
+            assert one.hits == two.hits == 1
+            assert {call["cookie"] for call in server.calls} == {"instance=worker-0", "instance=worker-1"}
+            for gate in server.gates.values():
+                gate.set()
+            finish(process)
+            for index, job in enumerate(jobs):
+                assert store.payload(job)["status"] == "SUCCEEDED"
+                report = json.loads(Path(store.history(job)[0]["report"]).read_bytes())
+                assert (Path(report["workdir"]) / "out.txt").read_text() == "worker-" + str(index)
+            assert b"PROXY_PRIVATE_CANARY" not in store.path.read_bytes()
+        finally:
+            for gate in server.gates.values():
+                gate.set()
+            if process and process.poll() is None:
+                terminate_tree(process.pid, psutil.Process(process.pid).create_time())
+                process.wait(10)
+            store.close()
+
+
+async def test_proxy_write_timeout_never_repeats_post(tmp_path):
+    from test_dispatcher_service import controlled_server
+
+    with controlled_server() as (server, base), proxy("http", tmp_path) as (_, config):
+        runner = GraphRunner(
+            chain("Single proxy POST", [("HTTP.Post", dict(url=base + "/hold/0", timeout_ms=150))]),
+            network=config,
+            workdir=tmp_path / "work",
+        )
+        try:
+            assert await runner.run(breakpoints=False) == "FAILED"
+            assert runner.results[-1].error_code == "HTTP_TIMEOUT"
+            assert runner.results[-1].details["write_outcome_unknown"]
+            assert len(server.calls) == 1 and server.calls[0]["method"] == "POST"
+        finally:
+            server.gates["0"].set()
+            await runner.close()

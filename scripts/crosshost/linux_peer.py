@@ -12,6 +12,7 @@ from importlib.metadata import version as package_version
 import json
 import os
 from pathlib import Path
+from urllib.parse import urlsplit
 import platform
 import re
 import signal
@@ -40,7 +41,17 @@ def fixture(root):
             pass
 
         def do_GET(self):
-            if self.path == "/session-check":
+            parsed = urlsplit(self.path)
+            virtual_origin = parsed.scheme == "http" and parsed.hostname == "fixture.poster.test"
+            if parsed.scheme:
+                expected = "Basic " + base64.b64encode(b"poster:POSTER_5D_PROXY_PASSWORD").decode()
+                if not virtual_origin or self.headers.get("Proxy-Authorization") != expected:
+                    self.send_response(407)
+                    self.send_header("Proxy-Authenticate", 'Basic realm="Cross-host CI"')
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+            if (parsed.path if virtual_origin else self.path) == "/session-check":
                 allowed = "poster5d=POSTER_5D_SYNTHETIC_SESSION" in self.headers.get("Cookie", "")
                 self.send_response(200 if allowed else 401)
                 self.send_header("Content-Type", "text/html")

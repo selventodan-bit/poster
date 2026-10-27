@@ -1,0 +1,3 @@
+# Explicit resources are identified by their exact bytes on every platform.
+/examples/maker-stage5d/inputs/* -text
+/examples/maker-stage5d/*.postergraph.json text eol=lf

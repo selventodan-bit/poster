@@ -47,17 +47,39 @@ class HTTPProxy(BaseHTTPRequestHandler):
             self.end_headers()
             tunnel(self.connection, upstream)
 
-    def do_GET(self):
+    def forward(self):
         if not self.authorized():
             return
         target = urlsplit(self.path)
         if target.hostname != "127.0.0.1":
             self.send_error(403)
             return
-        with socket.create_connection((target.hostname, target.port), timeout=5) as upstream:
-            upstream.sendall((f"GET {target.path or '/'} HTTP/1.0\r\nHost: {target.netloc}\r\n\r\n").encode())
-            while raw := upstream.recv(65536):
-                self.wfile.write(raw)
+        length = int(self.headers.get("Content-Length", "0"))
+        if not 0 <= length <= 2_000_000:
+            self.send_error(413)
+            return
+        body = self.rfile.read(length)
+        headers = {
+            k: v
+            for k, v in self.headers.items()
+            if k.lower() not in {"proxy-authorization", "proxy-connection", "host", "connection"}
+        }
+        headers.update(Host=target.netloc, Connection="close")
+        path = (target.path or "/") + ("?" + target.query if target.query else "")
+        head = (
+            f"{self.command} {path} HTTP/1.0\r\n"
+            + "".join(k + ": " + v + "\r\n" for k, v in headers.items())
+            + "\r\n"
+        )
+        try:
+            with socket.create_connection((target.hostname, target.port), timeout=5) as upstream:
+                upstream.sendall(head.encode() + body)
+                while raw := upstream.recv(65536):
+                    self.wfile.write(raw)
+        except OSError:
+            pass
+
+    do_GET = do_POST = forward
 
     def log_message(self, *_):
         pass

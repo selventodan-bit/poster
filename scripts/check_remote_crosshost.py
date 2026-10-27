@@ -363,13 +363,28 @@ def check(config, output):
             profile_key_file.write_bytes(profile_key)
             profiles = Profiles(output / "private-profiles", key=profile_key)
             profile_id = profiles.create("Synthetic scoped session")
+            session_origin = "http://fixture.poster.test"
+            # A controlled virtual origin is reachable only through the actual
+            # authenticated HTTP proxy on Linux, never through public DNS.
+            fixture_address = urlsplit(fixture_url)
+            call(
+                "network_bind",
+                binding="crosshost-network",
+                config=dict(
+                    kind="http",
+                    host=fixture_address.hostname,
+                    port=fixture_address.port,
+                    username="poster",
+                    password="POSTER_5D_PROXY_PASSWORD",
+                ),
+            )
             profiles.open(profile_id).commit(
                 dict(
                     cookies=[
                         dict(
                             name="poster5d",
                             value="POSTER_5D_SYNTHETIC_SESSION",
-                            domain="127.0.0.1",
+                            domain="fixture.poster.test",
                             path="/",
                             httpOnly=True,
                             sameSite="Lax",
@@ -377,7 +392,7 @@ def check(config, output):
                     ],
                     origins=[
                         dict(
-                            origin=fixture_url,
+                            origin=session_origin,
                             localStorage=[dict(name="poster5d", value="POSTER_5D_SYNTHETIC_STORAGE")],
                         )
                     ],
@@ -386,13 +401,24 @@ def check(config, output):
             session_graph = chain(
                 "Cross-host Stage 5D session",
                 [
-                    ("Browser.OpenURL", dict(url=fixture_url + "/session-check")),
+                    ("CSV.Read", dict(path="inputs/data.csv")),
+                    ("Files.Copy", dict(source="inputs/data.csv", destination="resource-proof.csv")),
+                    ("Browser.OpenURL", dict(url=session_origin + "/session-check")),
                     ("Browser.ReadText", dict(selector="#session-authorized")),
                     ("Files.WriteText", dict(path="session-proof.txt", text="{{authentication}}")),
                 ],
             )
             extraction = next(n for n in session_graph.nodes if n.type == "Browser.ReadText")
             extraction.save_as, extraction.result_path = "authentication", "value"
+            resource = b"name,value\nportable,5D\n"
+            private_dir(output / "inputs")
+            (output / "inputs/data.csv").write_bytes(resource)
+            session_graph.metadata.update(
+                {
+                    "poster.resources": {"inputs/data.csv": hashlib.sha256(resource).hexdigest()},
+                    "poster.network": dict(binding="crosshost-network", allow_override=False),
+                }
+            )
             session_source = output / "session-project.postergraph.json"
             save_graph(session_source, session_graph, Vault())
             session_item = call("add", source=str(session_source))
@@ -403,7 +429,7 @@ def check(config, output):
                 profile_root=str(profiles.root),
                 profile_id=profile_id,
                 key_file=str(profile_key_file),
-                origins=[fixture_url],
+                origins=[session_origin],
                 confirmed=True,
             )
             permit = call("session_permission_create", **permit_args)
@@ -414,7 +440,7 @@ def check(config, output):
                         id=session_item["id"],
                         agent_id=agent_id,
                         session_permission=permit["id"],
-                        remote_outputs=["session-proof.txt"],
+                        remote_outputs=["session-proof.txt", "resource-proof.csv"],
                     )
                 ],
                 request_id=uuid.uuid4().hex,
@@ -424,6 +450,7 @@ def check(config, output):
             assert completed["status"] == "SUCCEEDED"
             returned = Path(completed["workdir"]) / "session-proof.txt"
             assert returned.read_text() == "Session authorized"
+            assert (Path(completed["workdir"]) / "resource-proof.csv").read_bytes() == resource
             permit_revocation = call("session_permission_revoke", id=permit["id"])
             assert permit_revocation["may_have_been_disclosed"]
             unsent = call("session_permission_create", **permit_args)
@@ -442,6 +469,8 @@ def check(config, output):
                 linux_browser_pid=completed["history"][0]["pid"],
                 returned_sha256=hashlib.sha256(returned.read_bytes()).hexdigest(),
                 cookies_and_storage_confirmed=True,
+                proxy_auth_verified=True,
+                pinned_resource_sha256=hashlib.sha256(resource).hexdigest(),
                 revoked_before_transfer=True,
                 queue_key_transferred=False,
             )
@@ -581,7 +610,16 @@ def check(config, output):
         wait(lambda: not peer.call("observe")["processes"]["alive"])
         remote_files = peer.call("scan")["files"]
         assert all(
-            master not in base64.b64decode(raw) and canary.encode() not in base64.b64decode(raw)
+            master not in base64.b64decode(raw)
+            and all(
+                secret not in base64.b64decode(raw)
+                for secret in (
+                    canary.encode(),
+                    b"POSTER_5D_SYNTHETIC_SESSION",
+                    b"POSTER_5D_SYNTHETIC_STORAGE",
+                    b"POSTER_5D_PROXY_PASSWORD",
+                )
+            )
             for raw in remote_files.values()
         )
         public = list(root.rglob("report.json")) + [

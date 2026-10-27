@@ -305,7 +305,7 @@ def main():
             linux=("linux", "parallel"),
             history=("jobs", "sqlite_history"),
             graph=("fixture", "snapshot", "returned_files", "tls"),
-            lifecycle=("browser", "reconnect", "partition", "secret_boundary", "revoke"),
+            lifecycle=("browser", "reconnect", "partition", "secret_boundary", "revoke", "stage5d_session"),
         )
         for name, fields in groups.items():
             value = {k: report["proof"][k] for k in fields if k in report.get("proof", {})}

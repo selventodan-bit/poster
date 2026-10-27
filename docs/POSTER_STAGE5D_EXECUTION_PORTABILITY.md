@@ -186,3 +186,79 @@ SQLite и все прежние 18 сценариев. До финального
 неограниченных файлов или exactly-once не вводятся. Расширение protocol 1 для
 больших Relay payload потребует отдельного совместимого контракта; текущие лимиты
 показаны до admission. Stage 6 этим заданием не начинается.
+
+## Покрытие 30 сценариев исходного задания
+
+Это карта обязательных проверок; итоговый статус определяется запуском CI на
+точном release SHA. Unit fault injection для RAM/диска и повреждения данных
+проверяет отказ, не имитирует реальное исчерпание ресурсов провайдера.
+
+| № | Проверка | Доказательство |
+|---|---|---|
+| 1 | Lifecycle профиля | test_portability_sessions + реальные Qt controls |
+| 2 | Cookies пяти браузеров | portability_browser_instances, Windows/Linux |
+| 3 | Private scoped export | test_portability_sessions, target/signature/ciphertext |
+| 4 | Import и несовместимость | настоящий Chromium; другие identity/provider запрещены |
+| 5 | Повреждённый профиль | lifecycle и повреждение одной из пяти сессий |
+| 6 | Нет session/proxy plaintext | ciphertext/log/argv/artifact boundaries; cross-host scan |
+| 7 | HTTP/HTTPS/SOCKS5 | настоящие локальные proxy и TLS endpoints |
+| 8 | Неверная proxy auth | HTTP 407 и SOCKS5 auth отказ |
+| 9 | Разные сети двух Workers | одна Native queue, два PID и два proxy, разные cookies/outputs |
+| 10 | Большой вход | 24 MiB через Drive fixture и оригинальный Worker |
+| 11 | Потоковая передача | 1 MiB chunks; 64 MiB copy отдельным процессом, RSS <100 MiB |
+| 12 | Обрыв и resume | прерван output upload; прежний Native job/Worker |
+| 13 | Повреждение части | hash mismatch до commit/import |
+| 14 | Недостаток RAM/диска | проверка фактических counters и unit fault injection |
+| 15 | Закреплённые ресурсы | immutable native copy остаётся после изменения source |
+| 16 | Конфликт версии | existing Drive atomic slot conflict tests + v2 unchanged |
+| 17 | Readiness всех сред | пять target cases; static отдельно от measured runtime |
+| 18 | Нет браузера | реальный probe с недоступным executable, fail closed |
+| 19 | Неподдерживаемый профиль | provider/public-cloud refusal до передачи |
+| 20 | Нет SecretRef | readiness и native validation до admission |
+| 21 | Пять настоящих браузеров | Chrome PID/birth, реальные contexts и пять Native Workers |
+| 22 | Outputs изолированы | отдельные Native workdirs и Detached result archive |
+| 23 | Cancel/timeout | адресная отмена/timeout, startup-gate cancellation, старые regression |
+| 24 | UNKNOWN при разрыве | прежний cross-host partition/Agent recovery |
+| 25 | Нет второго POST | cross-host POST count=1; отдельный proxy timeout test |
+| 26 | Windows frozen GUI | новый Full: OS keyboard/mouse, два preparation dialogs |
+| 27 | Linux Worker | TLS Remote E2E и отдельная Linux OS в cross-host |
+| 28 | Drive fixtures | прежние Drive/OAuth/atomic commit tests, v1 и v2 |
+| 29 | Jupyter/marimo | настоящие kernels/runtimes; private named network binding |
+| 30 | Прежние 18 | current-SHA Windows Full и Linux packages, старые 18 без исключений |
+
+Дополнительный cross-host граф 5D одновременно использует закреплённый CSV,
+согласованный профиль (HttpOnly cookie + localStorage), authenticated proxy
+к контролируемому виртуальному origin и возвращаемые файлы. Эти данные тестовые;
+ни пользовательские профили, ни proxy passwords в публичные доказательства
+не включаются. Граф выполняет тот же production GraphRunner.
+
+## Исправления, найденные при приёмке
+
+Старое окно typed inputs допускает отсутствие source/project/version и нового
+profile-binding cache. Необязательная локальная привязка больше не меняет этот
+контракт. Проверка отчёта в GUI отделена от общей подсказки о ресурсах.
+
+Сборка предыдущего Linux release берёт документы и examples только из выбранного
+Git snapshot. Если в нём ещё не было 5D, новые файлы в старый пакет не подмешиваются.
+Manifest проверяет именно содержимое выбранной версии.
+
+Windows venv launcher может владеть отдельным процессом Python. Раньше Store.start
+видел PID launcher вместо Worker и отклонял запуск до первого кубика. Теперь
+анонимный pipe сообщает PID/birth, Dispatcher проверяет его по ОС и происхождению
+от своего launcher, сохраняет фактический PID и только затем выдаёт gate/key.
+Windows Job Object продолжает владеть всем деревом. Неподтверждённая identity
+останавливает запуск; queue.key в argv/environment не передаётся.
+
+В диагностике отказа startup gate сохранена совместимость с сокращённым Remote
+ExecutionAdapter: ранняя адресная отмена остаётся CANCELLED, а не превращается
+в WORKER_INTERNAL_ERROR из-за отсутствующих локальных полей.
+
+Frozen ESC действительно закрывает окно. Проверка теперь ожидает его отсутствие,
+не обращается к is_visible уже уничтоженного native window. Все действия
+по-прежнему выполняются настоящими OS keyboard/mouse по свежей геометрии.
+
+В Recorder запрос мог появиться в capture до решения асинхронного routing gate.
+В управляемой RecognitionSession такой write изначально blocked и становится
+допущенным только после существующих проверок scope/click/dependency. Это
+устраняет попадание ожидающего фонового запроса в UNLINKED_REQUESTS; требования
+к распознаванию, отсутствие второго POST и read-only политика не ослаблены.
