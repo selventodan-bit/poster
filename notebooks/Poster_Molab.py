@@ -10,7 +10,7 @@ def _():
     import hashlib
     import urllib.request
 
-    _BOOTSTRAP_URL = "https://raw.githubusercontent.com/selventodan-bit/poster/830b6024f23f8625e4d0871a0322c4c73cf473ad/scripts/cloud/bootstrap.py"
+    _BOOTSTRAP_URL = "https://raw.githubusercontent.com/selventodan-bit/poster/e828f6c60010d71612e69681ce340eb8a0aeacc7/scripts/cloud/bootstrap.py"
     with urllib.request.urlopen(_BOOTSTRAP_URL, timeout=60) as _response:
         _bootstrap = _response.read(100_000)
     assert (
@@ -20,9 +20,9 @@ def _():
     _scope = {"__name__": "poster_cloud_bootstrap"}
     exec(compile(_bootstrap, "verified_poster_bootstrap", "exec"), _scope)
     _scope["install"](
-        "830b6024f23f8625e4d0871a0322c4c73cf473ad",
-        "c388fb6640fc8eddc8c8e283ed8a85f0c8a7e95e9ac6f8adb9effdf20dbac9a9",
-        "5a16453ddd0b38119f1f4ee64284164591c2c86d904cb37351016bd323501fbc",
+        "e828f6c60010d71612e69681ce340eb8a0aeacc7",
+        "89bbb4e8755a8e47fce7049877570ea052acd9b2a03f33597796e5ced37bdbfc",
+        "64ed7d46c05c6e408a4a4583b3d7d56e199764e90c88d9fd3489148cc68f18ba",
         molab=True,
     )
     return

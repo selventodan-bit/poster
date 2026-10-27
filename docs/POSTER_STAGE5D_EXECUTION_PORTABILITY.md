@@ -262,3 +262,23 @@ Frozen ESC действительно закрывает окно. Провер�
 допущенным только после существующих проверок scope/click/dependency. Это
 устраняет попадание ожидающего фонового запроса в UNLINKED_REQUESTS; требования
 к распознаванию, отсутствие второго POST и read-only политика не ослаблены.
+
+## Закреплённая доставка Launcher
+
+Notebook Launcher закреплён на runtime commit
+`e828f6c60010d71612e69681ce340eb8a0aeacc7`, а не на main/HEAD.
+SHA256 исходного `tar.gz`:
+`89bbb4e8755a8e47fce7049877570ea052acd9b2a03f33597796e5ced37bdbfc`.
+SHA256 requirements:
+`64ed7d46c05c6e408a4a4583b3d7d56e199764e90c88d9fd3489148cc68f18ba`.
+Проверка установила поставляемый installer в новую venv, включая закреплённый
+Molab gdrive-fsspec, и выполнила оригинальный Native Worker успешно. Финальная
+сборка может иметь следующий delivery commit: код runtime остаётся закреплённым
+на указанном неизменяемом SHA. Индивидуальные hashes notebook-файлов находятся в
+`notebooks/poster-launcher-pins.json`; ZIP/TAR hashes — в GitHub Actions artifacts.
+
+Cookies сохраняют исходные domain/path/SameSite/Secure semantics: выбранный origin
+может включать domain cookie, действующий также на его поддомены. Это не даёт
+новых browser privileges и не гарантирует вход. Partitioned cookies не переносятся;
+IPv6 cookie domains в текущем формате отвергаются. Изменение/очистка исходного
+профиля не отзывает уже переданные данные: для этого отзовите сеанс на сайте.
