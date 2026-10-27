@@ -11,6 +11,7 @@ node_modules/
 *.bundle.js
 poster-tiptap.js
 .poster/
+.poster-product-locks/
 demo-output/
 *.sqlite*
 session.enc

@@ -1354,11 +1354,14 @@ class DispatcherWindow(QMainWindow):
 
 
 def launch():
+    from ..product.locking import application_lease
+
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("Poster Dispatcher")
-    window = DispatcherWindow()
-    window.show()
-    return app.exec()
+    with application_lease(workspace_path(), "gui"):
+        window = DispatcherWindow()
+        window.show()
+        return app.exec()
 
 
 if __name__ == "__main__":

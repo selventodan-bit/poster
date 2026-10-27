@@ -61,7 +61,9 @@ class MakerWindow(QMainWindow, ToolsMixin):
         # 1024px desktop. Keep every native control reachable on smaller screens.
         self.setMinimumSize(min(1050, screen.width() - 30), min(650, screen.height() - 50))
         self.resize(min(1450, screen.width() - 30), min(940, screen.height() - 50))
-        self.workspace = workspace or Workspace()
+        from ..product.paths import maker_root
+
+        self.workspace = workspace or Workspace(maker_root())
         ensure_local_key(self.workspace.root / "private")
         self.settings = self.workspace.root / "maker-qt-layout.json"
         self.directory = self.workspace.root / "maker-projects"
@@ -1084,14 +1086,19 @@ class MakerWindow(QMainWindow, ToolsMixin):
 
 
 def launch():
+    from ..product.paths import maker_root
+    from ..product.locking import application_lease
+
     with tempfile.TemporaryDirectory(prefix="poster-maker-") as temporary:
         port = configure_browser(temporary)
         app = QApplication.instance() or QApplication([])
         app.setApplicationName("Poster Maker")
         app.setStyle("Fusion")
-        window = MakerWindow(port)
-        window.show()
-        return app.exec()
+        root = maker_root()
+        with application_lease(root, "maker"):
+            window = MakerWindow(port, workspace=Workspace(root))
+            window.show()
+            return app.exec()
 
 
 if __name__ == "__main__":

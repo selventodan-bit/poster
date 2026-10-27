@@ -713,6 +713,8 @@ class Host:
 
 
 def main():
+    from ..product.locking import application_lease
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--workspace", type=Path, default=None)
     parser.add_argument("--autostart", choices=["status", "enable", "disable"])
@@ -734,7 +736,7 @@ def main():
             print(json.dumps({"code": exc.code}))
             return 1
     try:
-        with FileLock(str(root / "service.lock"), timeout=0):
+        with application_lease(root, "service"), FileLock(str(root / "service.lock"), timeout=0):
             (root / "startup-error.json").unlink(missing_ok=True)
             host = Host(root)
             import atexit

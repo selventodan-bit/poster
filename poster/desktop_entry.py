@@ -11,16 +11,16 @@ def main():
     multiprocessing.freeze_support()
     if getattr(sys, "frozen", False):
         os.chdir(Path(sys.executable).resolve().parent)
-    if Path(sys.executable).stem.casefold() == "posterdispatcher" or "--dispatcher" in sys.argv:
-        from poster.dispatcher.qt_app import launch
-
-        return launch()
     if "--qt-browser-host" in sys.argv:
         from poster.maker.qt_host import main as host_main
 
         return host_main()
     os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(Path(".poster/browsers").absolute()))
     try:
+        if Path(sys.executable).stem.casefold() == "posterdispatcher" or "--dispatcher" in sys.argv:
+            from poster.dispatcher.qt_app import launch
+
+            return launch()
         try:
             info = json.loads(Path("BUILD_INFO.json").read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -31,7 +31,15 @@ def main():
             from poster.recorder.app import launch
 
         return launch() or 0
-    except Exception:
+    except Exception as error:
+        from poster.dispatcher.models import DispatcherError
+
+        message = (
+            str(error)
+            if isinstance(error, DispatcherError)
+            else "Не удалось открыть Poster. Распакуйте весь архив в доступную для записи папку. "
+            "Сохраните существующую папку данных: в ней проекты, знания и ключи."
+        )
         import tkinter as tk
         from tkinter import messagebox
 
@@ -39,8 +47,7 @@ def main():
         root.withdraw()
         messagebox.showerror(
             "Poster — запуск",
-            "Не удалось открыть Poster. Распакуйте весь архив в доступную для записи папку. "
-            "Сохраните существующую папку .poster: в ней проекты, знания и ключи.",
+            message,
             parent=root,
         )
         root.destroy()
