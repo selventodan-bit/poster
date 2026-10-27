@@ -16,7 +16,7 @@ MISSING означает отсутствующую функцию, EXTERNAL_VAL
 | Возможность | Проверяемый статус | Проверяемое основание / граница |
 |---|---|---|
 | Граф, связи, undo/redo, сохранение v1/v2 | IMPLEMENTED_AND_TESTED | test_maker, test_maker_stage2; Windows frozen OS input |
-| 78 действий и параметры | IMPLEMENTED_NOT_E2E_TESTED | Все 78 формы: Qt apply/save/reopen; все оригинальные execute измеряются через GraphRunner. Итоговые Windows/Linux CI отчёты Stage 6 обязательны; это не 78 независимых внешних интеграций |
+| 78 действий и параметры | IMPLEMENTED_AND_TESTED | Все 78 формы: Qt apply/save/reopen; все оригинальные execute измеряются через GraphRunner. Итоговые Windows/Linux CI отчёты Stage 6 обязательны; это не 78 независимых внешних интеграций |
 | Recorder, embedded Chromium, iframe/popup/вкладки | IMPLEMENTED_AND_TESTED | test_maker_stage3a, unified frozen; closed Shadow DOM/SSO не гарантированы |
 | Переменные, условия, циклы, отладка | IMPLEMENTED_AND_TESTED | test_maker_stage2; breakpoint/step/edit, bounded runtime |
 | HTTP/JSON/lists/tables/CSV/XLSX/files/subprojects | IMPLEMENTED_AND_TESTED | test_maker_actions3 и frozen data graphs |
@@ -31,11 +31,11 @@ MISSING означает отсутствующую функцию, EXTERNAL_VAL
 | Google Drive live E2E | EXTERNAL_VALIDATION_REQUIRED | CLOUD_PROVIDER_NOT_EXECUTED; аккаунт не предоставлен |
 | Общие Jupyter/marimo Launchers | IMPLEMENTED_AND_TESTED | genuine local kernels, original GraphRunner, fresh pinned installer |
 | Colab/Molab live E2E | EXTERNAL_VALIDATION_REQUIRED | CLOUD_PROVIDER_NOT_EXECUTED; interactive concurrency 1 |
-| Первый запуск и единая помощь | IMPLEMENTED_NOT_E2E_TESTED | Постоянная кнопка помощи, пути/примеры/setup, принятие прежнего Maker и руководство; frozen Stage 6 приёмка обязательна |
+| Первый запуск и единая помощь | IMPLEMENTED_AND_TESTED | Постоянная кнопка помощи, пути/примеры/setup, принятие прежнего Maker и руководство; frozen Stage 6 приёмка обязательна |
 | Защищённый backup/restore продукта | IMPLEMENTED_NOT_E2E_TESTED | AES-GCM, приватные SQLite snapshots, durable staging/recovery, запрет повторного POST; Linux targeted passed, Windows CI нового SHA обязателен |
 | SQLite migrations | IMPLEMENTED_AND_TESTED | Schemas 1–7: проверенная копия до изменений, отказ без порчи при ошибке; настоящие предыдущие source producers проверяются отдельно |
 | Обновление Windows Full | IMPLEMENTED_NOT_E2E_TESTED | Стабильные per-user данные, legacy adoption без переноса ключей, совместимость Service по SHA, ручное обновление; frozen CI обязателен |
-| Безопасный diagnostic export | IMPLEMENTED_NOT_E2E_TESTED | GUI экспорт только allowlist версий/статусов/ёмкостей, без конфигурационных значений; отдельный canary test и новый frozen CI |
+| Безопасный diagnostic export | IMPLEMENTED_AND_TESTED | GUI экспорт только allowlist версий/статусов/ёмкостей, без конфигурационных значений; отдельный canary test и новый frozen CI |
 | Импорт закрытых проектов ZennoLab | INTENTIONALLY_UNSUPPORTED | Формат .zp/.zppro не реализован |
 | Arbitrary Python/JS из импортированного JSON | INTENTIONALLY_UNSUPPORTED | Registry доверенного кода, без eval/import из графа |
 | CAPTCHA/antidetect/платные сторонние сервисы | INTENTIONALLY_UNSUPPORTED | Вне согласованного объёма; лицензий/безопасного API нет |

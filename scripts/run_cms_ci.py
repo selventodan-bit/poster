@@ -438,9 +438,7 @@ async def publication(install, directory, kb_path):
             # Flarum reloads the current index after login. A second goto after
             # a fixed 500 ms races that reload and aborts the navigation. Wait
             # for the authenticated header on the real post-login document.
-            await session.page.locator(".Dropdown--user .Dropdown-toggle").wait_for(
-                state="visible", timeout=30000
-            )
+            await session.page.locator("button.Button--user").wait_for(state="visible", timeout=30000)
             await session.page.wait_for_load_state("domcontentloaded")
         else:
             await session.page.wait_for_timeout(500)

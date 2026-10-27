@@ -48,14 +48,14 @@ release builders и все четыре принятых workflows. Старую
 
 | ID | Приоритет | Факт и необходимое исправление | Статус |
 |---|---|---|---|
-| S6-01 | P0 | Maker state привязан к каталогу EXE: новое место распаковки теряет видимость проектов/ключей. Нужны стабильный default, сохранение legacy и GUI выбор прежнего workspace | IN_PROGRESS: stable paths/legacy leases implemented; 16 targeted tests passed; GUI adoption pending |
-| S6-02 | P1 | Нет согласованного защищённого backup/restore native product state; нельзя повторять восстановленные внешние jobs | IN_PROGRESS: encrypted offline export/verification tested; transactional restore and GUI pending |
+| S6-01 | P0 | Maker state привязан к каталогу EXE: новое место распаковки теряет видимость проектов/ключей. Нужны стабильный default, сохранение legacy и GUI выбор прежнего workspace | FIX_IMPLEMENTED: stable paths, legacy adoption и GUI; приёмка — product Qt/frozen CI |
+| S6-02 | P1 | Нет согласованного защищённого backup/restore native product state; нельзя повторять восстановленные внешние jobs | FIX_IMPLEMENTED: encrypted offline export, transactional restore, GUI и 22 обязательные категории recovery |
 | S6-03 | P1 | Перед schema migration нет проверенного SQLite snapshot | FIXED: private SQLite backup before any schema/journal change; 19 targeted tests passed |
-| S6-04 | P1 | First-run, инструкции OAuth/updates и diagnostics разнесены и недостаточны для обычного пользователя | OPEN |
-| S6-05 | P1 | Нет непрерывной проверки GUI edit/save/reopen всех 78 действий; нужно выявить и закрыть реальные несоответствия | OPEN |
-| S6-06 | P1 | Доставка должна включать актуальные user guide, RC identity, совместимые pinned Launchers и финальные evidence | OPEN |
+| S6-04 | P1 | First-run, инструкции OAuth/updates и diagnostics разнесены и недостаточны для обычного пользователя | FIX_IMPLEMENTED: постоянная помощь, GUI диагностика и POSTER_USER_GUIDE |
+| S6-05 | P1 | Нет непрерывной проверки GUI edit/save/reopen всех 78 действий; нужно выявить и закрыть реальные несоответствия | FIX_IMPLEMENTED: 78 forms и 78 original execute; обязательные Windows/Linux jobs |
+| S6-06 | P1 | Доставка должна включать актуальные user guide, RC identity, совместимые pinned Launchers и финальные evidence | DELIVERY_IMPLEMENTED: builders, SHA256, инструкции, закреплённые Launchers; финальные evidence поставляются CI |
 | S6-07 | P2 | Несколько редактируемых документов/расширенный trace viewer, импорт ZennoLab, arbitrary code blocks | DEFERRED: не обязательные P0/P1 согласованного runtime |
-| S6-09 | P0 | Maker key used chmod only on Windows; existing queue-key ACL was not rechecked. Owner-only DACL and plain-path checks now protect both, without key regeneration | FIXED_LOCAL: 21 key/Host/Worker tests passed; Windows ACL CI pending |
+| S6-09 | P0 | Maker key used chmod only on Windows; existing queue-key ACL was not rechecked. Owner-only DACL and plain-path checks now protect both, without key regeneration | FIX_IMPLEMENTED: protected owner-only DACL; WinAPI проверяет expanded SID, единственный ACE и FILE_ALL_ACCESS без зависимости от SDDL alias |
 | S6-08 | P2 | Signing/auto-updater | DEFERRED: signing infrastructure отсутствует; безопасное ручное обновление |
 
 Сравнение с ProjectMaker/ZennoPoster проводится по пользовательским сценариям:
@@ -168,3 +168,36 @@ Linux Xvfb проверяются отдельными jobs, frozen Windows — 
 Windows/Linux/Cloud builders включают руководство и матрицу; старые release snapshots
 получают только свои собственные versioned assets. Окончательные RC/pins/CI ещё
 проверяются на финальном SHA.
+
+## Финальный спринт: исправления известных CI failures
+
+Новые функции не добавляются. Исправления A–F выполняются поверх опубликованного
+Stage 6; статус RC требует 61/61 SUCCESS точного delivery SHA, а не только этой
+таблицы или локальных результатов. Полные SHA архивов, screenshots и безопасные
+отчёты находятся в artifacts соответствующего финального run GitHub Actions.
+
+| Failure | Исправление | Проверка |
+|---|---|---|
+| A: Windows ACL/PID | DACL проверяется бинарно через WinAPI: protected, один allow ACE, FILE_ALL_ACCESS, expanded SID текущего пользователя. PID/birth сообщает сам владелец DB; redirector PID отдельно | product recovery Windows/Linux |
+| B: UnicodeDecodeError | UTF-8 читается явно; новых Windows jobs также касается PYTHONUTF8=1 | обе исходные secret tests сохранены |
+| C: PermissionError при scan | Test registry OS locks вынесен из сканируемого workspace, как в production; сканирование пользовательских данных и ключевые ACL не ослаблены | исходный Worker secret test, Python 3.11/12/13 |
+| D: Frozen Scheduler | Перед enable создаётся приватный WorkingDirectory под recovery gate. Проверяются настоящий PID/birth, samefile и SHA256 фактического image | настоящий Windows Task Scheduler + frozen Service |
+| E: Maker timeout | Tk продолжает обслуживать события в пределах 30-секундного browser launch; повторных действий нет. Terminal failure выдаёт безопасную фазу/код | native Tk под Xvfb passed; Windows native suite сохранён |
+| F: Flarum ERR_ABORTED | После login ожидается authenticated user button на перезагруженной странице; конкурирующий goto на тот же index удалён | исходный Flarum Docker E2E сохранён |
+
+Локально: 31 affected checks PASSED; 24 Host/launcher/paths checks PASSED;
+настоящие Tk и три Qt сценария под Xvfb — 4 PASSED. Windows-specific части
+подтверждаются соответствующими jobs, не заменяются Linux-проверками.
+
+Runtime Launchers закреплён на `4656d7273af39a257b3874477a8763f20d6ddde6`.
+SHA256 исходного TAR.GZ:
+`ff7fd2beb77b4beb3d964ecebdf892f4d410ddc76de7e1fa63cbd2ea2964480c`.
+Fresh installer проверяет не только 78 actions и настоящий Worker, но и совпадение
+всех установленных Python-модулей с кодом delivery checkout (нормализованы только
+CRLF/LF). Точный delivery SHA отличается лишь тестовыми/документальными/pin assets;
+исполняемый пакет Poster совпадает. Windows и Linux builders берут собственный
+полный delivery SHA. Protocol/session version остаётся совместимой 5D.1.
+
+Google Drive, Colab, Molab live: CLOUD_PROVIDER_NOT_EXECUTED. Public WAN/VPS и
+физический reboot/power-cut отдельно не заявляются. main, PR №2 и стабильные
+ветки не изменяются; merge не выполняется.
