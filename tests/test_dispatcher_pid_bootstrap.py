@@ -62,3 +62,50 @@ def test_pid_pipe_cannot_claim_an_unrelated_process():
     finally:
         process.terminate()
         process.wait(10)
+
+
+def test_cancelled_remote_adapter_remains_compatible_with_start_diagnostics(tmp_path):
+    import uuid
+    from pathlib import Path
+    from poster.auth import session_key
+    from poster.dispatcher.service import prepare_snapshot
+    from poster.dispatcher.snapshots import Snapshots
+    from poster.remote.protocol import b64
+
+    source = graph_file(tmp_path, [("Files.WriteText", dict(path="must-not-exist.txt", text="not executed"))])
+    store = Store(tmp_path / "queue.sqlite")
+    try:
+        from poster.dispatcher.security import key_setup
+
+        key_setup(store.root)
+        project_id, version = Snapshots(store.root).create(source)
+        cipher, _ = prepare_snapshot(store, project_id, version)
+        run_id, job_id = uuid.uuid4().hex, uuid.uuid4().hex
+        packet = dict(
+            key=session_key().decode(),
+            root=str(store.root),
+            job=dict(
+                id=job_id, project_id=project_id, version=version, timeout=30, inputs_cipher=b64(cipher)
+            ),
+            execution=dict(run_id=run_id, job_id=job_id, attempt=1, owner="unit-owner"),
+        )
+        code = """
+import asyncio,json,os,sys,time
+from pathlib import Path
+from poster.dispatcher.worker import execute
+from poster.remote.worker import ExecutionAdapter,LeaseControls
+packet=json.load(sys.stdin);os.environ['POSTER_SESSION_KEY']=packet.pop('key')
+controls=LeaseControls(b'',time.time()+30);controls.request('CANCEL_REQUESTED')
+adapter=ExecutionAdapter(Path(packet.pop('root')),packet,controls)
+assert asyncio.run(execute(adapter,adapter.current,'unit-owner',controls))==1
+"""
+        process = subprocess.run(
+            [sys.executable, "-c", code], input=json.dumps(packet), capture_output=True, text=True, timeout=30
+        )
+        assert process.returncode == 0
+        report = json.loads((store.root / "runs" / run_id / "report.json").read_bytes())
+        assert report["status"] == "CANCELLED" and report["code"] == "CANCEL_REQUESTED"
+        assert report["start_rejection"]["cancel_requested"]
+        assert not (Path(report["workdir"]) / "must-not-exist.txt").exists()
+    finally:
+        store.close()

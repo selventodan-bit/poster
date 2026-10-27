@@ -145,13 +145,15 @@ async def execute(store, execution, owner, controls):
             inputs[name] = vault.put_value(value)
         if not store.start(execution["run_id"], owner, os.getpid()):
             recorded = store.execution(execution["run_id"])
-            latest_job = store.payload(execution["job_id"], private=False)
+            latest_job = store.payload(execution["job_id"])
             start_rejection = dict(
-                recorded_pid=recorded["pid"],
+                recorded_pid=recorded.get("pid"),
                 actual_pid=os.getpid(),
-                owner_matches=recorded["owner"] == owner,
-                status=latest_job["status"],
-                cancel_requested=bool(latest_job["cancel_requested"]),
+                owner_matches=recorded.get("owner") == owner,
+                status=latest_job.get("status"),
+                cancel_requested=bool(
+                    latest_job.get("cancel_requested") or controls.reason == "CANCEL_REQUESTED"
+                ),
             )
             state, code = Status.CANCELLED, "CANCEL_REQUESTED"
         else:
