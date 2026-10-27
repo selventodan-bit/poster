@@ -1,10 +1,11 @@
 """Explicit encrypted session snapshots, never a shared mutable browser directory."""
 
 from pathlib import Path
+from contextlib import contextmanager
 import re
 from urllib.parse import urlsplit
 
-from filelock import FileLock
+from filelock import FileLock, Timeout
 
 from ..auth import decrypt_bytes, encrypt_session
 from .model import GraphError, identity
@@ -19,10 +20,12 @@ RESTORE = """state=>{
 
 class Profiles:
     def __init__(self, root):
-        self.root = Path(root)
-        self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
-        if self.root.is_symlink():
-            raise GraphError("PROFILE_INVALID")
+        from poster.dispatcher.security import private_dir
+
+        try:
+            self.root = private_dir(Path(root))
+        except Exception as exc:
+            raise GraphError("PROFILE_INVALID") from exc
 
     def path(self, name):
         if not re.fullmatch(r"profile_[a-f0-9]{12,32}", name):
@@ -31,6 +34,14 @@ class Profiles:
         if path.is_symlink():
             raise GraphError("PROFILE_INVALID")
         return path
+
+    @contextmanager
+    def ownership(self, key):
+        try:
+            with FileLock(str(self.path(key)) + ".dispatcher-execution.lock", timeout=0):
+                yield
+        except Timeout as exc:
+            raise GraphError("PROFILE_BUSY") from exc
 
     def list(self):
         result = []
@@ -48,13 +59,50 @@ class Profiles:
             raise GraphError("PROFILE_INVALID")
         key = "profile_" + identity()
         atomic(self.path(key), encrypt_session({"name": name, "revision": 0, "state": {}}))
+        from poster.dispatcher.security import restrict
+
+        restrict(self.path(key))
         return key
 
     def open(self, key):
         path = self.path(key)
         if not path.is_file():
             raise GraphError("PROFILE_MISSING")
-        return Profile(self, key, decrypt_bytes(read_bounded(path)))
+        try:
+            from poster.portability.sessions import normalize
+
+            data = decrypt_bytes(read_bounded(path))
+            if (
+                set(data) != {"name", "revision", "state"}
+                or not isinstance(data["name"], str)
+                or type(data["revision"]) is not int
+                or data["revision"] < 0
+            ):
+                raise ValueError()
+            normalize(data["state"])
+            return Profile(self, key, data)
+        except Exception as exc:
+            raise GraphError("PROFILE_INVALID") from exc
+
+    def clone(self, key, name=None, *, clean=False):
+        with self.ownership(key):
+            source = self.open(key)
+            created = self.create(name or source.data["name"] + " — копия")
+            if not clean:
+                self.open(created).commit(source.data["state"])
+            return created
+
+    def describe(self, key, *, provider="chromium", environment="windows", trusted=True):
+        from poster.portability.sessions import compatibility
+
+        profile = self.open(key)
+        return dict(
+            id=key,
+            name=profile.data["name"],
+            revision=profile.data["revision"],
+            location=str(self.path(key)),
+            compatibility=compatibility(profile.data["state"], provider, environment, trusted=trusted),
+        )
 
     def clear(self, key):
         # Revision change invalidates any other session's unsaved snapshot.
@@ -70,7 +118,7 @@ class Profiles:
 
     def delete(self, key):
         path = self.path(key)
-        with FileLock(str(path) + ".lock"):
+        with self.ownership(key), FileLock(str(path) + ".lock"):
             if not path.is_file():
                 raise GraphError("PROFILE_MISSING")
             path.unlink()
@@ -81,8 +129,11 @@ class Profile:
         self.store, self.key, self.data = store, key, data
 
     def commit(self, state):
+        from poster.portability.sessions import normalize
+
+        normalize(state)
         path = self.store.path(self.key)
-        with FileLock(str(path) + ".lock"):
+        with self.store.ownership(self.key), FileLock(str(path) + ".lock"):
             previous = decrypt_bytes(read_bounded(path))
             if previous["revision"] != self.data["revision"]:
                 raise GraphError("PROFILE_CONFLICT")
@@ -91,10 +142,17 @@ class Profile:
             if len(raw) > 10_000_000:
                 raise GraphError("FILE_TOO_LARGE")
             atomic(path, raw)
+            from poster.dispatcher.security import restrict
+
+            restrict(path)
             self.data = updated
 
     async def restore(self, session):
-        state = self.data["state"]
+        from poster.portability.sessions import prune_expired, compatibility
+
+        state = prune_expired(self.data["state"])
+        if not compatibility(state, session.provider.name, "local", trusted=True)["supported"]:
+            raise GraphError("PROFILE_INCOMPATIBLE")
         cookies = state.get("cookies", [])
         if cookies:
             cdp = await session.context.new_cdp_session(session.page)
@@ -147,7 +205,13 @@ class Profile:
         finally:
             await cdp.detach()
         fields = {"name", "value", "domain", "path", "secure", "httpOnly", "sameSite", "expires"}
-        cookies = [{key: value for key, value in cookie.items() if key in fields} for cookie in raw]
+        unsupported = []
+        cookies = []
+        for cookie in raw:
+            if cookie.get("partitionKey") or cookie.get("partitionKeyOpaque"):
+                unsupported.append("partitioned-cookies")
+                continue
+            cookies.append({key: value for key, value in cookie.items() if key in fields})
         # Session cookies use expires=-1 in CDP; omit it when restoring.
         for cookie in cookies:
             if cookie.get("expires", -1) < 0:
@@ -162,4 +226,7 @@ class Profile:
                         origins[value["origin"]] = value
                 except Exception:
                     pass  # Closed frames / opaque origins have no portable localStorage.
-        self.commit({"cookies": cookies, "origins": list(origins.values())})
+        value = dict(cookies=cookies, origins=list(origins.values()))
+        if unsupported:
+            value["unsupported"] = sorted(set(unsupported))
+        self.commit(value)
