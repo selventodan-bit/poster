@@ -47,6 +47,8 @@ class FileSandbox:
         if not text or "\x00" in str(text):
             raise GraphError("FILE_PATH_INVALID")
         text = str(text)
+        if ".poster-product-locks" in Path(text.replace("\\", "/")).parts:
+            raise GraphError("FILE_PATH_INVALID")
         if os.name != "nt" and PureWindowsPath(text).drive:
             raise GraphError("FILE_OUTSIDE_WORKDIR")
         path = Path(text.replace("\\", "/"))

@@ -36,12 +36,7 @@ def default_roots(maker):
         legacy_key=plain_path(Path.home() / ".poster/session.key"),
         location=product_home() / "maker-location.json",
     )
-    # A containing selected workspace already owns the complete child scope.
-    return {
-        k: p
-        for k, p in candidates.items()
-        if not any(p != other and p.is_relative_to(other) for other in candidates.values())
-    }
+    return candidates
 
 
 def binding():
@@ -80,38 +75,83 @@ def roots_checked(roots):
         ):
             raise DispatcherError("BACKUP_SCOPE")
         p = plain_path(path)
-        if p == Path(p.anchor) or p == Path.home().resolve():
+        if (
+            p == Path(p.anchor)
+            or Path.home().resolve().is_relative_to(p)
+            or Path(tempfile.gettempdir()).resolve().is_relative_to(p)
+        ):
             raise DispatcherError("BACKUP_SCOPE")
         result[name] = p
-    paths = list(result.values())
-    if len(set(paths)) != len(paths) or any(a != b and a.is_relative_to(b) for a in paths for b in paths):
-        raise DispatcherError("BACKUP_SCOPE")
     return result
 
 
-def skipped(relative):
-    return (
-        any(
-            p in {"__pycache__", "browser-cache", "browsers", "tmp", ".poster-product-locks"}
-            for p in relative.parts
-        )
-        or relative.name.endswith((".lock", "-wal", "-shm", ".partial", ".sock"))
-        or relative.name in {"service.json", "startup-error.json", "ipc.key"}
-    )
+def physical_roots(roots):
+    """Store each tree once, while retaining every logical app boundary."""
+    result = {}
+    for name, path in roots.items():
+        if path in result.values() or any(
+            path != other and path.is_relative_to(other) for other in roots.values()
+        ):
+            continue
+        result[name] = path
+    return result
+
+
+def skipped(relative, full_path):
+    # User resources may themselves be called tmp/ipc.key/data.partial/*.lock.
+    # Only known application-root caches/control records are disposable.
+    if ".poster-product-locks" in relative.parts:
+        return True
+    if relative.parts and relative.parts[0] in {"__pycache__", "browser-cache", "browsers", "tmp"}:
+        return True
+    if len(relative.parts) == 1 and relative.name in {
+        "service.json",
+        "startup-error.json",
+        "ipc.key",
+        "startup.lock",
+        "service.lock",
+        "queue-key.lock",
+        "dispatcher.sqlite.schema.lock",
+        "dispatcher.sqlite.dispatcher.lock",
+    }:
+        return True
+    if relative.name.endswith(("-wal", "-shm")):
+        base = plain_path(full_path.with_name(full_path.name[:-4]))
+        if base.is_file():
+            with base.open("rb") as f:
+                return f.read(16) == b"SQLite format 3\x00"
+    return False
 
 
 def inventory(roots):
     roots = roots_checked(roots)
+    existing = {k: p for k, p in roots.items() if p.exists()}
+    physical = physical_roots(existing)
+    logical = []
+    for name, path in existing.items():
+        container = next(k for k, p in physical.items() if path.is_relative_to(p))
+        relative_path = (
+            path.relative_to(physical[container]).as_posix() if path != physical[container] else ""
+        )
+        logical.append(
+            dict(
+                name=name,
+                path=str(path),
+                kind="directory" if path.is_dir() else "file",
+                container=container,
+                relative=relative_path,
+            )
+        )
     scopes, files, dirs = [], [], []
     total = 0
-    for name, root in roots.items():
+    for name, root in physical.items():
         if not root.exists():
             continue
         scopes.append(dict(name=name, path=str(root), kind="directory" if root.is_dir() else "file"))
         paths = walk(root) if root.is_dir() else [root]
         for path in paths:
             rel = path.relative_to(root) if path != root else Path("")
-            if skipped(rel):
+            if skipped(rel, path):
                 continue
             path = plain_path(path)
             if len(files) + len(dirs) >= MAX_FILES:
@@ -137,7 +177,7 @@ def inventory(roots):
             files.append(
                 dict(scope=name, path=rel.as_posix() if path != root else "", source=path, size=size)
             )
-    return dict(scopes=scopes, files=files, directories=dirs, bytes=total)
+    return dict(scopes=scopes, logical=logical, files=files, directories=dirs, bytes=total)
 
 
 def walk(root):
@@ -147,7 +187,7 @@ def walk(root):
         with os.scandir(pending.pop()) as entries:
             for entry in entries:
                 path = Path(entry.path)
-                if skipped(path.relative_to(root)):
+                if skipped(path.relative_to(root), path):
                     continue
                 count += 1
                 if count > MAX_FILES:
@@ -182,6 +222,7 @@ def sqlite_snapshot(source, target):
 def create(roots, destination, password, *, confirmed=False):
     if confirmed is not True:
         raise DispatcherError("BACKUP_PASSPHRASE")
+    crypto.validate_password(password)
     roots = roots_checked(roots)
     destination = plain_path(destination)
     if destination.exists() or any(destination == p or destination.is_relative_to(p) for p in roots.values()):
@@ -203,6 +244,7 @@ def create(roots, destination, password, *, confirmed=False):
                     binding=binding(),
                     created=time.time(),
                     scopes=plan["scopes"],
+                    logical=plan["logical"],
                     directories=plan["directories"],
                     files=[],
                     excluded=[
@@ -267,7 +309,7 @@ def create(roots, destination, password, *, confirmed=False):
                     file_count=len(manifest["files"]),
                     bytes=sum(f["size"] for f in manifest["files"]),
                     sha256=checksum,
-                    scopes=[s["name"] for s in manifest["scopes"]],
+                    scopes=[s["name"] for s in manifest["logical"]],
                     build=manifest["build"],
                 )
     except DispatcherError:
@@ -326,6 +368,7 @@ def validate(archive, roots):
     if manifest["format"] != FORMAT or manifest["binding"] != binding():
         raise DispatcherError("BACKUP_SCOPE")
     scopes = manifest["scopes"]
+    logical = manifest["logical"]
     files = manifest["files"]
     dirs = manifest["directories"]
     if (
@@ -346,6 +389,30 @@ def validate(archive, roots):
             or scope["kind"] not in {"file", "directory"}
         ):
             raise DispatcherError("BACKUP_SCOPE")
+    if (
+        not isinstance(logical, list)
+        or not 1 <= len(logical) <= len(roots)
+        or len({s["name"] for s in logical}) != len(logical)
+    ):
+        raise DispatcherError("BACKUP_INVALID")
+    logical_paths = {}
+    for item in logical:
+        if item["name"] not in roots or item["path"] != str(roots[item["name"]]):
+            raise DispatcherError("BACKUP_SCOPE")
+        container = by_scope[item["container"]]
+        path, parent = roots[item["name"]], roots[item["container"]]
+        if not path.is_relative_to(parent) or item["kind"] not in {"file", "directory"}:
+            raise DispatcherError("BACKUP_SCOPE")
+        rel = path.relative_to(parent).as_posix() if path != parent else ""
+        if (
+            rel != item["relative"]
+            or (rel and container["kind"] != "directory")
+            or (not rel and container["kind"] != item["kind"])
+        ):
+            raise DispatcherError("BACKUP_INVALID")
+        logical_paths[item["name"]] = path
+    if physical_roots(logical_paths) != {s["name"]: roots[s["name"]] for s in scopes}:
+        raise DispatcherError("BACKUP_INVALID")
     seen = set()
     file_paths = set()
     for item in dirs:
@@ -402,17 +469,31 @@ def validate(archive, roots):
 
 
 @contextmanager
-def opened(source, password, roots, temporary_parent):
+def opened(source, password, roots, temporary_parent, *, expected_sha256=None):
     roots = roots_checked(roots)
     try:
         source = plain_path(source)
         space(temporary_parent, source.stat().st_size * 2 + MAX_MANIFEST)
         with tempfile.TemporaryDirectory(prefix=".poster-verify-", dir=temporary_parent) as temp:
             temp = private_dir(temp)
+            snapshot = temp / "source.pbackup"
+            sha, count = hashlib.sha256(), 0
+            with source.open("rb") as src, snapshot.open("xb") as dst:
+                restrict(snapshot)
+                while raw := src.read(crypto.CHUNK):
+                    count += len(raw)
+                    if count > crypto.MAX_BYTES + 256:
+                        raise DispatcherError("BACKUP_LIMIT")
+                    dst.write(raw)
+                    sha.update(raw)
+            actual_sha = sha.hexdigest()
+            if expected_sha256 is not None and actual_sha != expected_sha256:
+                raise DispatcherError("BACKUP_INVALID")
             decrypted = temp / "snapshot.zip"
-            crypto.decrypt(source, decrypted, password)
+            crypto.decrypt(snapshot, decrypted, password)
             with zipfile.ZipFile(decrypted, "r") as archive:
                 manifest = validate(archive, roots)
+                manifest["archive_sha256"] = actual_sha
                 yield archive, manifest
     except DispatcherError:
         raise

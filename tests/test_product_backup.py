@@ -161,3 +161,24 @@ def test_actual_hardlink_and_directory_link_cannot_expand_backup_scope(roots, tm
         else:
             linked.unlink()
     assert (outside / "file.txt").read_text() == "unselected private data"
+
+
+def test_resource_names_are_not_confused_with_runtime_transients(roots, tmp_path):
+    folder = roots["maker"] / "maker-projects/user-data"
+    (folder / "tmp").mkdir(parents=True)
+    names = [
+        "tmp/real.csv",
+        "ipc.key",
+        "service.json",
+        "my.lock",
+        "data.partial",
+        "ordinary-wal",
+        "ordinary-shm",
+    ]
+    for name in names:
+        (folder / name).write_text("selected data " + name)
+    output = tmp_path / "resource-names.pbackup"
+    backup.create(roots, output, PASSWORD, confirmed=True)
+    manifest = backup.inspect(output, PASSWORD, roots)
+    backed = {f["path"] for f in manifest["files"]}
+    assert all("maker-projects/user-data/" + name in backed for name in names)

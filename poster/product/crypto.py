@@ -13,9 +13,13 @@ CHUNK = 1024 * 1024
 MAX_BYTES = 16 * 1024**3
 
 
-def key(password, salt):
+def validate_password(password):
     if not isinstance(password, str) or not 12 <= len(password) <= 1024:
         raise DispatcherError("BACKUP_PASSPHRASE")
+
+
+def key(password, salt):
+    validate_password(password)
     return Scrypt(salt=salt, length=32, n=2**15, r=8, p=1).derive(password.encode("utf-8"))
 
 

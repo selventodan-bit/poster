@@ -78,3 +78,38 @@ def test_source_and_explicit_workspace_remain_supported(tmp_path, monkeypatch):
     assert paths.maker_root() == tmp_path / ".poster"
     monkeypatch.setenv("POSTER_MAKER_WORKSPACE", str(tmp_path / "explicit"))
     assert paths.maker_root() == tmp_path / "explicit"
+
+
+def test_parent_maintenance_covers_active_and_new_nested_applications(tmp_path):
+    parent = tmp_path / "parent"
+    child = parent / "nested"
+    child.mkdir(parents=True)
+    with application_lease(child, "service"):
+        with pytest.raises(DispatcherError):
+            with offline([parent]):
+                pass
+    with offline([parent]):
+        with pytest.raises(DispatcherError):
+            with application_lease(child, "service"):
+                pass
+    # A parent's durable recovery marker also blocks an absent nested root;
+    # startup must not recreate a partially restored tree.
+    (lock_root(parent) / "restore-pending.json").write_text("{}")
+    missing = parent / "missing"
+    try:
+        with pytest.raises(DispatcherError) as caught:
+            with application_lease(missing, "service"):
+                pass
+        assert caught.value.code == "RESTORE_RECOVERY" and not missing.exists()
+    finally:
+        (lock_root(parent) / "restore-pending.json").unlink()
+
+
+def test_runner_cannot_forge_product_maintenance_namespace(tmp_path):
+    from poster.maker.resources import FileSandbox
+    from poster.maker.model import GraphError
+
+    sandbox = FileSandbox(tmp_path / "run")
+    with pytest.raises(GraphError):
+        sandbox.write(".poster-product-locks/forged/restore-pending.json", b"{}")
+    assert not (tmp_path / "run/.poster-product-locks").exists()
