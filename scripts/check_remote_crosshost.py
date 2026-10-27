@@ -466,7 +466,7 @@ def check(config, output):
                 status="PASSED",
                 agent_id=agent_id,
                 job=queued["jobs"][0],
-                linux_browser_pid=completed["history"][0]["pid"],
+                linux_worker_pid=completed["history"][0]["pid"],
                 returned_sha256=hashlib.sha256(returned.read_bytes()).hexdigest(),
                 cookies_and_storage_confirmed=True,
                 proxy_auth_verified=True,
