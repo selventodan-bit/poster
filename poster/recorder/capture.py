@@ -68,7 +68,7 @@ def chromium_options(headless=False, managed_executable=None):
 
 
 class Recorder:
-    def __init__(self, url: str, profile: Path):
+    def __init__(self, url: str, profile: Path, *, admission_controlled=False):
         self.capture = Capture(url)
         self.profile = profile
         self.pending = set()
@@ -76,6 +76,7 @@ class Recorder:
         self.response_event = asyncio.Event()
         self.browser_bodies = {}
         self.record_request = None
+        self.admission_controlled = admission_controlled
 
     def task(self, coro):
         task = asyncio.create_task(coro)
@@ -156,6 +157,11 @@ class Recorder:
                     }
                 )
                 self.request_records[req] = self.capture.requests[-1]
+                if self.admission_controlled and req.method not in {"GET", "HEAD", "OPTIONS"}:
+                    # A context event may precede its asynchronous routing gate.
+                    # Pending admission must never look like an approved write
+                    # to a learner running after another response completes.
+                    self.request_records[req]["blocked"] = True
 
         async def response(res):
             received_at = time.monotonic()

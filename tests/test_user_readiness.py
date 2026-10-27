@@ -193,3 +193,40 @@ async def test_extra_required_control_requests_operator_input(tmp_path):
             assert s.result.state == "DETECTED"
         finally:
             await s.close()
+
+
+async def test_pending_background_route_cannot_contaminate_an_admitted_capture(tmp_path):
+    from poster.recognition.network import NetworkAnalyzer
+
+    with serve_readiness() as (server, base):
+        session = RecognitionSession(base + "/compose/background", tmp_path / "profile", headless=True)
+        release, pending = asyncio.Event(), asyncio.Event()
+        try:
+            await session.start()
+            await session.recognize()
+            await session.test_publish("Causal title", "Causal body", "pending-route", confirmed=True)
+            assert session.result.state == "HTTP_CANDIDATE", session.result.summary()
+            assert len(server.writes) == 1
+
+            # Hold a genuine browser request BEFORE the original gate runs.
+            # Its context event can already reach the synchronous learner.
+            async def paused(route):
+                pending.set()
+                await release.wait()
+                await session.gate(route)
+
+            await session.context.route("**/autosave", paused)
+            await session.page.evaluate("void fetch('/autosave',{method:'POST',body:'{}'}).catch(()=>{})")
+            await asyncio.wait_for(pending.wait(), 5)
+            records = [
+                r
+                for r in session.recorder.capture.requests
+                if r["url"].endswith("/autosave") and r.get("action_id") == session.recorder.capture.action_id
+            ]
+            assert records and all(r.get("blocked") is True for r in records)
+            analysis = NetworkAnalyzer().analyze(session.recorder.capture)
+            assert analysis.linked and "UNLINKED_REQUESTS" not in analysis.diagnostics
+            assert len(server.writes) == 1
+        finally:
+            release.set()
+            await session.close()

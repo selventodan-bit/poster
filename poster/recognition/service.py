@@ -76,7 +76,7 @@ class RecognitionSession:
         if not 0 < self.confirmation_timeout <= 600 or not 0 < self.permalink_timeout <= 600:
             raise ValueError("Confirmation deadlines must be between 0 and 600 seconds")
         self.result = Recognition()
-        self.recorder = Recorder(url, profile)
+        self.recorder = Recorder(url, profile, admission_controlled=True)
         self.context = self.page = self.playwright = None
         self.browser_attempted = self.http_attempted = False
         self.read_only = True
