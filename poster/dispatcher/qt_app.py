@@ -176,8 +176,8 @@ class InputsDialog(QDialog):
 
         for permit in getattr(parent, "session_permits", []):
             if (
-                permit["project_id"] == item["project_id"]
-                and permit["version"] == item["version"]
+                permit["project_id"] == item.get("project_id")
+                and permit["version"] == item.get("version")
                 and not permit["revoked"]
                 and permit["expires"] > time.time()
                 and permit["remaining"] > 0
