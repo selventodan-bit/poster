@@ -21,7 +21,6 @@ def private_acl(path):
     advapi = ctypes.WinDLL("advapi32", use_last_error=True)
     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
     descriptor = ctypes.c_void_p()
-    text = w.LPWSTR()
     advapi.GetNamedSecurityInfoW.argtypes = [
         w.LPWSTR,
         w.DWORD,
@@ -33,31 +32,56 @@ def private_acl(path):
         ctypes.POINTER(ctypes.c_void_p),
     ]
     advapi.GetNamedSecurityInfoW.restype = w.DWORD
-    advapi.ConvertSecurityDescriptorToStringSecurityDescriptorW.argtypes = [
+    advapi.GetSecurityDescriptorControl.argtypes = [
         ctypes.c_void_p,
-        w.DWORD,
-        w.DWORD,
-        ctypes.POINTER(w.LPWSTR),
-        ctypes.c_void_p,
+        ctypes.POINTER(w.WORD),
+        ctypes.POINTER(w.DWORD),
     ]
-    advapi.ConvertSecurityDescriptorToStringSecurityDescriptorW.restype = w.BOOL
+    advapi.GetSecurityDescriptorControl.restype = w.BOOL
+    advapi.GetSecurityDescriptorDacl.argtypes = [
+        ctypes.c_void_p,
+        ctypes.POINTER(w.BOOL),
+        ctypes.POINTER(ctypes.c_void_p),
+        ctypes.POINTER(w.BOOL),
+    ]
+    advapi.GetSecurityDescriptorDacl.restype = w.BOOL
+    advapi.GetAclInformation.argtypes = [ctypes.c_void_p, ctypes.c_void_p, w.DWORD, w.DWORD]
+    advapi.GetAclInformation.restype = w.BOOL
+    advapi.GetAce.argtypes = [ctypes.c_void_p, w.DWORD, ctypes.POINTER(ctypes.c_void_p)]
+    advapi.GetAce.restype = w.BOOL
+    advapi.ConvertSidToStringSidW.argtypes = [ctypes.c_void_p, ctypes.POINTER(w.LPWSTR)]
+    advapi.ConvertSidToStringSidW.restype = w.BOOL
     kernel.LocalFree.argtypes = [ctypes.c_void_p]
+    kernel.LocalFree.restype = ctypes.c_void_p
+
+    class AclSize(ctypes.Structure):
+        _fields_ = [("count", w.DWORD), ("used", w.DWORD), ("free", w.DWORD)]
+
     assert (
         advapi.GetNamedSecurityInfoW(str(path), 1, 4, None, None, None, None, ctypes.byref(descriptor)) == 0
     )
     try:
-        assert advapi.ConvertSecurityDescriptorToStringSecurityDescriptorW(
-            descriptor, 1, 4, ctypes.byref(text), None
+        control, revision = w.WORD(), w.DWORD()
+        assert advapi.GetSecurityDescriptorControl(descriptor, ctypes.byref(control), ctypes.byref(revision))
+        assert control.value & 0x1000  # SE_DACL_PROTECTED: inherited grants forbidden.
+        present, defaulted, acl = w.BOOL(), w.BOOL(), ctypes.c_void_p()
+        assert advapi.GetSecurityDescriptorDacl(
+            descriptor, ctypes.byref(present), ctypes.byref(acl), ctypes.byref(defaulted)
         )
+        assert present.value and acl.value
+        size = AclSize()
+        assert advapi.GetAclInformation(acl, ctypes.byref(size), ctypes.sizeof(size), 2)
+        assert size.count == 1
+        ace = ctypes.c_void_p()
+        assert advapi.GetAce(acl, 0, ctypes.byref(ace))
+        assert ctypes.c_ubyte.from_address(ace.value).value == 0  # ACCESS_ALLOWED_ACE
+        assert ctypes.c_uint32.from_address(ace.value + 4).value == 0x1F01FF  # FILE_ALL_ACCESS
+        sid = w.LPWSTR()
+        assert advapi.ConvertSidToStringSidW(ctypes.c_void_p(ace.value + 8), ctypes.byref(sid))
         try:
-            value = text.value
-            assert (
-                value.count("(") == 1
-                and value.endswith(";" + windows_sid() + ")")
-                and value.startswith("D:P")
-            )
+            assert sid.value == windows_sid()  # Expanded SID, independent of SDDL's LA/BA aliases.
         finally:
-            kernel.LocalFree(text)
+            kernel.LocalFree(sid)
     finally:
         kernel.LocalFree(descriptor)
 

@@ -139,6 +139,8 @@ import json,os,sys
 from pathlib import Path
 from poster.product import restore
 p=json.load(sys.stdin)
+import psutil
+print(json.dumps(dict(pid=os.getpid(),birth=psutil.Process().create_time())),flush=True)
 def crash(phase):
  if phase==p['phase']:os._exit(77)
 restore.checkpoint=crash
@@ -151,8 +153,6 @@ restore.restore(p['archive'],p['password'],{k:Path(v) for k,v in p['roots'].item
         sha=product["sha"],
         phase=phase,
     )
-    import psutil
-
     process = subprocess.Popen(
         [sys.executable, "-c", program],
         stdin=subprocess.PIPE,
@@ -160,14 +160,20 @@ restore.restore(p['archive'],p['password'],{k:Path(v) for k,v in p['roots'].item
         stderr=subprocess.PIPE,
         text=True,
     )
-    birth = psutil.Process(process.pid).create_time()
-    process.communicate(json.dumps(data), timeout=45)
+    stdout, _stderr = process.communicate(json.dumps(data), timeout=45)
+    actual = json.loads(stdout)
     assert process.returncode == 77
     from product_evidence import save
 
     save(
         "restore-crash-" + phase,
-        dict(phase=phase, pid=process.pid, birth=birth, exit_code=process.returncode),
+        dict(
+            phase=phase,
+            pid=actual["pid"],
+            birth=actual["birth"],
+            launcher_pid=process.pid,
+            exit_code=process.returncode,
+        ),
     )
     with pytest.raises(DispatcherError):
         with application_lease(roots["maker"], "maker"):
@@ -284,13 +290,14 @@ def test_external_kill_during_staging_recovers_all_roots(product, tmp_path):
 
     signal_file = tmp_path / "ready"
     code = """
-import json,sys,time
+import json,sys,time,os,psutil
 from pathlib import Path
 from poster.product import restore
 p=json.load(sys.stdin)
 def pause(phase):
  if phase=='STAGE_FILE_0':
-  Path(p['ready']).touch()
+  Path(p['ready']+'.tmp').write_text(json.dumps(dict(pid=os.getpid(),birth=psutil.Process().create_time())))
+  os.replace(p['ready']+'.tmp',p['ready'])
   while True:time.sleep(0.1)
 restore.checkpoint=pause
 restore.restore(p['archive'],p['password'],p['roots'],expected_sha256=p['sha'],confirmed=True)
@@ -314,8 +321,9 @@ restore.restore(p['archive'],p['password'],p['roots'],expected_sha256=p['sha'],c
         process.stdin.close()
         wait(lambda: signal_file.exists() or process.poll() is not None)
         assert signal_file.exists() and process.poll() is None
-        owner = psutil.Process(process.pid)
-        assert owner.create_time() > 0
+        actual = json.loads(signal_file.read_bytes())
+        owner = psutil.Process(actual["pid"])
+        assert owner.create_time() == actual["birth"]
         birth = owner.create_time()
         owner.kill()  # SIGKILL / Windows TerminateProcess; no Python cleanup.
         process.wait(timeout=15)
@@ -325,7 +333,7 @@ restore.restore(p['archive'],p['password'],p['roots'],expected_sha256=p['sha'],c
             "restore-external-kill",
             dict(
                 phase="STAGE_FILE_0",
-                pid=process.pid,
+                pid=owner.pid,
                 birth=birth,
                 exit_code=process.returncode,
                 external_kill=True,

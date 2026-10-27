@@ -405,7 +405,7 @@ async def test_http_literal_credentials_encrypted_on_save_and_not_logged(tmp_pat
         )
         path = tmp_path / "auth.postergraph.json"
         save_graph(path, graph, Vault())
-        assert "PRIVATE_" not in path.read_text()
+        assert "PRIVATE_" not in path.read_text(encoding="utf-8")
         graph, vault = load_graph(path)
         save_graph(path, graph, vault)
         graph, vault = load_graph(path)
@@ -807,7 +807,7 @@ async def test_sensitive_url_encrypted_on_save(tmp_path):
 
     path = tmp_path / "url.json"
     save_graph(path, linear(("HTTP.Get", {"url": "https://example.org/?token=PRIVATE_QUERY"})), Vault())
-    assert "PRIVATE_QUERY" not in path.read_text()
+    assert "PRIVATE_QUERY" not in path.read_text(encoding="utf-8")
     graph, vault = load_graph(path)
     assert vault.resolve(graph.node("n0").params["url"]).endswith("PRIVATE_QUERY")
 
