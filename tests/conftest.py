@@ -86,7 +86,45 @@ def pytest_runtest_logreport(report):
 def pytest_runtest_makereport(item, call):
     result = yield
     report = result.get_result()
-    if not report.failed or not item.path.name.startswith(("test_dispatcher", "remote_")):
+    if not report.failed:
+        return
+    if item.path.name == "test_user_readiness.py" and call.excinfo:
+        # Browser transports can fail before RecognitionSession records a safe
+        # diagnostic. Expose only locations and fixed categories, never the
+        # Playwright message (it may include page text, credentials or URLs).
+        import json
+        from pathlib import Path
+        import traceback
+
+        exc = call.excinfo.value
+        message = str(exc).lower()
+        hint = next(
+            (
+                code
+                for phrase, code in (
+                    ("execution context was destroyed", "NAVIGATION_CONTEXT_CHANGED"),
+                    ("navigation is interrupted", "NAVIGATION_INTERRUPTED"),
+                    ("target page, context or browser has been closed", "TARGET_CLOSED"),
+                    ("net::err_", "NETWORK_ERROR"),
+                    ("timeout", "BROWSER_TIMEOUT"),
+                )
+                if phrase in message
+            ),
+            "UNCLASSIFIED",
+        )
+        diagnostic = dict(
+            test=item.name,
+            phase=report.when,
+            exception_type=type(exc).__name__,
+            hint=hint,
+            frames=[
+                Path(f.filename).name + ":" + str(f.lineno) + ":" + f.name
+                for f in traceback.extract_tb(exc.__traceback__)[-12:]
+            ],
+        )
+        print("\n::notice title=Readiness browser diagnostics::" + json.dumps(diagnostic), flush=True)
+        return
+    if not item.path.name.startswith(("test_dispatcher", "remote_")):
         return
     # Hosted Windows logs are not always downloadable. Publish only fixed codes
     # and locations, never inputs, exception text, stdout/stderr or graph values.
