@@ -49,7 +49,7 @@ release builders и все четыре принятых workflows. Старую
 | ID | Приоритет | Факт и необходимое исправление | Статус |
 |---|---|---|---|
 | S6-01 | P0 | Maker state привязан к каталогу EXE: новое место распаковки теряет видимость проектов/ключей. Нужны стабильный default, сохранение legacy и GUI выбор прежнего workspace | IN_PROGRESS: stable paths/legacy leases implemented; 16 targeted tests passed; GUI adoption pending |
-| S6-02 | P1 | Нет согласованного защищённого backup/restore native product state; нельзя повторять восстановленные внешние jobs | OPEN |
+| S6-02 | P1 | Нет согласованного защищённого backup/restore native product state; нельзя повторять восстановленные внешние jobs | IN_PROGRESS: encrypted offline export/verification tested; transactional restore and GUI pending |
 | S6-03 | P1 | Перед schema migration нет проверенного SQLite snapshot | FIXED: private SQLite backup before any schema/journal change; 19 targeted tests passed |
 | S6-04 | P1 | First-run, инструкции OAuth/updates и diagnostics разнесены и недостаточны для обычного пользователя | OPEN |
 | S6-05 | P1 | Нет непрерывной проверки GUI edit/save/reopen всех 78 действий; нужно выявить и закрыть реальные несоответствия | OPEN |
@@ -68,3 +68,22 @@ Google Drive/Colab/Molab: CLOUD_PROVIDER_NOT_EXECUTED. Public WAN отдельн
 подтверждён. Эти проверки не заменяются fixtures или статусом READY. Они не
 блокируют исправление локальных P0/P1. RC не равен окончательной пользовательской
 приёмке; необходимые действия аккаунта будут перечислены в пользовательской инструкции.
+
+## Реализованный защищённый backup (блок E, восстановление ещё в работе)
+
+Экспорт требует явного согласия на включение private keys/identities и отдельной
+парольной фразы (12–1024 символа). Scrypt и потоковый AES-256-GCM защищают весь
+архив и manifest. Пароль/ключи не входят в CLI, заголовок или отчёт. Содержимое
+разбирается только после полной проверки тега. Файлы включаются только из
+подтверждённых app workspaces; SQLite снимается через backup API с integrity и
+foreign-key check, включая зафиксированный WAL. Кеш браузера, tmp и IPC/locks
+не включаются. Внешние папки не добавляются автоматически.
+
+Backup привязан к исходным путям и тому же пользователю/машине. DPAPI не
+объявляется переносимым. Предел: 16 GiB зашифрованного содержимого, 4 GiB на файл,
+20 000 файлов/каталогов, 16 MiB manifest, потоковые блоки 1 MiB; требуется место
+на временные копии и резерв 64 MiB. Symlinks/reparse/hardlinks, traversal,
+дубликаты, compressed inner ZIP, чужие пути/identity и повреждение отклоняются.
+Создание не перезаписывает существующий файл. Проверены реальный SQLite WAL,
+правильный и неверный пароль, изменение header/ciphertext/tag, сохранность
+существующего файла при ошибке, реальные hardlink и directory link.
