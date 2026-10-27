@@ -20,6 +20,8 @@ from PySide6.QtWidgets import (
     QPushButton,
     QTextBrowser,
     QTreeWidget,
+    QScrollArea,
+    QWidget,
     QTreeWidgetItem,
     QVBoxLayout,
 )
@@ -98,8 +100,9 @@ class MaintenanceDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Poster — резервные копии и восстановление")
         self.setObjectName("poster_maintenance")
-        self.resize(900, 650)
-        self.setMinimumSize(650, 480)
+        screen = QApplication.primaryScreen().availableGeometry()
+        self.resize(min(900, screen.width() - 30), min(650, screen.height() - 50))
+        self.setMinimumSize(min(650, screen.width() - 30), min(380, screen.height() - 50))
         startup_error = None
         try:
             self.roots = dict(roots if roots is not None else initial_roots())
@@ -111,7 +114,13 @@ class MaintenanceDialog(QDialog):
             )
         self.preview = None
         self.thread = None
-        form = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        body = QWidget()
+        scroll.setWidget(body)
+        outer.addWidget(scroll, 1)
+        form = QVBoxLayout(body)
         notice = QLabel(
             "Закройте Maker и Dispatcher. Остановите Service и его автозапуск перед обслуживанием.\nКопия содержит приватные ключи и OAuth/browser state: храните её и пароль отдельно.\nВосстановление разрешено на исходной машине, под тем же пользователем и в те же папки."
         )
@@ -175,7 +184,7 @@ class MaintenanceDialog(QDialog):
         self.go = QPushButton("Выполнить")
         self.go.setObjectName("maintenance_execute")
         self.go.clicked.connect(self.execute)
-        form.addWidget(self.go)
+        outer.addWidget(self.go)
         self.refresh_roots()
         self.changed()
         if startup_error:
@@ -384,7 +393,8 @@ class HelpDialog(QDialog):
         self.window = window
         self.setWindowTitle("Poster — начало работы, данные и диагностика")
         self.setObjectName("poster_help")
-        self.resize(850, 640)
+        screen = QApplication.primaryScreen().availableGeometry()
+        self.resize(min(850, screen.width() - 30), min(640, screen.height() - 50))
         form = QVBoxLayout(self)
         text = QTextBrowser()
         text.setObjectName("product_guide")

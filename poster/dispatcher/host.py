@@ -729,15 +729,22 @@ def main():
     root = plain_path(args.workspace or workspace_path())
     if args.autostart:
         from .autostart import configure
+        from ..product.locking import connection_lease
+        from contextlib import nullcontext
 
         try:
-            print(
-                json.dumps(
-                    configure(
-                        root, enabled=None if args.autostart == "status" else args.autostart == "enable"
+            # Task Scheduler requires its WorkingDirectory to exist before it
+            # launches the EXE. Creating it here remains behind the restore gate.
+            with connection_lease(root) if args.autostart == "enable" else nullcontext():
+                if args.autostart == "enable":
+                    private_dir(root)
+                print(
+                    json.dumps(
+                        configure(
+                            root, enabled=None if args.autostart == "status" else args.autostart == "enable"
+                        )
                     )
                 )
-            )
             return 0
         except DispatcherError as exc:
             print(json.dumps({"code": exc.code}))

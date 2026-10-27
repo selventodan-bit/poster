@@ -26,6 +26,7 @@ def test_real_qt_maintenance_preview_restore_and_password_does_not_enter_report(
     dialog.consent.setChecked(True)
     dialog.show()
     try:
+        assert not dialog.go.visibleRegion().isEmpty()
         QTest.mouseClick(dialog.go, Qt.MouseButton.LeftButton)
         wait(app, lambda: dialog.thread is None)
         assert archive.exists(), dialog.output.toPlainText()
@@ -170,7 +171,9 @@ restore.restore(p['archive'],p['password'],p['roots'],expected_sha256=p['sha'],c
     assert dialog.roots == dict(maker=root)
     dialog.operation.setCurrentIndex(3)
     dialog.consent.setChecked(True)
+    dialog.resize(700, 480)
     dialog.show()
+    app.processEvents()
     try:
         QTest.mouseClick(dialog.go, Qt.MouseButton.LeftButton)
         wait(app, lambda: dialog.thread is None)
