@@ -269,9 +269,9 @@ Frozen ESC действительно закрывает окно. Провер�
 ## Закреплённая доставка Launcher
 
 Notebook Launcher закреплён на runtime commit
-`e828f6c60010d71612e69681ce340eb8a0aeacc7`, а не на main/HEAD.
+`da3c8b94b1219fcce2797021557ef52b821f5fdd`, а не на main/HEAD.
 SHA256 исходного `tar.gz`:
-`89bbb4e8755a8e47fce7049877570ea052acd9b2a03f33597796e5ced37bdbfc`.
+`e659a04dbba7a3105d6d6bb2e7b7af96f0a9dfa9e13e019ffdcb026ce50cb518`.
 SHA256 requirements:
 `64ed7d46c05c6e408a4a4583b3d7d56e199764e90c88d9fd3489148cc68f18ba`.
 Проверка установила поставляемый installer в новую venv, включая закреплённый
