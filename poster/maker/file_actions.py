@@ -57,7 +57,9 @@ async def file_action(ctx, p, operation):
             dest = files.path(p.destination)
             if source == dest:
                 raise GraphError("FILE_PATH_INVALID")
-            value = files.write(p.destination, files.read(p.source), overwrite=p.overwrite)
+            import asyncio
+
+            value = await asyncio.to_thread(files.copy, p.source, p.destination, overwrite=p.overwrite)
             if operation == "Move":
                 source.unlink()
         elif operation == "Delete":

@@ -252,6 +252,7 @@ class Library:
         # A directory ID can belong to only one category; reserve separate IDs
         # where graphs and resources happen to share the same relative directory.
         directory_ids = self.files.journal.get(key + ":directories") or {}
+        entries = {}
         for name in sorted(bundle.files):
             category = "graphs" if name in graph_files else "resources"
             path = PurePosixPath(name)
@@ -267,21 +268,35 @@ class Library:
                         self.files.journal.set(key + ":directories", directory_ids)
                     await self.files.folder(part, parents[category][previous], file_id=directory_ids[lookup])
                     parents[category][current] = directory_ids[lookup]
-            await self.files.upload(
-                state["files"][name],
-                path.name,
-                parents[category][str(path.parent)],
-                bundle.files[name],
-                mime="application/json" if name in graph_files else "application/octet-stream",
-            )
+            from poster.portability.blobs import FileBlob
+            from poster.portability.chunks import upload as upload_chunks
+
+            blob = bundle.files[name]
+            if bundle.manifest["schema_version"] == 2 and name not in graph_files:
+                owner = digest(canonical(dict(project=bundle.project_id, version=bundle.version, path=name)))
+                entries[name] = await upload_chunks(
+                    self.files,
+                    blob,
+                    parents[category][str(path.parent)],
+                    owner,
+                    publication_id=state["manifest_id"],
+                )
+            else:
+                if isinstance(blob, FileBlob):
+                    blob = blob.verify().path.read_bytes()  # 5C bounded <=20 MB compatibility.
+                await self.files.upload(
+                    state["files"][name],
+                    path.name,
+                    parents[category][str(path.parent)],
+                    blob,
+                    mime="application/json" if name in graph_files else "application/octet-stream",
+                )
+                entries[name] = dict(id=state["files"][name], sha256=digest(blob), size=len(blob))
         transport_manifest = dict(
             format="poster.drive.bundle.v1",
             version=bundle.version,
             manifest=bundle.manifest,
-            files={
-                n: dict(id=state["files"][n], sha256=digest(raw), size=len(raw))
-                for n, raw in sorted(bundle.files.items())
-            },
+            files=entries,
         )
         await self.files.create_json(
             state["manifest_id"], "manifest.json", state["version_folder"], transport_manifest
@@ -298,6 +313,11 @@ class Library:
             name=project_name,
         )
         await self.files.create_json(slot, "commit.json", descriptor["folders"]["versions"], commit)
+        from poster.portability.chunks import committed
+
+        for entry in entries.values():
+            if entry.get("format") == "poster.data.chunks.v1":
+                committed(self.files, entry)
         self.files.journal.set(key, None)
         self.files.journal.set(key + ":directories", None)
         return dict(
@@ -329,16 +349,33 @@ class Library:
             raise CloudError("INTEGRITY")
         blobs = {}
         from .format import MAX_BYTES, MAX_FILES, relative
+        from poster.portability.blobs import MAX_BUNDLE_BYTES
+        from poster.portability.chunks import download
 
         if not 1 <= len(value["files"]) <= MAX_FILES:
             raise CloudError("PACKAGE_LIMIT")
+        limit = MAX_BUNDLE_BYTES if value["manifest"].get("schema_version") == 2 else MAX_BYTES
+        if (
+            any(type(e.get("size")) is not int or e["size"] < 0 for e in value["files"].values())
+            or sum(e["size"] for e in value["files"].values()) > limit
+        ):
+            raise CloudError("PACKAGE_LIMIT")
         for name, entry in value["files"].items():
             relative(name)
-            blob = await self.files.read(entry["id"])
+            if entry.get("format") == "poster.data.chunks.v1":
+                if entry["encrypted"]:
+                    raise CloudError("INTEGRITY")
+                from poster.dispatcher.security import private_dir
+
+                cache = private_dir(self.files.journal.path.parent / "resources" / selected["version"])
+                blob = await download(self.files, entry, cache / digest(name.encode()))
+            else:
+                blob = await self.files.read(entry["id"])
             if len(blob) != entry["size"] or digest(blob) != entry["sha256"]:
                 raise CloudError("INTEGRITY")
             blobs[name] = blob
-            if sum(map(len, blobs.values())) > MAX_BYTES:
+            limit = MAX_BUNDLE_BYTES if value["manifest"].get("schema_version") == 2 else MAX_BYTES
+            if sum(map(len, blobs.values())) > limit:
                 raise CloudError("PACKAGE_LIMIT")
         bundle = PortableBundle(value["manifest"], blobs).verify()
         if bundle.version != selected["version"] or bundle.project_id != project_id:

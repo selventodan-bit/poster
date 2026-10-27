@@ -19,6 +19,10 @@ def canonical(value):
 
 
 def digest(raw):
+    from poster.portability.blobs import FileBlob
+
+    if isinstance(raw, FileBlob):
+        return raw.verify().sha256
     return hashlib.sha256(raw).hexdigest()
 
 

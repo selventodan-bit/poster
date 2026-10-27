@@ -94,6 +94,8 @@ def enqueue_snapshot(
 
         manifest, files = Snapshots(store.root).read(version)
         graph = Graph.model_validate_json(files[manifest["main"]])
+        if sum(map(len, files.values())) > 10_000_000:
+            raise DispatcherError("REMOTE_LIMIT")
         validate_target(store, agent_id)
         agent = store.db.execute("SELECT version FROM remote_agents WHERE id=?", (agent_id,)).fetchone()
         if (graph.metadata.get("poster.network") or network_override) and agent["version"] != "5D.1":

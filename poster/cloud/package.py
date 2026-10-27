@@ -15,6 +15,7 @@ from poster.maker.variables import has_reference
 
 from .errors import CloudError
 from .format import MAX_BYTES, MAX_FILES, canonical, digest, identifier, relative
+from poster.portability.blobs import FileBlob, MAX_FILE_BYTES, MAX_BUNDLE_BYTES, copy_blob
 
 PRIVATE_PARTS = {
     "cookies",
@@ -65,7 +66,9 @@ def public_resource(name):
 class PortableBundle:
     def __init__(self, manifest, files):
         self._manifest = deepcopy(manifest)
-        self.files = MappingProxyType({name: bytes(raw) for name, raw in files.items()})
+        self.files = MappingProxyType(
+            {name: raw if isinstance(raw, FileBlob) else bytes(raw) for name, raw in files.items()}
+        )
 
     @property
     def manifest(self):
@@ -83,14 +86,19 @@ class PortableBundle:
         try:
             m = self._manifest
             if (
-                m["format"] != "poster.portable.project.v1"
-                or m["schema_version"] != 1
+                (m["format"], m["schema_version"])
+                not in {("poster.portable.project.v1", 1), ("poster.portable.project.v2", 2)}
                 or not isinstance(m["files"], dict)
                 or set(self.files) != set(m["files"])
             ):
                 raise ValueError()
             identifier(m["project_id"])
-            if not 1 <= len(self.files) <= MAX_FILES or sum(map(len, self.files.values())) > MAX_BYTES:
+            limit = MAX_BYTES if m["schema_version"] == 1 else MAX_BUNDLE_BYTES
+            if (
+                not 1 <= len(self.files) <= MAX_FILES
+                or sum(map(len, self.files.values())) > limit
+                or any(len(v) > MAX_FILE_BYTES for v in self.files.values())
+            ):
                 raise CloudError("PACKAGE_LIMIT")
             if len({name.casefold() for name in self.files}) != len(self.files):
                 raise ValueError()
@@ -240,20 +248,23 @@ class PortableBundle:
             if (
                 not path.is_relative_to(source.parent)
                 or not path.is_file()
-                or path.stat().st_size > MAX_BYTES
+                or path.stat().st_size > MAX_FILE_BYTES
             ):
                 raise CloudError("PATH_FORBIDDEN")
             if name in files:
                 raise CloudError("INTEGRITY")
-            selected[name] = path.read_bytes()
+            selected[name] = (
+                FileBlob.capture(path) if path.stat().st_size > 1024 * 1024 else path.read_bytes()
+            )
         main = Graph.model_validate_json(files[source.name])
         main.metadata["poster.resources"] = {n: digest(raw) for n, raw in sorted(selected.items())}
         main.metadata["poster.outputs"] = sorted(set(outputs))
         files[source.name] = main.model_dump_json(indent=2).encode()
         files.update(selected)
+        large = sum(map(len, files.values())) > MAX_BYTES
         manifest = dict(
-            format="poster.portable.project.v1",
-            schema_version=1,
+            format="poster.portable.project.v2" if large else "poster.portable.project.v1",
+            schema_version=2 if large else 1,
             project_id=main.id,
             name=main.name,
             main=source.name,
@@ -283,8 +294,7 @@ class PortableBundle:
         for name, raw in self.files.items():
             path = plain_path(target / name)
             private_dir(path.parent)
-            path.write_bytes(raw)
-            path.chmod(0o600)
+            copy_blob(raw, path)
         return target / self.manifest["main"]
 
 
@@ -297,4 +307,4 @@ def stage_resources(graph, files, workdir):
         public_resource(name)
         if name not in files or digest(files[name]) != expected:
             raise CloudError("INTEGRITY")
-        sandbox.write(name, files[name])
+        copy_blob(files[name], sandbox.path(name))

@@ -20,7 +20,6 @@ from .errors import CloudError
 from .library import Library
 from .package import PortableBundle
 from .package import public_resource
-from .format import MAX_BYTES, digest
 
 
 class FixtureHTTPTransport(httpx.AsyncBaseTransport):
@@ -154,28 +153,32 @@ class DesktopCloud:
                 (str(Path(source).resolve()), value["project_id"], value["version"], value["folder_id"]),
             )
 
+    async def preview_resources(self, source, paths):
+        from poster.portability.resources import preview
+
+        return preview(plain_path(source).parent, paths)
+
     async def include_resources(self, source, paths):
+        from poster.portability.blobs import FileBlob, copy_blob
+
         source = plain_path(source)
         selected = []
-        for value in paths:
-            path = plain_path(value)
-            if not path.is_file() or path.stat().st_size > MAX_BYTES:
-                raise CloudError("PACKAGE_LIMIT")
-            if path.is_relative_to(source.parent):
-                name = path.relative_to(source.parent).as_posix()
-                public_resource(name)
-            else:
-                name = public_resource("resources/" + path.name)
-                raw = path.read_bytes()
-                target = plain_path(source.parent / name)
-                if target.exists() and digest(target.read_bytes()) != digest(raw):
-                    name = public_resource("resources/" + path.stem + "-" + digest(raw)[:8] + path.suffix)
+        report = await self.preview_resources(source, paths)
+        for entry in report["files"]:
+            path, name = plain_path(entry["source"]), entry["name"]
+            blob = FileBlob.capture(path)
+            target = plain_path(source.parent / name)
+            if path != target:
+                if target.exists() and FileBlob.capture(target).sha256 != blob.sha256:
+                    name_path = Path(name)
+                    name = public_resource(
+                        str(
+                            name_path.with_name(name_path.stem + "-" + blob.sha256[:8] + name_path.suffix)
+                        ).replace("\\", "/")
+                    )
                     target = plain_path(source.parent / name)
-                private_dir(target.parent)
                 if not target.exists():
-                    from poster.maker.storage import atomic
-
-                    atomic(target, raw)
+                    copy_blob(blob, target)
             selected.append(name)
             with sqlite3.connect(self.cache) as db:
                 db.execute(

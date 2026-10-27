@@ -105,3 +105,23 @@ class FileSandbox:
         finally:
             temporary.unlink(missing_ok=True)
         return str(path.relative_to(self.root)) if path.is_relative_to(self.root) else str(path)
+
+    def copy(self, source, destination, *, overwrite=False):
+        from poster.portability.blobs import FileBlob, copy_blob, MAX_BUNDLE_BYTES
+        from poster.cloud.errors import CloudError
+
+        try:
+            blob = FileBlob.capture(self.path(source))
+            if self.budget:
+                self.budget.file_bytes += len(blob)
+                if self.budget.file_bytes > MAX_BUNDLE_BYTES:
+                    raise GraphError("FILE_LIMIT")
+                if self.budget.stopped or self.budget.remaining() <= 0:
+                    raise GraphError("RUN_TIMEOUT")
+            path = self.path(destination)
+            copy_blob(blob, path, overwrite=overwrite)
+            return str(path.relative_to(self.root)) if path.is_relative_to(self.root) else str(path)
+        except FileExistsError as exc:
+            raise GraphError("FILE_EXISTS") from exc
+        except CloudError as exc:
+            raise GraphError("FILE_LIMIT" if exc.code == "PACKAGE_LIMIT" else exc.code) from exc

@@ -1,6 +1,8 @@
 """Payload-free errors shared by desktop and notebook frontends."""
 
 MESSAGES = {
+    "MEMORY_LIMIT": "Недостаточно доступной RAM для ограниченной передачи. Освободите память.",
+    "DISK_LIMIT": "Недостаточно свободного места для приватного staging и результатов.",
     "AUTH_REQUIRED": "Подключите Google Drive.",
     "AUTH_CONFIG_REQUIRED": "Выберите OAuth Desktop application в настройках подключения.",
     "AUTH_CANCELLED": "Авторизация не завершена. Подключение можно повторить.",

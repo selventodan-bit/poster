@@ -8,7 +8,9 @@ from poster.dispatcher.security import plain_path, private_dir, seal, unseal
 from poster.maker.storage import atomic
 from .crypto import encrypt_output, decrypt_output, sign_result, verify_result
 from .errors import CloudError
-from .format import MAX_BYTES, canonical, digest, identifier, relative
+from .format import canonical, digest, identifier, relative
+from poster.portability.blobs import FileBlob, MAX_OUTPUT_BYTES as MAX_LARGE_OUTPUT_BYTES, capacity
+from poster.portability import chunks
 
 TERMINAL = {"SUCCEEDED", "FAILED", "CANCELLED", "TIMED_OUT", "UNKNOWN", "REVIEW_REQUIRED"}
 MAX_OUTPUT_BYTES = 14_000_000  # AES-GCM JSON/base64 must fit the bounded Drive blob.
@@ -31,6 +33,22 @@ async def publish_result(library, descriptor, claim, index, identity, execution,
     if identity.public() != claim["issuer"] or execution["status"] not in TERMINAL:
         raise CloudError("RESULT_UNTRUSTED")
     files = library.files
+    if await files.info(manifest_id) is not None:
+        signed = await files.json(manifest_id)
+        previous = verify_result(claim["issuer"], signed)
+        if (
+            previous.get("run_id") != run_id
+            or previous.get("claim_id") != claim["id"]
+            or previous.get("project_version") != bundle.version
+            or previous.get("status") != execution["status"]
+        ):
+            raise CloudError("RESULT_UNTRUSTED")
+        return dict(
+            run_id=run_id,
+            manifest_id=manifest_id,
+            status=execution["status"],
+            sha256=digest(canonical(signed)),
+        )
     await files.folder(
         run_id,
         descriptor["folders"]["results"],
@@ -49,12 +67,26 @@ async def publish_result(library, descriptor, claim, index, identity, execution,
         path = plain_path(Path(execution["workdir"]) / name) if execution.get("workdir") else None
         if path is None or not path.exists():
             continue
-        if not path.is_file() or path.stat().st_size > MAX_OUTPUT_BYTES:
+        if not path.is_file() or path.stat().st_size > MAX_LARGE_OUTPUT_BYTES:
             raise CloudError("PACKAGE_LIMIT")
+        total += path.stat().st_size
+        if total > MAX_LARGE_OUTPUT_BYTES:
+            raise CloudError("PACKAGE_LIMIT")
+        if path.stat().st_size > MAX_OUTPUT_BYTES:
+            owner = digest(
+                canonical(dict(issuer=identity.public()["id"], context=context(claim, run_id, name)))
+            )
+            outputs[name] = await chunks.upload(
+                files,
+                FileBlob.capture(path),
+                folder_id,
+                owner,
+                recipient=peer,
+                context=context(claim, run_id, name),
+                publication_id=manifest_id,
+            )
+            continue
         raw = path.read_bytes()
-        total += len(raw)
-        if total > MAX_OUTPUT_BYTES:
-            raise CloudError("PACKAGE_LIMIT")
         box = encrypt_output(peer, raw, context(claim, run_id, name))
         file_id = (await files.ids())[0]
         await files.upload(file_id, "output-" + str(len(outputs)) + ".box", folder_id, box)
@@ -85,6 +117,9 @@ async def publish_result(library, descriptor, claim, index, identity, execution,
     )
     signed = sign_result(identity, body)
     await files.create_json(manifest_id, "committed-result.json", folder_id, signed)
+    for entry in outputs.values():
+        if entry.get("format") == "poster.data.chunks.v1":
+            chunks.committed(files, entry)
     return dict(
         run_id=run_id, manifest_id=manifest_id, status=execution["status"], sha256=digest(canonical(signed))
     )
@@ -163,20 +198,41 @@ class ResultArchive:
         if len(value["outputs"]) > 128:
             raise CloudError("PACKAGE_LIMIT")
         decoded, total = {}, 0
+        root = private_dir(
+            self.store.root / "cloud-results" / identifier(value["issuer"]) / identifier(run_id)
+        )
+        total_expected = sum(entry.get("size", 0) for entry in value["outputs"].values())
+        capacity(root, min(total_expected, MAX_LARGE_OUTPUT_BYTES))
         for name, entry in value["outputs"].items():
             relative(name)
+            if entry.get("format") == "poster.data.chunks.v1":
+                if not entry["encrypted"]:
+                    raise CloudError("RESULT_UNTRUSTED")
+                total += entry["size"]
+                if total > MAX_LARGE_OUTPUT_BYTES:
+                    raise CloudError("PACKAGE_LIMIT")
+                decoded[name] = await chunks.download(
+                    library.files,
+                    entry,
+                    root / name,
+                    recipient=recipient,
+                    context=context(claim, run_id, name),
+                )
+                continue
             raw = await library.files.read(identifier(entry["id"]))
             if len(raw) != entry["size"] or digest(raw) != entry["sha256"]:
                 raise CloudError("RESULT_UNTRUSTED")
             plain = decrypt_output(recipient, raw, context(claim, run_id, name))
             total += len(plain)
-            if total > MAX_BYTES or digest(plain) != entry["plain_sha256"]:
+            if total > MAX_LARGE_OUTPUT_BYTES or digest(plain) != entry["plain_sha256"]:
                 raise CloudError("RESULT_UNTRUSTED")
             decoded[name] = plain
         root = private_dir(
             self.store.root / "cloud-results" / identifier(value["issuer"]) / identifier(run_id)
         )
         for name, raw in decoded.items():
+            if isinstance(raw, FileBlob):
+                continue
             target = plain_path(root / relative(name))
             private_dir(target.parent)
             atomic(target, raw)
