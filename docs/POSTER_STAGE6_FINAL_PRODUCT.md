@@ -50,7 +50,7 @@ release builders и все четыре принятых workflows. Старую
 |---|---|---|---|
 | S6-01 | P0 | Maker state привязан к каталогу EXE: новое место распаковки теряет видимость проектов/ключей. Нужны стабильный default, сохранение legacy и GUI выбор прежнего workspace | OPEN |
 | S6-02 | P1 | Нет согласованного защищённого backup/restore native product state; нельзя повторять восстановленные внешние jobs | OPEN |
-| S6-03 | P1 | Перед schema migration нет проверенного SQLite snapshot | OPEN |
+| S6-03 | P1 | Перед schema migration нет проверенного SQLite snapshot | FIXED: private SQLite backup before any schema/journal change; 19 targeted tests passed |
 | S6-04 | P1 | First-run, инструкции OAuth/updates и diagnostics разнесены и недостаточны для обычного пользователя | OPEN |
 | S6-05 | P1 | Нет непрерывной проверки GUI edit/save/reopen всех 78 действий; нужно выявить и закрыть реальные несоответствия | OPEN |
 | S6-06 | P1 | Доставка должна включать актуальные user guide, RC identity, совместимые pinned Launchers и финальные evidence | OPEN |

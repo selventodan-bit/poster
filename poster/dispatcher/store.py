@@ -128,6 +128,8 @@ class Store:
             not tables and (app or version)
         ):
             raise DispatcherError("STORE_INVALID")
+        if tables and version < SCHEMA_VERSION:
+            self._migration_backup(version)
         self.db.execute("PRAGMA foreign_keys=ON")
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA synchronous=FULL")
@@ -192,6 +194,28 @@ class Store:
 
     def close(self):
         self.db.close()
+
+    def _migration_backup(self, version):
+        """A verified private snapshot precedes any schema/journal changes."""
+        folder = private_dir(self.root / "migrations")
+        target = folder / (f"schema-{version}-" + uuid.uuid4().hex + ".sqlite")
+        connection = None
+        try:
+            target.touch(mode=0o600, exist_ok=False)
+            restrict(target)
+            connection = sqlite3.connect(target)
+            self.db.backup(connection)
+            if (
+                connection.execute("PRAGMA integrity_check").fetchone()[0] != "ok"
+                or connection.execute("PRAGMA application_id").fetchone()[0] != APPLICATION_ID
+                or connection.execute("PRAGMA user_version").fetchone()[0] != version
+            ):
+                raise ValueError()
+        except Exception as exc:
+            raise DispatcherError("MIGRATION_BACKUP_FAILED") from exc
+        finally:
+            if connection is not None:
+                connection.close()
 
     @contextmanager
     def transaction(self):
