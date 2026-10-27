@@ -433,9 +433,18 @@ async def publication(install, directory, kb_path):
             .locator('[type="submit"]')
             .click()
         )
-        await session.page.wait_for_timeout(500)
         section = {"mybb": "/forumdisplay.php?fid=2", "smf": "/index.php?board=1.0", "flarum": "/"}[engine]
-        await session.page.goto(base + section)
+        if engine == "flarum":
+            # Flarum reloads the current index after login. A second goto after
+            # a fixed 500 ms races that reload and aborts the navigation. Wait
+            # for the authenticated header on the real post-login document.
+            await session.page.locator(".Dropdown--user .Dropdown-toggle").wait_for(
+                state="visible", timeout=30000
+            )
+            await session.page.wait_for_load_state("domcontentloaded")
+        else:
+            await session.page.wait_for_timeout(500)
+            await session.page.goto(base + section)
         await session.recognize()
         (directory / "discovery-private.html").write_text(await session.page.content())
         (directory / "capture-private.json").write_text(

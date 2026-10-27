@@ -11,7 +11,7 @@ import time
 def check(bundle, output):
     import psutil
     from poster.dispatcher.host import request
-    from poster.dispatcher.processes import terminate_tree
+    from poster.dispatcher.processes import terminate_tree, same_process
 
     output.mkdir(parents=True, exist_ok=False)
     root = output / "Temporary logon task Ж"
@@ -64,7 +64,32 @@ def check(bundle, output):
                 break
             except ValueError:
                 time.sleep(0.1)
-        assert info and Path(psutil.Process(info["pid"]).exe()).resolve() == service.resolve()
+        assert info, "Scheduled service did not answer"
+        owned = same_process(info["pid"], info["birth"])
+        assert owned is not None, "Scheduled service PID/birth is not live"
+        # Windows can report extended/short image paths. Compare the actual
+        # file identity, then its bytes, rather than path spellings.
+        actual_image = Path(owned.exe())
+        import hashlib
+
+        image_matches = actual_image.samefile(service)
+        bytes_match = (
+            hashlib.sha256(actual_image.read_bytes()).digest()
+            == hashlib.sha256(service.read_bytes()).digest()
+        )
+        print(
+            "::notice title=Scheduled process ownership::"
+            + json.dumps(
+                dict(
+                    pid=owned.pid,
+                    birth=owned.create_time(),
+                    image_matches=image_matches,
+                    bytes_match=bytes_match,
+                )
+            ),
+            flush=True,
+        )
+        assert image_matches and bytes_match, "Scheduled service image differs from the verified bundle"
         assert info["commit"] == os.environ["EXPECTED_POSTER_COMMIT"]
         # Duplicate logon/start is harmless under the existing host singleton lock.
         duplicate = subprocess.run([str(service), "--workspace", str(root)], env=env, timeout=15)

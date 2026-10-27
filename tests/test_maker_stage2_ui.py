@@ -20,8 +20,12 @@ scenario()
         [sys.executable, "-c", source, str(Path(__file__).parent), str(tmp_path)],
         text=True,
         capture_output=True,
-        timeout=90,
+        timeout=150,
     )
+    if process.returncode:
+        for line in process.stdout.splitlines():
+            if line.startswith("::error title=Maker Tk state::"):
+                print(line, flush=True)
     assert process.returncode == 0, process.stderr
 
 
@@ -44,14 +48,33 @@ def scenario():
     maker.tools_notebook.select(maker.properties_page)
     messagebox.askyesno = lambda *a, **k: True
 
-    def wait(predicate):
-        deadline = time.monotonic() + 15
+    def wait(predicate, phase, timeout=40):
+        # Browser launch itself permits 30 seconds. Keep pumping real Tk events
+        # while a cold Windows browser starts; never re-invoke the GUI action.
+        deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             root.update()
             if predicate():
                 return
             time.sleep(0.02)
-        raise AssertionError("Maker UI state timeout")
+            if not maker.busy and (maker.last_error or maker.runner and maker.runner.state == "FAILED"):
+                break
+        import json
+
+        print(
+            "::error title=Maker Tk state::"
+            + json.dumps(
+                dict(
+                    phase=phase,
+                    busy=maker.busy,
+                    state=maker.runner.state if maker.runner else None,
+                    pause=maker.runner.pause_reason if maker.runner else None,
+                    code=maker.last_error,
+                )
+            ),
+            flush=True,
+        )
+        raise AssertionError("Maker UI state timeout: " + phase)
 
     def fill(widget, text):
         if isinstance(widget, tk.Text):
@@ -99,7 +122,7 @@ def scenario():
         maker.buttons["var_save"].invoke()
         assert maker.document.graph.variables["counter"].value == 0
         maker.buttons["demo"].invoke()
-        wait(lambda: not maker.busy)
+        wait(lambda: not maker.busy, "demo ready")
         open_url = add("Browser.OpenURL", url=maker.url.get())
         assert maker.document.graph.metadata["maker_demo"] == maker.demo_base
         start = maker.document.graph.entry
@@ -128,7 +151,10 @@ def scenario():
         maker.buttons["breakpoint"].invoke()
         assert increment.breakpoint
         maker.buttons["run"].invoke()
-        wait(lambda: maker.runner and maker.runner.pause_reason == "breakpoint" and not maker.busy)
+        wait(
+            lambda: maker.runner and maker.runner.pause_reason == "breakpoint" and not maker.busy,
+            "browser ready at breakpoint",
+        )
         assert maker.runner.context.variables.get("counter") == 0
         assert maker.runner.current == increment.id
         fill(maker.props["amount"][1], "2")
@@ -136,7 +162,7 @@ def scenario():
         maker.output_path.set("value")
         assert maker.apply(), maker.status.get()
         maker.buttons["run"].invoke()
-        wait(lambda: maker.runner.state == "SUCCEEDED" and not maker.busy)
+        wait(lambda: maker.runner.state == "SUCCEEDED" and not maker.busy, "resumed graph complete")
         assert maker.runtime_values["counter"] == 2
         assert maker.runtime_values["last_increment"] == 2
         assert maker.runner.context.session.browser is not None
@@ -145,19 +171,22 @@ def scenario():
         loaded, _ = load_graph(path)
         assert loaded.node(increment.id).breakpoint and loaded.node(increment.id).params["amount"] == 2
         maker.buttons["stop"].invoke()
-        wait(lambda: maker.runner is None)
+        wait(lambda: maker.runner is None, "runner closed")
         maker.load(path)
         maker.canvas.selected = {increment.id}
         maker.select(increment.id)
         maker.buttons["run"].invoke()
-        wait(lambda: maker.runner and maker.runner.pause_reason == "breakpoint" and not maker.busy)
+        wait(
+            lambda: maker.runner and maker.runner.pause_reason == "breakpoint" and not maker.busy,
+            "browser ready at breakpoint",
+        )
         assert maker.runtime_values["counter"] == 0
         maker.buttons["breakpoint"].invoke()
         maker.buttons["run"].invoke()
-        wait(lambda: maker.runner.state == "SUCCEEDED" and not maker.busy)
+        wait(lambda: maker.runner.state == "SUCCEEDED" and not maker.busy, "resumed graph complete")
         assert maker.runtime_values["counter"] == 2
         maker.buttons["stop"].invoke()
-        wait(lambda: maker.runner is None and not maker.busy)
+        wait(lambda: maker.runner is None and not maker.busy, "runner closed and idle")
         from poster.maker.example_projects import EXAMPLES, source_directory
         from poster.maker.fixtures import serve_maker
         from tkinter import simpledialog
@@ -169,10 +198,13 @@ def scenario():
                 if filename.startswith("01"):
                     maker.document.graph.variables["api_base"].value = base
                 maker.buttons["run"].invoke()
-                wait(lambda: maker.runner and maker.runner.state == "SUCCEEDED" and not maker.busy)
+                wait(
+                    lambda: maker.runner and maker.runner.state == "SUCCEEDED" and not maker.busy,
+                    "example " + filename,
+                )
                 assert maker.runner.context.session.page is None
                 maker.buttons["stop"].invoke()
-                wait(lambda: maker.runner is None and not maker.busy)
+                wait(lambda: maker.runner is None and not maker.busy, "runner closed and idle")
     finally:
         maker.document.dirty = False
         app.close()
